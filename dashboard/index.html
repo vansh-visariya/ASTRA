@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Federated AI Platform</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        :root {
+            --bg-dark: #0f172a;
+            --bg-card: #1e293b;
+            --border: #334155;
+            --primary: #6366f1;
+            --success: #22c55e;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --text: #f1f5f9;
+            --text-muted: #94a3b8;
+        }
+        
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-dark);
+            color: var(--text);
+            min-height: 100vh;
+        }
+        
+        .header {
+            background: var(--bg-card);
+            border-bottom: 1px solid var(--border);
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+        
+        .logo-icon {
+            width: 40px;
+            height: 40px;
+            background: var(--primary);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.25rem;
+        }
+        
+        .logo h1 {
+            font-size: 1.25rem;
+            font-weight: 700;
+        }
+        
+        .logo p {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+        
+        .status-badge {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            background: rgba(34, 197, 94, 0.1);
+            border-radius: 8px;
+        }
+        
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            background: var(--success);
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .nav {
+            background: var(--bg-card);
+            border-bottom: 1px solid var(--border);
+            padding: 0.5rem 2rem;
+            display: flex;
+            gap: 0.5rem;
+        }
+        
+        .nav button {
+            padding: 0.5rem 1rem;
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            border-radius: 8px;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        
+        .nav button:hover {
+            background: var(--bg-dark);
+            color: var(--text);
+        }
+        
+        .nav button.active {
+            background: var(--primary);
+            color: white;
+        }
+        
+        .main {
+            padding: 2rem;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.25rem;
+        }
+        
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.75rem;
+        }
+        
+        .card-title {
+            color: var(--text-muted);
+            font-size: 0.875rem;
+        }
+        
+        .card-value {
+            font-size: 1.75rem;
+            font-weight: 700;
+        }
+        
+        .card-subtitle {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-top: 0.25rem;
+        }
+        
+        .chart-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1rem;
+        }
+        
+        .chart-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.25rem;
+        }
+        
+        .chart-card h3 {
+            font-weight: 600;
+            margin-bottom: 1rem;
+        }
+        
+        .clients-table {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+        
+        .clients-header {
+            padding: 1rem 1.25rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .clients-header h3 {
+            font-weight: 600;
+        }
+        
+        .btn {
+            padding: 0.5rem 1rem;
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+        
+        .btn:hover {
+            background: #4f46e5;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        th, td {
+            padding: 0.75rem 1rem;
+            text-align: left;
+        }
+        
+        th {
+            background: rgba(0,0,0,0.2);
+            color: var(--text-muted);
+            font-weight: 500;
+            font-size: 0.875rem;
+        }
+        
+        tr {
+            border-bottom: 1px solid var(--border);
+        }
+        
+        tr:hover {
+            background: rgba(255,255,255,0.02);
+        }
+        
+        .badge {
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+        
+        .badge-success {
+            background: rgba(34, 197, 94, 0.1);
+            color: var(--success);
+        }
+        
+        .badge-warning {
+            background: rgba(245, 158, 11, 0.1);
+            color: var(--warning);
+        }
+        
+        .badge-danger {
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--danger);
+        }
+        
+        .trust-bar {
+            width: 100px;
+            height: 8px;
+            background: var(--bg-dark);
+            border-radius: 4px;
+            overflow: hidden;
+            display: inline-block;
+            vertical-align: middle;
+            margin-right: 0.5rem;
+        }
+        
+        .trust-fill {
+            height: 100%;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="logo">
+            <div class="logo-icon">🧠</div>
+            <div>
+                <h1>Federated AI Platform</h1>
+                <p>Distributed Learning Dashboard</p>
+            </div>
+        </div>
+        <div class="status-badge">
+            <div class="status-dot"></div>
+            <span>Connected</span>
+        </div>
+    </header>
+    
+    <nav class="nav">
+        <button class="active" onclick="showTab('overview')">📊 Overview</button>
+        <button onclick="showTab('clients')">👥 Clients</button>
+        <button onclick="showTab('models')">🤖 Models</button>
+        <button onclick="showTab('security')">🔒 Security</button>
+    </nav>
+    
+    <main class="main" id="content">
+        <!-- Overview Tab -->
+        <div id="tab-overview">
+            <div class="grid">
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-title">Status</span>
+                    </div>
+                    <div class="card-value">Training</div>
+                    <div class="card-subtitle">Round: 150</div>
+                </div>
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-title">Active Clients</span>
+                    </div>
+                    <div class="card-value">4</div>
+                    <div class="card-subtitle">of 5 total</div>
+                </div>
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-title">Accuracy</span>
+                    </div>
+                    <div class="card-value" style="color: var(--success)">87.3%</div>
+                    <div class="card-subtitle">+2.3% from last round</div>
+                </div>
+                <div class="card">
+                    <div class="card-header">
+                        <span class="card-title">Privacy (ε)</span>
+                    </div>
+                    <div class="card-value">1.45</div>
+                    <div class="card-subtitle">Differential Privacy</div>
+                </div>
+            </div>
+            
+            <div class="chart-grid">
+                <div class="chart-card">
+                    <h3>Accuracy Over Time</h3>
+                    <canvas id="accuracyChart" height="250"></canvas>
+                </div>
+                <div class="chart-card">
+                    <h3>Loss Over Time</h3>
+                    <canvas id="lossChart" height="250"></canvas>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Clients Tab -->
+        <div id="tab-clients" style="display:none">
+            <div class="clients-table">
+                <div class="clients-header">
+                    <h3>Connected Clients</h3>
+                    <button class="btn">+ Add Client</button>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Client ID</th>
+                            <th>Status</th>
+                            <th>Trust Score</th>
+                            <th>Latency</th>
+                            <th>Accuracy</th>
+                            <th>Grad Norm</th>
+                        </tr>
+                    </thead>
+                    <tbody id="clients-body">
+                        <!-- Filled by JS -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        
+        <!-- Models Tab -->
+        <div id="tab-models" style="display:none">
+            <div class="grid" style="grid-template-columns: repeat(3, 1fr);">
+                <div class="card">
+                    <h3 style="margin-bottom: 0.5rem;">SimpleCNN (MNIST)</h3>
+                    <p style="color: var(--text-muted); font-size: 0.875rem;">Vision • 421K params</p>
+                    <span class="badge badge-success" style="margin-top: 0.75rem; display: inline-block;">Active</span>
+                </div>
+                <div class="card">
+                    <h3 style="margin-bottom: 0.5rem;">CLIP ViT Base</h3>
+                    <p style="color: var(--text-muted); font-size: 0.875rem;">Multimodal • 151M params</p>
+                    <span class="badge badge-warning" style="margin-top: 0.75rem; display: inline-block;">PEFT</span>
+                </div>
+                <div class="card" style="border-style: dashed; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 120px; cursor: pointer;">
+                    <div style="font-size: 2rem; margin-bottom: 0.5rem;">+</div>
+                    <p style="color: var(--text-muted);">Add Model</p>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Security Tab -->
+        <div id="tab-security" style="display:none">
+            <div class="grid" style="grid-template-columns: repeat(2, 1fr);">
+                <div class="card">
+                    <h3 style="margin-bottom: 1rem;">🛡️ Robust Aggregation</h3>
+                    <div style="display: flex; justify-content: space-between; padding: 0.5rem; background: var(--bg-dark); border-radius: 8px; margin-bottom: 0.5rem;">
+                        <span style="color: var(--text-muted);">Method</span>
+                        <span>Hybrid (Trimmed Mean + Trust)</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; padding: 0.5rem; background: var(--bg-dark); border-radius: 8px; margin-bottom: 0.5rem;">
+                        <span style="color: var(--text-muted);">Trim Ratio</span>
+                        <span>10%</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; padding: 0.5rem; background: var(--bg-dark); border-radius: 8px;">
+                        <span style="color: var(--text-muted);">Anomaly Detection</span>
+                        <span style="color: var(--success);">Enabled</span>
+                    </div>
+                </div>
+                <div class="card">
+                    <h3 style="margin-bottom: 1rem;">🔒 Differential Privacy</h3>
+                    <div style="display: flex; justify-content: space-between; padding: 0.5rem; background: var(--bg-dark); border-radius: 8px; margin-bottom: 0.5rem;">
+                        <span style="color: var(--text-muted);">Status</span>
+                        <span style="color: var(--success);">Enabled</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; padding: 0.5rem; background: var(--bg-dark); border-radius: 8px; margin-bottom: 0.5rem;">
+                        <span style="color: var(--text-muted);">Epsilon (ε)</span>
+                        <span>1.45</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; padding: 0.5rem; background: var(--bg-dark); border-radius: 8px;">
+                        <span style="color: var(--text-muted);">Noise (σ)</span>
+                        <span>1.2</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+    
+    <script>
+        // Mock data
+        const mockClients = [
+            { id: 'client_001', status: 'active', trust: 0.98, latency: 45, accuracy: 0.89, gradient: 0.23 },
+            { id: 'client_002', status: 'active', trust: 0.95, latency: 52, accuracy: 0.87, gradient: 0.31 },
+            { id: 'client_003', status: 'active', trust: 0.72, latency: 120, accuracy: 0.76, gradient: 0.89 },
+            { id: 'client_004', status: 'slow', trust: 0.68, latency: 2500, accuracy: 0.71, gradient: 0.45 },
+            { id: 'client_005', status: 'quarantined', trust: 0.25, latency: 0, accuracy: 0.0, gradient: 5.2 },
+        ];
+        
+        // Generate mock metrics
+        const metricsData = Array.from({ length: 20 }, (_, i) => ({
+            step: i * 10,
+            accuracy: 0.1 + (i / 20) * 0.75 + Math.random() * 0.05,
+            loss: 2.5 - (i / 20) * 1.8 + Math.random() * 0.1,
+        }));
+        
+        // Tab switching
+        function showTab(tabName) {
+            document.querySelectorAll('.nav button').forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+            
+            ['overview', 'clients', 'models', 'security'].forEach(t => {
+                document.getElementById('tab-' + t).style.display = t === tabName ? 'block' : 'none';
+            });
+        }
+        
+        // Render clients table
+        function renderClients() {
+            const tbody = document.getElementById('clients-body');
+            tbody.innerHTML = mockClients.map(client => {
+                const trustColor = client.trust > 0.7 ? 'var(--success)' : client.trust > 0.4 ? 'var(--warning)' : 'var(--danger)';
+                const badgeClass = client.status === 'active' ? 'badge-success' : client.status === 'slow' ? 'badge-warning' : 'badge-danger';
+                
+                return `
+                    <tr>
+                        <td>${client.id}</td>
+                        <td><span class="badge ${badgeClass}">${client.status}</span></td>
+                        <td>
+                            <div class="trust-bar">
+                                <div class="trust-fill" style="width: ${client.trust * 100}%; background: ${trustColor};"></div>
+                            </div>
+                            ${(client.trust * 100).toFixed(0)}%
+                        </td>
+                        <td>${client.latency > 0 ? client.latency + 'ms' : '-'}</td>
+                        <td>${client.accuracy > 0 ? (client.accuracy * 100).toFixed(1) + '%' : '-'}</td>
+                        <td>${client.gradient.toFixed(3)}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+        
+        // Initialize charts
+        function initCharts() {
+            // Accuracy chart
+            new Chart(document.getElementById('accuracyChart'), {
+                type: 'line',
+                data: {
+                    labels: metricsData.map(m => m.step),
+                    datasets: [{
+                        label: 'Accuracy',
+                        data: metricsData.map(m => m.accuracy * 100),
+                        borderColor: '#6366f1',
+                        backgroundColor: 'rgba(99, 102, 241, 0.1)',
+                        fill: true,
+                        tension: 0.4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { grid: { color: '#334155' }, ticks: { color: '#94a3b8' } },
+                        y: { grid: { color: '#334155' }, ticks: { color: '#94a3b8' }, min: 0, max: 100 }
+                    }
+                }
+            });
+            
+            // Loss chart
+            new Chart(document.getElementById('lossChart'), {
+                type: 'line',
+                data: {
+                    labels: metricsData.map(m => m.step),
+                    datasets: [{
+                        label: 'Loss',
+                        data: metricsData.map(m => m.loss),
+                        borderColor: '#ef4444',
+                        backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                        fill: true,
+                        tension: 0.4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { grid: { color: '#334155' }, ticks: { color: '#94a3b8' } },
+                        y: { grid: { color: '#334155' }, ticks: { color: '#94a3b8' } }
+                    }
+                }
+            });
+        }
+        
+        // Initialize
+        renderClients();
+        initCharts();
+    </script>
+</body>
+</html>
