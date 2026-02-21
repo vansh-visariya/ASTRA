@@ -24,7 +24,7 @@ import time
 import uuid
 import threading
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field
@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import torch
 import uvicorn
+import jwt
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -187,14 +188,29 @@ class TrainingGroup:
 class GroupManager:
     """Manages multiple training groups with hybrid async windowing."""
     
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any], connection_manager=None):
         self.config = config
         self.groups: Dict[str, TrainingGroup] = {}
         self.client_to_group: Dict[str, str] = {}
         self.lock = threading.RLock()
         self.logger = logging.getLogger(__name__)
+        self.connection_manager = connection_manager
+        self.training_tasks: Dict[str, asyncio.Task] = []
+        
+        # Event logs
+        self.event_logs: List[Dict] = []
         
         self._init_default_groups()
+    
+    async def broadcast_to_group(self, group_id: str, message: Dict):
+        """Broadcast message to all clients in a group."""
+        if not self.connection_manager:
+            return
+        group = self.groups.get(group_id)
+        if not group:
+            return
+        for client_id in group.clients:
+            await self.connection_manager.send_to(client_id, message)
     
     def _init_default_groups(self):
         """Initialize default groups from config."""
@@ -215,6 +231,28 @@ class GroupManager:
                 window_size=g.get('window_size', 3),
                 time_limit=g.get('time_limit', 20.0)
             )
+    
+    def log_event(self, event_type: str, message: str, group_id: str = None, details: Dict = None):
+        """Add an event to the log."""
+        with self.lock:
+            self.event_logs.append({
+                'timestamp': time.time(),
+                'type': event_type,
+                'message': message,
+                'group_id': group_id,
+                'details': details or {}
+            })
+            # Keep last 500 events
+            if len(self.event_logs) > 500:
+                self.event_logs = self.event_logs[-500:]
+    
+    def get_logs(self, limit: int = 100, event_type: str = None) -> List[Dict]:
+        """Get recent logs."""
+        with self.lock:
+            logs = list(self.event_logs)
+            if event_type:
+                logs = [l for l in logs if l['type'] == event_type]
+            return logs[-limit:][::-1]  # Most recent first
     
     def create_group(
         self,
@@ -276,11 +314,14 @@ class GroupManager:
             if client_id in self.client_to_group:
                 current = self.client_to_group[client_id]
                 if current != group_id:
+                    self.log_event('client_rejected', f'Client {client_id} tried to migrate from {current} to {group_id}', group_id)
                     return False  # No migration allowed
             
             group = self.groups[group_id]
             group.add_client(client_id, client_info)
             self.client_to_group[client_id] = group_id
+            
+            self.log_event('client_joined', f'Client {client_id} joined group {group_id}', group_id, {'client_id': client_id})
             
             return True
     
@@ -323,23 +364,49 @@ class GroupManager:
             updates = [u['update'] for u in group.pending_updates]
             client_ids = [u['client_id'] for u in group.pending_updates]
             
-            # Aggregate
+            # Calculate global metrics from client updates
+            accuracies = [u.get('meta', {}).get('train_accuracy', 0) for u in updates]
+            losses = [u.get('meta', {}).get('train_loss', 0) for u in updates]
+            
+            global_accuracy = sum(accuracies) / len(accuracies) if accuracies else 0
+            global_loss = sum(losses) / len(losses) if losses else 0
+            
+            # Aggregate model weights
             if group.aggregator:
                 aggregated = group.aggregator.aggregate(updates)
             else:
-                aggregated = np.mean([np.array(u) for u in updates], axis=0)
+                aggregated = np.mean([np.array(u.get('local_updates', u)) for u in updates], axis=0)
             
             # Update version
             group.model_version += 1
+            
+            # Store metrics
+            group.metrics_history.append({
+                'version': group.model_version,
+                'timestamp': time.time(),
+                'accuracy': global_accuracy,
+                'loss': global_loss,
+                'clients': len(updates)
+            })
+            
             group.clear_updates()
             
+            self.log_event('aggregation', f'Aggregated {len(updates)} updates -> v{group.model_version}', group_id, {
+                'version': group.model_version,
+                'clients': len(updates),
+                'accuracy': global_accuracy,
+                'loss': global_loss
+            })
+            
             self.logger.info(
-                f"Aggregated group {group_id}: {len(updates)} clients, version {group.model_version}"
+                f"Aggregated group {group_id}: {len(updates)} clients, v{group.model_version}, acc={global_accuracy:.4f}, loss={global_loss:.4f}"
             )
             
             return {
                 'group_id': group_id,
                 'version': group.model_version,
+                'accuracy': global_accuracy,
+                'loss': global_loss,
                 'contributing_clients': client_ids,
                 'update_count': len(updates),
                 'aggregated_model': aggregated
@@ -361,7 +428,50 @@ class GroupManager:
             group.is_locked = True
             group.is_training = True
             group.status = 'TRAINING'
+            
+            self.log_event('training_started', f'Training started for group {group_id}', group_id)
+            self.logger.info(f"Started training for group {group_id}")
             return True
+    
+    async def trigger_clients_training(self, group_id: str):
+        """Send training command to all clients in the group."""
+        group = self.groups.get(group_id)
+        if not group:
+            return
+        
+        self.log_event('training_triggered', f'Training round triggered for group {group_id}', group_id, {
+            'client_count': len(group.clients)
+        })
+        
+        for client_id in group.clients:
+            await self.broadcast_to_group(group_id, {
+                'type': 'train_command',
+                'group_id': group_id,
+                'config': {
+                    'local_epochs': group.config.get('local_epochs', 2),
+                    'batch_size': group.config.get('batch_size', 32),
+                    'lr': group.config.get('lr', 0.01),
+                }
+            })
+    
+    def process_client_update(self, client_id: str, update: Dict) -> Dict:
+        """Process client update and check if aggregation needed."""
+        group = self.get_client_group(client_id)
+        if not group or not group.is_training:
+            return {'triggered': False, 'group_id': None}
+        
+        triggered = group.add_update(client_id, update)
+        
+        result = {
+            'triggered': triggered,
+            'group_id': group.group_id,
+            'window_status': group.get_window_status()
+        }
+        
+        if triggered:
+            result['aggregate'] = True
+        
+        return result
     
     def pause_group_training(self, group_id: str) -> bool:
         """Pause training for a group."""
@@ -619,7 +729,7 @@ class FLServer:
         self.config = config
         self.connection_manager = ConnectionManager()
         self.db = ExperimentDB()
-        self.group_manager = GroupManager(config)
+        self.group_manager = GroupManager(config, self.connection_manager)
         
         self.server: Optional[AsyncServer] = None
         self.model_registry = get_registry()
@@ -880,6 +990,102 @@ async def list_models():
     return {"models": models}
 
 
+# ============================================================================
+# Authentication System
+# ============================================================================
+
+SECRET_KEY = "dev_secret_key_change_in_production"
+ALGORITHM = "HS256"
+
+# In-memory user store (use DB in production)
+users_db: Dict[str, Dict] = {
+    "admin": {"password": "admin", "role": "coordinator", "name": "Admin"},
+    "observer": {"password": "observer", "role": "observer", "name": "Observer"},
+}
+
+
+def create_token(user_id: str, role: str) -> str:
+    """Create JWT token."""
+    payload = {
+        "sub": user_id,
+        "role": role,
+        "exp": datetime.utcnow() + timedelta(days=1)
+    }
+    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def verify_token(token: str) -> Optional[Dict]:
+    """Verify JWT token."""
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        return payload
+    except jwt.PyJWTError:
+        return None
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+@app.post("/api/auth/login")
+async def login(credentials: LoginRequest):
+    """Authenticate user and return JWT."""
+    user = users_db.get(credentials.username)
+    if not user or user["password"] != credentials.password:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    
+    token = create_token(credentials.username, user["role"])
+    return {
+        "token": token,
+        "user": {
+            "username": credentials.username,
+            "role": user["role"],
+            "name": user["name"]
+        }
+    }
+
+
+@app.get("/api/auth/me")
+async def get_current_user(authorization: str = None):
+    """Get current user info from token."""
+    if not authorization:
+        raise HTTPException(status_code=401, detail="No token provided")
+    
+    token = authorization.replace("Bearer ", "")
+    payload = verify_token(token)
+    
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    
+    user = users_db.get(payload["sub"])
+    return {
+        "username": payload["sub"],
+        "role": payload["role"],
+        "name": user["name"] if user else "Unknown"
+    }
+
+
+# System metrics endpoint
+@app.get("/api/system/metrics")
+async def get_system_metrics():
+    """Get system-wide metrics for dashboard."""
+    groups = fl_server.group_manager.get_all_groups()
+    clients = fl_server.group_manager.get_all_client_status()
+    
+    active_groups = [g for g in groups if g.get('status') == 'TRAINING']
+    dp_enabled = sum(1 for g in groups if g.get('config', {}).get('dp_enabled', False))
+    
+    return {
+        "total_groups": len(groups),
+        "active_groups": len(active_groups),
+        "total_participants": len(clients),
+        "active_participants": len([c for c in clients if c.get('status') == 'active']),
+        "dp_enabled_groups": dp_enabled,
+        "total_aggregations": sum(g.get('model_version', 0) for g in groups)
+    }
+
+
 @app.post("/api/models/register")
 async def register_model(model_id: str, model_type: str, model_source: str, config: Dict):
     """Register a new model."""
@@ -932,6 +1138,51 @@ async def get_server_status():
         "global_version": fl_server.server.global_version if fl_server.server else 0,
         "connected_clients": len(fl_server.connection_manager.client_sockets)
     }
+
+
+@app.get("/api/models")
+async def list_models():
+    """List all available models."""
+    models = fl_server.model_registry.list_models()
+    return {"models": models, "count": len(models)}
+
+
+@app.post("/api/models/register/hf")
+async def register_hf_model(model_name: str, use_peft: bool = False, peft_method: str = "lora"):
+    """Register a HuggingFace model."""
+    try:
+        peft_config = {
+            'enabled': use_peft,
+            'method': peft_method,
+            'lora_rank': 8,
+            'lora_alpha': 16,
+            'target_modules': ['q_proj', 'v_proj']
+        } if use_peft else {'enabled': False}
+        
+        model_info = fl_server.model_registry.register_hf_model(
+            model_name=model_name,
+            use_peft=use_peft,
+            peft_config=peft_config
+        )
+        return {"status": "registered", "model": model_info.to_dict()}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/models/{model_id}")
+async def get_model(model_id: str):
+    """Get model details."""
+    model_info = fl_server.model_registry.get_model_info(model_id)
+    if not model_info:
+        raise HTTPException(status_code=404, detail="Model not found")
+    return {"model": model_info}
+
+
+@app.get("/api/models/validate/{model_id}")
+async def validate_model(model_id: str):
+    """Validate model compatibility."""
+    is_valid, message = fl_server.model_registry.validate_model(model_id)
+    return {"model_id": model_id, "is_valid": is_valid, "message": message}
 
 
 @app.get("/api/groups")
@@ -987,11 +1238,22 @@ async def get_group(group_id: str):
 
 @app.post("/api/groups/{group_id}/start")
 async def start_group_training(group_id: str):
-    """Start training for a group."""
+    """Start training for a group and trigger first round."""
     success = fl_server.group_manager.start_group_training(group_id)
     if not success:
         raise HTTPException(status_code=400, detail="Cannot start training")
-    return {"status": "started", "group_id": group_id}
+    
+    # Trigger first training round immediately
+    await fl_server.group_manager.trigger_clients_training(group_id)
+    
+    return {"status": "started", "group_id": group_id, "triggered": True}
+
+
+@app.post("/api/groups/{group_id}/trigger")
+async def trigger_training(group_id: str):
+    """Trigger training round - tells all clients to train."""
+    await fl_server.group_manager.trigger_clients_training(group_id)
+    return {"status": "triggered", "group_id": group_id}
 
 
 @app.post("/api/groups/{group_id}/pause")
@@ -1043,6 +1305,13 @@ async def list_clients():
     return {"clients": clients, "count": len(clients)}
 
 
+@app.get("/api/logs")
+async def get_logs(limit: int = 100, event_type: str = None):
+    """Get server event logs."""
+    logs = fl_server.group_manager.get_logs(limit, event_type)
+    return {"logs": logs, "count": len(logs)}
+
+
 # ============================================================================
 # WebSocket Endpoint
 # ============================================================================
@@ -1077,38 +1346,90 @@ async def websocket_endpoint(websocket: WebSocket):
                         'reason': 'invalid_token'
                     })
                 else:
-                    # Register client
-                    success = fl_server.group_manager.register_client(
-                        client_id=client_id,
-                        group_id=group_id,
-                        client_info={
-                            **capabilities,
-                            'data_metadata': data_metadata,
-                            'connection': 'websocket'
-                        }
-                    )
-                    if success:
-                        await websocket.send_json({
-                            'status': 'registered',
-                            'client_id': client_id,
-                            'group_id': group_id,
-                            'model_id': group.model_id
-                        })
-                    else:
+                    # Register client - be more lenient
+                    try:
+                        success = fl_server.group_manager.register_client(
+                            client_id=client_id,
+                            group_id=group_id,
+                            client_info={
+                                'has_gpu': capabilities.get('has_gpu', False),
+                                'device': capabilities.get('device', 'cpu'),
+                                'data_metadata': data_metadata,
+                                'connection': 'websocket'
+                            }
+                        )
+                        if success:
+                            # Register websocket for sending messages to client
+                            fl_server.connection_manager.register_client(client_id, websocket)
+                            await websocket.send_json({
+                                'status': 'registered',
+                                'client_id': client_id,
+                                'group_id': group_id,
+                                'model_id': group.model_id
+                            })
+                        else:
+                            await websocket.send_json({
+                                'status': 'rejected',
+                                'reason': 'registration_failed'
+                            })
+                    except Exception as e:
+                        import logging
+                        logger = logging.getLogger(__name__)
+                        logger.error(f"Registration error: {e}")
                         await websocket.send_json({
                             'status': 'rejected',
-                            'reason': 'registration_failed'
+                            'reason': f'registration_error: {str(e)}'
                         })
             
             elif message.get('type') == 'update':
-                if not fl_server.is_running:
-                    await websocket.send_json({'status': 'rejected', 'reason': 'server_not_running'})
+                # Check if group is training
+                client_id = message.get('update', {}).get('client_id')
+                group = fl_server.group_manager.get_client_group(client_id)
+                
+                if not group:
+                    await websocket.send_json({'status': 'rejected', 'reason': 'group_not_found'})
                     continue
-                    
-                update_data = message.get('update', {})
-                update = ClientUpdate(**update_data)
-                result = await fl_server.handle_client_update(update)
-                await websocket.send_json(result)
+                
+                if not group.is_training:
+                    await websocket.send_json({'status': 'rejected', 'reason': 'training_not_started'})
+                    continue
+                
+                # Process update through group manager
+                update_result = fl_server.group_manager.process_client_update(client_id, message.get('update', {}))
+                
+                # Log the update
+                fl_server.group_manager.log_event('client_update', f'Client {client_id} sent update', group.group_id, {
+                    'client_id': client_id,
+                    'accuracy': message.get('update', {}).get('meta', {}).get('train_accuracy', 0),
+                    'loss': message.get('update', {}).get('meta', {}).get('train_loss', 0)
+                })
+                
+                # Check if aggregation triggered
+                if update_result.get('triggered') and update_result.get('aggregate'):
+                    # Aggregate updates
+                    agg_result = fl_server.group_manager.aggregate_group(group.group_id)
+                    if agg_result:
+                        # Broadcast new model version to all clients in group
+                        await fl_server.group_manager.broadcast_to_group(group.group_id, {
+                            'type': 'model_update',
+                            'version': agg_result['version'],
+                            'group_id': group.group_id,
+                            'accuracy': agg_result.get('accuracy', 0),
+                            'loss': agg_result.get('loss', 0)
+                        })
+                        
+                        # Auto-trigger next round if still training
+                        if group.is_training:
+                            asyncio.create_task(
+                                fl_server.group_manager.trigger_clients_training(group.group_id)
+                            )
+                
+                await websocket.send_json({
+                    'status': 'accepted',
+                    'group_id': group.group_id,
+                    'triggered': update_result.get('triggered', False),
+                    'window_status': update_result.get('window_status')
+                })
     
     except WebSocketDisconnect:
         fl_server.connection_manager.disconnect(websocket)
