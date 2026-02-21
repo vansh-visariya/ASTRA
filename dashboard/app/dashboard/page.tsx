@@ -5,7 +5,7 @@ import { useAuth } from '@/components/AuthContext';
 import { Layers, Users, Activity, Shield, Zap, TrendingUp, Plus } from 'lucide-react';
 import Link from 'next/link';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://10.146.11.202:8000';
 
 interface SystemMetrics {
   total_groups: number;
@@ -14,6 +14,11 @@ interface SystemMetrics {
   active_participants: number;
   dp_enabled_groups: number;
   total_aggregations: number;
+  latest_group_id?: string | null;
+  latest_accuracy?: number;
+  latest_loss?: number;
+  latest_version?: number;
+  latest_timestamp?: number;
 }
 
 export default function DashboardPage() {
@@ -39,13 +44,20 @@ export default function DashboardPage() {
     return () => clearInterval(interval);
   }, [token]);
 
-  const statCards = [
+  const formatPercent = (value?: number) => `${((value || 0) * 100).toFixed(1)}%`;
+  const formatLoss = (value?: number) => (value ?? 0).toFixed(4);
+  const formatVersion = (value?: number) => `v${value || 0}`;
+
+  const statCards: { label: string; value: string | number; icon: any; color: string }[] = [
     { label: 'Total Groups', value: metrics?.total_groups || 0, icon: Layers, color: 'indigo' },
     { label: 'Active Groups', value: metrics?.active_groups || 0, icon: Activity, color: 'green' },
     { label: 'Total Participants', value: metrics?.total_participants || 0, icon: Users, color: 'blue' },
     { label: 'Active Participants', value: metrics?.active_participants || 0, icon: Zap, color: 'yellow' },
     { label: 'DP Enabled', value: metrics?.dp_enabled_groups || 0, icon: Shield, color: 'purple' },
     { label: 'Total Aggregations', value: metrics?.total_aggregations || 0, icon: TrendingUp, color: 'pink' },
+    { label: 'Latest Accuracy', value: formatPercent(metrics?.latest_accuracy), icon: TrendingUp, color: 'green' },
+    { label: 'Latest Loss', value: formatLoss(metrics?.latest_loss), icon: Activity, color: 'red' },
+    { label: 'Latest Round', value: formatVersion(metrics?.latest_version), icon: Layers, color: 'indigo' },
   ];
 
   const colorMap: Record<string, string> = {
@@ -55,6 +67,7 @@ export default function DashboardPage() {
     yellow: 'bg-yellow-600',
     purple: 'bg-purple-600',
     pink: 'bg-pink-600',
+    red: 'bg-red-600',
   };
 
   return (

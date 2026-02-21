@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://10.146.11.202:8000';
 
 interface GroupMetrics {
   version: number;
@@ -108,6 +108,15 @@ export default function GroupDetailPage() {
   }
 
   const progress = (group.window_status?.pending_updates || 0) / group.window_config.window_size;
+  const latestMetric = group.metrics_history && group.metrics_history.length > 0
+    ? group.metrics_history[group.metrics_history.length - 1]
+    : null;
+  const avgClientAccuracy = clients.length > 0
+    ? clients.reduce((sum, c) => sum + (c.local_accuracy || 0), 0) / clients.length
+    : 0;
+  const avgClientLoss = clients.length > 0
+    ? clients.reduce((sum, c) => sum + (c.local_loss || 0), 0) / clients.length
+    : 0;
 
   return (
     <div className="space-y-6">
@@ -184,9 +193,7 @@ export default function GroupDetailPage() {
                 <span className="text-gray-400 text-sm">Accuracy</span>
               </div>
               <p className="text-2xl font-bold text-green-400">
-                {group.metrics_history && group.metrics_history.length > 0 
-                  ? (group.metrics_history[group.metrics_history.length - 1].accuracy * 100).toFixed(1) 
-                  : '0.0'}%
+                {((latestMetric ? latestMetric.accuracy : avgClientAccuracy) * 100).toFixed(1)}%
               </p>
             </div>
 
@@ -196,9 +203,7 @@ export default function GroupDetailPage() {
                 <span className="text-gray-400 text-sm">Loss</span>
               </div>
               <p className="text-2xl font-bold text-red-400">
-                {group.metrics_history && group.metrics_history.length > 0 
-                  ? group.metrics_history[group.metrics_history.length - 1].loss.toFixed(4) 
-                  : '0.0000'}
+                {(latestMetric ? latestMetric.loss : avgClientLoss).toFixed(4)}
               </p>
             </div>
 

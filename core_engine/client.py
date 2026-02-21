@@ -106,10 +106,14 @@ class FLClient:
         total_loss = 0.0
         total_correct = 0
         total_samples = 0
+        epoch_metrics = []
         
         initial_weights = self._get_weights()
         
         for epoch in range(local_epochs):
+            epoch_loss = 0.0
+            epoch_correct = 0
+            epoch_samples = 0
             for batch_idx, (data, target) in enumerate(self.train_loader):
                 # Move to GPU
                 data, target = data.to(self.device), target.to(self.device)
@@ -121,10 +125,28 @@ class FLClient:
                 loss.backward()
                 self.optimizer.step()
                 
-                total_loss += loss.item() * len(target)
+                batch_size = len(target)
+                total_loss += loss.item() * batch_size
                 pred = output.argmax(dim=1)
                 total_correct += (pred == target).sum().item()
-                total_samples += len(target)
+                total_samples += batch_size
+
+                epoch_loss += loss.item() * batch_size
+                epoch_correct += (pred == target).sum().item()
+                epoch_samples += batch_size
+
+            epoch_loss_avg = epoch_loss / epoch_samples if epoch_samples > 0 else 0.0
+            epoch_accuracy = epoch_correct / epoch_samples if epoch_samples > 0 else 0.0
+            epoch_metrics.append({
+                'epoch': epoch + 1,
+                'loss': epoch_loss_avg,
+                'accuracy': epoch_accuracy,
+                'samples': epoch_samples
+            })
+            self.logger.info(
+                f"Client {self.client_id} epoch {epoch + 1}/{local_epochs}: "
+                f"loss={epoch_loss_avg:.4f}, acc={epoch_accuracy:.4f}"
+            )
         
         final_weights = self._get_weights()
         weight_delta = self._compute_weight_delta(initial_weights, final_weights)
@@ -158,7 +180,8 @@ class FLClient:
             'meta': {
                 'train_loss': train_loss,
                 'train_accuracy': train_accuracy,
-                'local_steps': local_epochs * len(self.train_loader)
+                'local_steps': local_epochs * len(self.train_loader),
+                'epoch_metrics': epoch_metrics
             }
         }
         

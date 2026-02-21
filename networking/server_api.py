@@ -90,6 +90,10 @@ class TrainingGroup:
     is_training: bool = False
     is_locked: bool = False  # Lock config when training starts
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
+
+    # Training bounds
+    max_rounds: Optional[int] = None
+    completed_rounds: int = 0
     
     # Metrics
     metrics_history: List[Dict] = field(default_factory=list)
@@ -164,6 +168,8 @@ class TrainingGroup:
             'is_training': self.is_training,
             'is_locked': self.is_locked,
             'created_at': self.created_at,
+            'completed_rounds': self.completed_rounds,
+            'max_rounds': self.max_rounds,
             'join_token': self.join_token if include_secret else '***HIDDEN***',
             'config': {
                 'local_epochs': self.config.get('local_epochs', 2),
@@ -195,7 +201,7 @@ class GroupManager:
         self.lock = threading.RLock()
         self.logger = logging.getLogger(__name__)
         self.connection_manager = connection_manager
-        self.training_tasks: Dict[str, asyncio.Task] = []
+        self.training_tasks: Dict[str, asyncio.Task] = {}
         
         # Event logs
         self.event_logs: List[Dict] = []
@@ -253,6 +259,79 @@ class GroupManager:
             if event_type:
                 logs = [l for l in logs if l['type'] == event_type]
             return logs[-limit:][::-1]  # Most recent first
+
+    def _decode_local_updates(self, local_updates: Any) -> np.ndarray:
+        """Decode base64/bytes/list updates into a float32 numpy array."""
+        if local_updates is None:
+            return np.array([], dtype=np.float32)
+        if isinstance(local_updates, bytes):
+            return np.frombuffer(local_updates, dtype=np.float32)
+        if isinstance(local_updates, str):
+            try:
+                import base64
+                decoded = base64.b64decode(local_updates)
+                return np.frombuffer(decoded, dtype=np.float32)
+            except Exception:
+                return np.array([], dtype=np.float32)
+        if isinstance(local_updates, np.ndarray):
+            return local_updates.astype(np.float32)
+        return np.array(local_updates, dtype=np.float32)
+
+    def normalize_update(self, update: Dict) -> Dict:
+        """Ensure updates have fields expected by aggregators."""
+        if 'delta' not in update:
+            update['delta'] = self._decode_local_updates(update.get('local_updates'))
+        update.setdefault('dataset_size', update.get('local_dataset_size', 1))
+        update.setdefault('staleness_weight', 1.0)
+        update.setdefault('trust', 1.0)
+        return update
+
+    def _start_training_watchdog(self, group_id: str) -> None:
+        """Ensure a background task is running to enforce time-based aggregation."""
+        task = self.training_tasks.get(group_id)
+        if task and not task.done():
+            return
+        self.training_tasks[group_id] = asyncio.create_task(self._training_watchdog(group_id))
+
+    def _stop_training_watchdog(self, group_id: str) -> None:
+        task = self.training_tasks.pop(group_id, None)
+        if task and not task.done():
+            task.cancel()
+
+    async def _training_watchdog(self, group_id: str) -> None:
+        """Trigger aggregation on timeouts so training keeps progressing."""
+        try:
+            while True:
+                await asyncio.sleep(1.0)
+                with self.lock:
+                    group = self.groups.get(group_id)
+                    if not group or not group.is_training:
+                        break
+                    if not group.window_config.enabled:
+                        continue
+                    pending = len(group.pending_updates)
+                    elapsed = time.time() - group.last_aggregation_time
+                    time_limit = group.window_config.time_limit
+
+                if pending == 0 or elapsed < time_limit:
+                    continue
+
+                agg_result = self.aggregate_group(group_id)
+                if not agg_result:
+                    continue
+
+                await self.broadcast_to_group(group_id, {
+                    'type': 'model_update',
+                    'version': agg_result['version'],
+                    'group_id': group_id,
+                    'accuracy': agg_result.get('accuracy', 0),
+                    'loss': agg_result.get('loss', 0)
+                })
+
+                if group and group.is_training and group.config.get('auto_continue', False):
+                    await self.trigger_clients_training(group_id)
+        except asyncio.CancelledError:
+            return
     
     def create_group(
         self,
@@ -267,13 +346,16 @@ class GroupManager:
             if group_id in self.groups:
                 return self.groups[group_id]
             
+            config = config or {}
+            config.setdefault('auto_continue', False)
+
             # Generate or use provided join token
-            join_token = config.get('join_token') if config else None
+            join_token = config.get('join_token')
             if not join_token or join_token == "GENERATE_NEW":
                 join_token = uuid.uuid4().hex[:16]
             
             # Create aggregator for this group
-            aggregator = create_aggregator(config or {})
+            aggregator = create_aggregator(config)
             
             group = TrainingGroup(
                 group_id=group_id,
@@ -284,7 +366,8 @@ class GroupManager:
                     window_size=window_size,
                     time_limit=time_limit
                 ),
-                aggregator=aggregator
+                aggregator=aggregator,
+                max_rounds=config.get('max_rounds')
             )
             
             self.groups[group_id] = group
@@ -335,8 +418,9 @@ class GroupManager:
             group = self.get_client_group(client_id)
             if not group:
                 return None
-            
-            triggered = group.add_update(client_id, update)
+
+            normalized = self.normalize_update(update)
+            triggered = group.add_update(client_id, normalized)
             
             result = {
                 'group_id': group.group_id,
@@ -361,7 +445,7 @@ class GroupManager:
                 return None
             
             # Get all updates
-            updates = [u['update'] for u in group.pending_updates]
+            updates = [self.normalize_update(u['update']) for u in group.pending_updates]
             client_ids = [u['client_id'] for u in group.pending_updates]
             
             # Calculate global metrics from client updates
@@ -375,10 +459,11 @@ class GroupManager:
             if group.aggregator:
                 aggregated = group.aggregator.aggregate(updates)
             else:
-                aggregated = np.mean([np.array(u.get('local_updates', u)) for u in updates], axis=0)
+                aggregated = np.mean([u.get('delta', np.array([])) for u in updates], axis=0)
             
             # Update version
             group.model_version += 1
+            group.completed_rounds += 1
             
             # Store metrics
             group.metrics_history.append({
@@ -401,6 +486,15 @@ class GroupManager:
             self.logger.info(
                 f"Aggregated group {group_id}: {len(updates)} clients, v{group.model_version}, acc={global_accuracy:.4f}, loss={global_loss:.4f}"
             )
+
+            if group.max_rounds is not None and group.completed_rounds >= group.max_rounds:
+                group.is_training = False
+                group.status = 'COMPLETED'
+                self._stop_training_watchdog(group_id)
+                self.log_event('training_completed', f'Training completed for group {group_id}', group_id, {
+                    'version': group.model_version,
+                    'rounds': group.completed_rounds
+                })
             
             return {
                 'group_id': group_id,
@@ -428,6 +522,9 @@ class GroupManager:
             group.is_locked = True
             group.is_training = True
             group.status = 'TRAINING'
+            group.completed_rounds = 0
+
+            self._start_training_watchdog(group_id)
             
             self.log_event('training_started', f'Training started for group {group_id}', group_id)
             self.logger.info(f"Started training for group {group_id}")
@@ -460,7 +557,8 @@ class GroupManager:
         if not group or not group.is_training:
             return {'triggered': False, 'group_id': None}
         
-        triggered = group.add_update(client_id, update)
+        normalized = self.normalize_update(update)
+        triggered = group.add_update(client_id, normalized)
         
         result = {
             'triggered': triggered,
@@ -481,6 +579,7 @@ class GroupManager:
             group = self.groups[group_id]
             group.is_training = False
             group.status = 'PAUSED'
+            self._stop_training_watchdog(group_id)
             return True
     
     def resume_group_training(self, group_id: str) -> bool:
@@ -491,6 +590,7 @@ class GroupManager:
             group = self.groups[group_id]
             group.is_training = True
             group.status = 'TRAINING'
+            self._start_training_watchdog(group_id)
             return True
     
     def stop_group_training(self, group_id: str) -> bool:
@@ -501,6 +601,7 @@ class GroupManager:
             group = self.groups[group_id]
             group.is_training = False
             group.status = 'COMPLETED'
+            self._stop_training_watchdog(group_id)
             return True
     
     def get_all_client_status(self) -> List[Dict]:
@@ -1075,6 +1176,17 @@ async def get_system_metrics():
     
     active_groups = [g for g in groups if g.get('status') == 'TRAINING']
     dp_enabled = sum(1 for g in groups if g.get('config', {}).get('dp_enabled', False))
+
+    latest_metric = None
+    latest_group_id = None
+    for group in groups:
+        history = group.get('metrics_history') or []
+        if not history:
+            continue
+        candidate = history[-1]
+        if not latest_metric or candidate.get('timestamp', 0) > latest_metric.get('timestamp', 0):
+            latest_metric = candidate
+            latest_group_id = group.get('group_id')
     
     return {
         "total_groups": len(groups),
@@ -1082,7 +1194,12 @@ async def get_system_metrics():
         "total_participants": len(clients),
         "active_participants": len([c for c in clients if c.get('status') == 'active']),
         "dp_enabled_groups": dp_enabled,
-        "total_aggregations": sum(g.get('model_version', 0) for g in groups)
+        "total_aggregations": sum(g.get('model_version', 0) for g in groups),
+        "latest_group_id": latest_group_id,
+        "latest_accuracy": (latest_metric or {}).get('accuracy', 0),
+        "latest_loss": (latest_metric or {}).get('loss', 0),
+        "latest_version": (latest_metric or {}).get('version', 0),
+        "latest_timestamp": (latest_metric or {}).get('timestamp', 0)
     }
 
 
@@ -1106,9 +1223,9 @@ async def register_model(model_id: str, model_type: str, model_source: str, conf
     return {"status": "registered", "model": model_info.to_dict()}
 
 
-@app.get("/api/clients")
-async def list_clients():
-    """List connected clients."""
+@app.get("/api/clients/connected")
+async def list_connected_clients():
+    """List currently connected client IDs."""
     clients = list(fl_server.connection_manager.client_sockets.keys())
     return {"clients": clients, "count": len(clients)}
 
@@ -1383,53 +1500,53 @@ async def websocket_endpoint(websocket: WebSocket):
             
             elif message.get('type') == 'update':
                 # Check if group is training
-                client_id = message.get('update', {}).get('client_id')
-                group = fl_server.group_manager.get_client_group(client_id)
-                
-                if not group:
-                    await websocket.send_json({'status': 'rejected', 'reason': 'group_not_found'})
-                    continue
-                
-                if not group.is_training:
-                    await websocket.send_json({'status': 'rejected', 'reason': 'training_not_started'})
-                    continue
-                
-                # Process update through group manager
-                update_result = fl_server.group_manager.process_client_update(client_id, message.get('update', {}))
-                
-                # Log the update
-                fl_server.group_manager.log_event('client_update', f'Client {client_id} sent update', group.group_id, {
-                    'client_id': client_id,
-                    'accuracy': message.get('update', {}).get('meta', {}).get('train_accuracy', 0),
-                    'loss': message.get('update', {}).get('meta', {}).get('train_loss', 0)
-                })
-                
-                # Check if aggregation triggered
-                if update_result.get('triggered') and update_result.get('aggregate'):
-                    # Aggregate updates
-                    agg_result = fl_server.group_manager.aggregate_group(group.group_id)
-                    if agg_result:
-                        # Broadcast new model version to all clients in group
-                        await fl_server.group_manager.broadcast_to_group(group.group_id, {
-                            'type': 'model_update',
-                            'version': agg_result['version'],
-                            'group_id': group.group_id,
-                            'accuracy': agg_result.get('accuracy', 0),
-                            'loss': agg_result.get('loss', 0)
-                        })
-                        
-                        # Auto-trigger next round if still training
-                        if group.is_training:
-                            asyncio.create_task(
-                                fl_server.group_manager.trigger_clients_training(group.group_id)
-                            )
-                
-                await websocket.send_json({
-                    'status': 'accepted',
-                    'group_id': group.group_id,
-                    'triggered': update_result.get('triggered', False),
-                    'window_status': update_result.get('window_status')
-                })
+                try:
+                    client_id = message.get('update', {}).get('client_id')
+                    group = fl_server.group_manager.get_client_group(client_id)
+                    
+                    if not group:
+                        await websocket.send_json({'status': 'rejected', 'reason': 'group_not_found'})
+                        continue
+                    
+                    if not group.is_training:
+                        await websocket.send_json({'status': 'rejected', 'reason': 'training_not_started'})
+                        continue
+                    
+                    update_payload = fl_server.group_manager.normalize_update(message.get('update', {}))
+                    update_result = fl_server.group_manager.process_client_update(client_id, update_payload)
+                    
+                    fl_server.group_manager.log_event('client_update', f'Client {client_id} sent update', group.group_id, {
+                        'client_id': client_id,
+                        'accuracy': message.get('update', {}).get('meta', {}).get('train_accuracy', 0),
+                        'loss': message.get('update', {}).get('meta', {}).get('train_loss', 0)
+                    })
+                    
+                    if update_result.get('triggered') and update_result.get('aggregate'):
+                        agg_result = fl_server.group_manager.aggregate_group(group.group_id)
+                        if agg_result:
+                            await fl_server.group_manager.broadcast_to_group(group.group_id, {
+                                'type': 'model_update',
+                                'version': agg_result['version'],
+                                'group_id': group.group_id,
+                                'accuracy': agg_result.get('accuracy', 0),
+                                'loss': agg_result.get('loss', 0)
+                            })
+                            
+                            if group.is_training and group.config.get('auto_continue', False):
+                                asyncio.create_task(
+                                    fl_server.group_manager.trigger_clients_training(group.group_id)
+                                )
+                    
+                    await websocket.send_json({
+                        'status': 'accepted',
+                        'group_id': group.group_id,
+                        'triggered': update_result.get('triggered', False),
+                        'window_status': update_result.get('window_status')
+                    })
+                except Exception as e:
+                    logger = logging.getLogger(__name__)
+                    logger.error(f"Update handling error: {e}")
+                    await websocket.send_json({'status': 'error', 'reason': 'update_failed'})
     
     except WebSocketDisconnect:
         fl_server.connection_manager.disconnect(websocket)

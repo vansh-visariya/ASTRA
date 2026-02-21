@@ -10,7 +10,7 @@ groups:
       join_token: ""
   - group_id: group_b
     model_id: simple_cnn_mnist
-    window_size: 3
+    window_size: 
     time_limit: 20.0
     config:
       aggregator: robust

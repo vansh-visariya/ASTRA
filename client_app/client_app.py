@@ -145,6 +145,20 @@ class FederatedClient:
         
         elif msg_type == 'train_command':
             # Server requesting local training
+            train_config = message.get('config', {})
+            if train_config:
+                self.config.setdefault('client', {})
+                self.config['client'].update(train_config)
+                if self.local_client:
+                    self.local_client.config['client'].update(train_config)
+                    self.local_client._init_optimizer()
+                    self.local_client._init_data_loader()
+                self.logger.info(
+                    "Updated training config: epochs=%s, batch_size=%s, lr=%s",
+                    train_config.get('local_epochs'),
+                    train_config.get('batch_size'),
+                    train_config.get('lr')
+                )
             await self._run_training()
         
         elif msg_type == 'config_update':
@@ -171,6 +185,23 @@ class FederatedClient:
         
         # Train locally
         update = self.local_client.local_train()
+        meta = update.get('meta', {})
+        epoch_metrics = meta.get('epoch_metrics', [])
+        if epoch_metrics:
+            for entry in epoch_metrics:
+                self.logger.info(
+                    "Epoch %s/%s: loss=%.4f, acc=%.4f",
+                    entry.get('epoch'),
+                    len(epoch_metrics),
+                    entry.get('loss', 0.0),
+                    entry.get('accuracy', 0.0)
+                )
+        self.logger.info(
+            "Training round complete: loss=%.4f, acc=%.4f, steps=%s",
+            meta.get('train_loss', 0.0),
+            meta.get('train_accuracy', 0.0),
+            meta.get('local_steps', 0)
+        )
         
         # Encode update for transmission
         encoded = base64.b64encode(update['local_updates']).decode('utf-8')

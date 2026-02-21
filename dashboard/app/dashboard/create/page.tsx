@@ -25,7 +25,7 @@ export default function CreateGroupPage() {
   const [form, setForm] = useState({
     group_id: '',
     model_id: 'simple_cnn_mnist',
-    window_size: 3,
+    window_size: 1,
     time_limit: 20,
     local_epochs: 2,
     batch_size: 32,
