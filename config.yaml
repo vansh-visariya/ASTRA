@@ -1,0 +1,88 @@
+seed: 20260221
+
+dataset:
+  name: MNIST
+  split: dirichlet
+  dirichlet_alpha: 0.3
+  imbalance: true
+
+model:
+  type: cnn
+  cnn:
+    name: simple_cnn
+  hf:
+    hf_model_name: "openai/clip-vit-base-patch32"
+    quantization: 8bit
+    gradient_checkpointing: true
+
+peft:
+  enabled: false
+  method: lora
+  lora_rank: 8
+  lora_alpha: 16
+  target_modules: ["q_proj","v_proj"]
+
+client:
+  num_clients: 8
+  local_epochs: 3
+  batch_size: 32
+  lr: 0.01
+  weight_decay: 0.0
+
+server:
+  optimizer: sgd
+  server_lr: 0.5
+  momentum: 0.9
+  async_lambda: 0.2
+  aggregator_window: 10
+  poll_timeout: 1.0
+  min_agg_interval_seconds: 0.5
+  adaptive_lr: true
+  lr_decay_factor: 0.5
+  instability_threshold: 0.15
+
+robust:
+  method: hybrid
+  trim_ratio: 0.1
+  norm_clip: 5.0
+  anomaly_k: 3
+  sim_threshold: 0.2
+  trust_power: 1.0
+
+trust:
+  init: 1.0
+  update_alpha: 0.3
+  quarantine_threshold: 0.35
+  soft_decay: 0.8
+
+malicious:
+  ratio: 0.30
+  behaviors: ["label_flip","noise","sign_flip","scale","backdoor"]
+
+privacy:
+  dp_enabled: true
+  dp_mode: client
+  clip_norm: 1.0
+  sigma: 1.2
+  epsilon_target: null
+
+communication:
+  compression: topk
+  topk_ratio: 0.1
+
+simulation:
+  latency_mean: 0.5
+  latency_std: 0.2
+
+training:
+  total_steps: 6
+  eval_interval_steps: 50
+
+flags:
+  use_simulated_networking: true
+  use_multiprocessing: false
+  demo_mode: false
+
+logging:
+  log_dir: ./runs/exp1
+  jsonl_logging: true
