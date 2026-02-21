@@ -1071,12 +1071,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         'status': 'rejected',
                         'reason': 'group_not_found'
                     })
-                elif group.is_locked and not fl_server.group_manager.client_to_group.get(client_id):
-                    await websocket.send_json({
-                        'status': 'rejected',
-                        'reason': 'group_locked'
-                    })
-                elif join_token != group.config.get('join_token'):
+                elif join_token != group.join_token:
                     await websocket.send_json({
                         'status': 'rejected',
                         'reason': 'invalid_token'
