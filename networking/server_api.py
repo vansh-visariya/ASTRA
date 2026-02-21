@@ -246,12 +246,14 @@ class GroupManager:
             if len(self.event_logs) > 500:
                 self.event_logs = self.event_logs[-500:]
     
-    def get_logs(self, limit: int = 100, event_type: str = None) -> List[Dict]:
+    def get_logs(self, limit: int = 100, event_type: str = None, group_id: str = None) -> List[Dict]:
         """Get recent logs."""
         with self.lock:
             logs = list(self.event_logs)
             if event_type:
                 logs = [l for l in logs if l['type'] == event_type]
+            if group_id:
+                logs = [l for l in logs if l.get('group_id') == group_id]
             return logs[-limit:][::-1]  # Most recent first
     
     def create_group(
@@ -433,31 +435,44 @@ class GroupManager:
             self.logger.info(f"Started training for group {group_id}")
             return True
     
-    async def trigger_clients_training(self, group_id: str):
-        """Send training command to all clients in the group."""
+    async def notify_training_started(self, group_id: str):
+        """Notify all clients that training is open - they should begin autonomous training."""
         group = self.groups.get(group_id)
         if not group:
             return
-        
-        self.log_event('training_triggered', f'Training round triggered for group {group_id}', group_id, {
+
+        self.log_event('training_started_notify', f'Training opened for group {group_id}, clients may begin', group_id, {
             'client_count': len(group.clients)
         })
-        
-        for client_id in group.clients:
-            await self.broadcast_to_group(group_id, {
-                'type': 'train_command',
-                'group_id': group_id,
-                'config': {
-                    'local_epochs': group.config.get('local_epochs', 2),
-                    'batch_size': group.config.get('batch_size', 32),
-                    'lr': group.config.get('lr', 0.01),
-                }
-            })
+
+        await self.broadcast_to_group(group_id, {
+            'type': 'training_started',
+            'group_id': group_id,
+            'config': {
+                'local_epochs': group.config.get('local_epochs', 2),
+                'batch_size': group.config.get('batch_size', 32),
+                'lr': group.config.get('lr', 0.01),
+            }
+        })
+
+    async def notify_training_paused(self, group_id: str):
+        """Notify all clients that training is paused."""
+        await self.broadcast_to_group(group_id, {
+            'type': 'training_paused',
+            'group_id': group_id,
+        })
+
+    async def notify_training_stopped(self, group_id: str):
+        """Notify all clients that training is stopped."""
+        await self.broadcast_to_group(group_id, {
+            'type': 'training_stopped',
+            'group_id': group_id,
+        })
     
     def process_client_update(self, client_id: str, update: Dict) -> Dict:
         """Process client update and check if aggregation needed."""
         group = self.get_client_group(client_id)
-        if not group or not group.is_training:
+        if not group:
             return {'triggered': False, 'group_id': None}
         
         triggered = group.add_update(client_id, update)
@@ -880,15 +895,41 @@ async def lifespan(app: FastAPI):
     }
     
     fl_server = FLServer(config)
-    
+
     # Setup Socket.IO
     from aiohttp import web
     socketio_app = web.Application()
-    
+
+    # Start background timer for time-based aggregation
+    aggregation_timer_task = asyncio.create_task(_aggregation_timer())
+
     yield
-    
+
+    aggregation_timer_task.cancel()
     if fl_server:
         fl_server.stop_experiment()
+
+
+async def _aggregation_timer():
+    """Background task: check all groups for time-based aggregation trigger."""
+    while True:
+        await asyncio.sleep(5)  # check every 5 seconds
+        if not fl_server:
+            continue
+        for group_id, group in list(fl_server.group_manager.groups.items()):
+            if len(group.pending_updates) == 0:
+                continue
+            elapsed = time.time() - group.last_aggregation_time
+            if elapsed >= group.window_config.time_limit:
+                agg_result = fl_server.group_manager.aggregate_group(group_id)
+                if agg_result:
+                    await fl_server.group_manager.broadcast_to_group(group_id, {
+                        'type': 'model_update',
+                        'version': agg_result['version'],
+                        'group_id': group_id,
+                        'accuracy': agg_result.get('accuracy', 0),
+                        'loss': agg_result.get('loss', 0)
+                    })
 
 
 app = FastAPI(title="Federated Learning API", lifespan=lifespan)
@@ -1238,22 +1279,17 @@ async def get_group(group_id: str):
 
 @app.post("/api/groups/{group_id}/start")
 async def start_group_training(group_id: str):
-    """Start training for a group and trigger first round."""
+    """Start training for a group - clients train independently."""
     success = fl_server.group_manager.start_group_training(group_id)
     if not success:
         raise HTTPException(status_code=400, detail="Cannot start training")
-    
-    # Trigger first training round immediately
-    await fl_server.group_manager.trigger_clients_training(group_id)
-    
-    return {"status": "started", "group_id": group_id, "triggered": True}
+
+    # Notify all clients that training is now open - they train autonomously
+    await fl_server.group_manager.notify_training_started(group_id)
+
+    return {"status": "started", "group_id": group_id}
 
 
-@app.post("/api/groups/{group_id}/trigger")
-async def trigger_training(group_id: str):
-    """Trigger training round - tells all clients to train."""
-    await fl_server.group_manager.trigger_clients_training(group_id)
-    return {"status": "triggered", "group_id": group_id}
 
 
 @app.post("/api/groups/{group_id}/pause")
@@ -1262,6 +1298,7 @@ async def pause_group_training(group_id: str):
     success = fl_server.group_manager.pause_group_training(group_id)
     if not success:
         raise HTTPException(status_code=400, detail="Cannot pause training")
+    await fl_server.group_manager.notify_training_paused(group_id)
     return {"status": "paused", "group_id": group_id}
 
 
@@ -1271,6 +1308,7 @@ async def resume_group_training(group_id: str):
     success = fl_server.group_manager.resume_group_training(group_id)
     if not success:
         raise HTTPException(status_code=400, detail="Cannot resume training")
+    await fl_server.group_manager.notify_training_started(group_id)
     return {"status": "resumed", "group_id": group_id}
 
 
@@ -1280,6 +1318,7 @@ async def stop_group_training(group_id: str):
     success = fl_server.group_manager.stop_group_training(group_id)
     if not success:
         raise HTTPException(status_code=400, detail="Cannot stop training")
+    await fl_server.group_manager.notify_training_stopped(group_id)
     return {"status": "stopped", "group_id": group_id}
 
 
@@ -1306,9 +1345,9 @@ async def list_clients():
 
 
 @app.get("/api/logs")
-async def get_logs(limit: int = 100, event_type: str = None):
+async def get_logs(limit: int = 100, event_type: str = None, group_id: str = None):
     """Get server event logs."""
-    logs = fl_server.group_manager.get_logs(limit, event_type)
+    logs = fl_server.group_manager.get_logs(limit, event_type, group_id)
     return {"logs": logs, "count": len(logs)}
 
 
@@ -1382,18 +1421,13 @@ async def websocket_endpoint(websocket: WebSocket):
                         })
             
             elif message.get('type') == 'update':
-                # Check if group is training
                 client_id = message.get('update', {}).get('client_id')
                 group = fl_server.group_manager.get_client_group(client_id)
-                
+
                 if not group:
                     await websocket.send_json({'status': 'rejected', 'reason': 'group_not_found'})
                     continue
-                
-                if not group.is_training:
-                    await websocket.send_json({'status': 'rejected', 'reason': 'training_not_started'})
-                    continue
-                
+
                 # Process update through group manager
                 update_result = fl_server.group_manager.process_client_update(client_id, message.get('update', {}))
                 
@@ -1417,12 +1451,6 @@ async def websocket_endpoint(websocket: WebSocket):
                             'accuracy': agg_result.get('accuracy', 0),
                             'loss': agg_result.get('loss', 0)
                         })
-                        
-                        # Auto-trigger next round if still training
-                        if group.is_training:
-                            asyncio.create_task(
-                                fl_server.group_manager.trigger_clients_training(group.group_id)
-                            )
                 
                 await websocket.send_json({
                     'status': 'accepted',

@@ -3,9 +3,9 @@
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useAuth } from '@/components/AuthContext';
-import { 
-  Layers, ArrowLeft, Play, Pause, Square, Clock, Users, 
-  Shield, Activity, Zap, TrendingUp
+import {
+  Layers, ArrowLeft, Play, Pause, Square, Clock, Users,
+  Shield, Activity, Zap, TrendingUp, ScrollText, RefreshCw
 } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
@@ -43,29 +43,49 @@ interface Client {
   updates_count: number;
 }
 
+interface Log {
+  timestamp: number;
+  type: string;
+  message: string;
+  group_id: string | null;
+  details: Record<string, any>;
+}
+
 export default function GroupDetailPage() {
   const { id } = useParams();
   const { token, user } = useAuth();
   const router = useRouter();
   const [group, setGroup] = useState<Group | null>(null);
   const [clients, setClients] = useState<Client[]>([]);
+  const [logs, setLogs] = useState<Log[]>([]);
+  const [logFilter, setLogFilter] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('overview');
 
   const fetchData = async () => {
     try {
-      const [groupRes, clientsRes] = await Promise.all([
+      const logsUrl = logFilter
+        ? `${API_URL}/api/logs?group_id=${id}&event_type=${logFilter}`
+        : `${API_URL}/api/logs?group_id=${id}`;
+
+      const [groupRes, clientsRes, logsRes] = await Promise.all([
         fetch(`${API_URL}/api/groups/${id}`, { headers: { 'Authorization': `Bearer ${token}` } }),
-        fetch(`${API_URL}/api/clients`, { headers: { 'Authorization': `Bearer ${token}` } })
+        fetch(`${API_URL}/api/clients`, { headers: { 'Authorization': `Bearer ${token}` } }),
+        fetch(logsUrl, { headers: { 'Authorization': `Bearer ${token}` } })
       ]);
-      
+
       if (groupRes.ok) {
         const groupData = await groupRes.json();
         setGroup(groupData.group);
       }
-      
+
       if (clientsRes.ok) {
         const clientsData = await clientsRes.json();
         setClients((clientsData.clients || []).filter((c: Client) => c.group_id === id));
+      }
+
+      if (logsRes.ok) {
+        const logsData = await logsRes.json();
+        setLogs(logsData.logs || []);
       }
     } catch (e) {
       console.error('Failed to fetch data:', e);
@@ -76,7 +96,7 @@ export default function GroupDetailPage() {
     fetchData();
     const interval = setInterval(fetchData, 2000);
     return () => clearInterval(interval);
-  }, [id, token]);
+  }, [id, token, logFilter]);
 
   const controlGroup = async (action: 'start' | 'pause' | 'resume' | 'stop') => {
     try {
@@ -152,7 +172,7 @@ export default function GroupDetailPage() {
       </div>
 
       <div className="flex gap-2 border-b border-gray-800">
-        {['overview', 'participants', 'privacy'].map((tab) => (
+        {['overview', 'participants', 'logs', 'privacy'].map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -304,6 +324,85 @@ export default function GroupDetailPage() {
                 ))}
               </tbody>
             </table>
+          )}
+        </div>
+      )}
+
+      {activeTab === 'logs' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <ScrollText size={18} className="text-gray-400" />
+              <span className="text-gray-400 text-sm">{logs.length} events</span>
+            </div>
+            <div className="flex gap-3">
+              <select
+                value={logFilter || ''}
+                onChange={(e) => setLogFilter(e.target.value || null)}
+                className="bg-gray-900 border border-gray-800 rounded-lg px-3 py-1.5 text-sm text-white"
+              >
+                <option value="">All Events</option>
+                <option value="client_joined">Client Joined</option>
+                <option value="client_update">Client Update</option>
+                <option value="aggregation">Aggregation</option>
+                <option value="training_started">Training Started</option>
+                <option value="training_started_notify">Training Notify</option>
+              </select>
+              <button onClick={fetchData} className="p-1.5 bg-gray-800 hover:bg-gray-700 rounded-lg transition">
+                <RefreshCw size={16} className="text-gray-400" />
+              </button>
+            </div>
+          </div>
+
+          {logs.length === 0 ? (
+            <div className="bg-gray-900 border border-gray-800 rounded-xl p-12 text-center">
+              <Clock size={48} className="mx-auto text-gray-600 mb-4" />
+              <h3 className="text-white font-semibold mb-2">No logs yet</h3>
+              <p className="text-gray-400">Events will appear here as clients train and push updates</p>
+            </div>
+          ) : (
+            <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+              <div className="max-h-[500px] overflow-y-auto">
+                {logs.map((log, idx) => {
+                  const typeColor: Record<string, string> = {
+                    training_started: 'text-green-400',
+                    training_started_notify: 'text-green-400',
+                    aggregation: 'text-blue-400',
+                    client_joined: 'text-purple-400',
+                    client_update: 'text-yellow-400',
+                    client_rejected: 'text-red-400',
+                  };
+                  const typeBg: Record<string, string> = {
+                    training_started: 'bg-green-900/20 border-green-900/40',
+                    training_started_notify: 'bg-green-900/20 border-green-900/40',
+                    aggregation: 'bg-blue-900/20 border-blue-900/40',
+                    client_joined: 'bg-purple-900/20 border-purple-900/40',
+                    client_update: 'bg-yellow-900/20 border-yellow-900/40',
+                    client_rejected: 'bg-red-900/20 border-red-900/40',
+                  };
+                  return (
+                    <div key={idx} className={`p-3 border-b border-gray-800 ${typeBg[log.type] || 'bg-gray-900/20 border-gray-800'}`}>
+                      <div className="flex items-start gap-3">
+                        <span className="text-gray-500 text-xs font-mono min-w-[70px] pt-0.5">
+                          {new Date(log.timestamp * 1000).toLocaleTimeString()}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <span className={`text-xs font-medium uppercase ${typeColor[log.type] || 'text-gray-400'}`}>
+                            {log.type.replace(/_/g, ' ')}
+                          </span>
+                          <p className="text-white text-sm mt-0.5">{log.message}</p>
+                          {log.details && Object.keys(log.details).length > 0 && (
+                            <pre className="text-gray-500 text-xs mt-1 font-mono truncate">
+                              {JSON.stringify(log.details)}
+                            </pre>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           )}
         </div>
       )}

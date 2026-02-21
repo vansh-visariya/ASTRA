@@ -44,10 +44,12 @@ from core_engine.utils.seed import set_seed
 class FederatedClient:
     """
     Distributed Federated Learning Client.
-    
-    Connects to central server, trains locally, and sends updates.
+
+    Connects to central server, trains locally on its own schedule, and pushes updates.
+    Training is client-initiated: the client autonomously decides when to train
+    rather than waiting for admin commands.
     """
-    
+
     def __init__(
         self,
         server_url: str,
@@ -57,17 +59,17 @@ class FederatedClient:
         self.server_url = server_url.rstrip('/')
         self.client_id = client_id or f"client_{uuid.uuid4().hex[:8]}"
         self.config = config
-        
+
         self.ws: Optional[websockets.WebSocketClientProtocol] = None
         self.is_connected = False
         self.is_training = False
-        
+
         self.local_client: Optional[LocalClient] = None
         self.current_global_version = 0
-        
+
         self.logger = logging.getLogger(__name__)
         self._setup_logging()
-    
+
     def _setup_logging(self):
         """Setup client logging."""
         logging.basicConfig(
@@ -138,20 +140,33 @@ class FederatedClient:
     async def _handle_message(self, message: Dict[str, Any]):
         """Handle incoming WebSocket messages."""
         msg_type = message.get('type')
-        
+
         if msg_type == 'model_update':
-            # Server pushing new global model
+            # Server sent new aggregated model - update and train again
             await self._download_model(message)
-        
-        elif msg_type == 'train_command':
-            # Server requesting local training
+            self.logger.info("Received aggregated model, training next round...")
             await self._run_training()
-        
+
+        elif msg_type == 'training_started':
+            # Server notifies training is open
+            if message.get('config'):
+                self.config.update({'client': {**self.config.get('client', {}), **message['config']}})
+            self.logger.info("Training opened by server")
+
+        elif msg_type == 'training_paused':
+            self.logger.info("Training paused by server")
+
+        elif msg_type == 'training_stopped':
+            self.logger.info("Training stopped by server")
+
+        elif msg_type == 'train_command':
+            # Legacy: still handle direct train commands for backward compat
+            await self._run_training()
+
         elif msg_type == 'config_update':
-            # Server updating client config
             self.config.update(message.get('config', {}))
             self.logger.info("Config updated")
-        
+
         elif msg_type == 'ping':
             await self.ws.send(json.dumps({'type': 'pong'}))
     
@@ -219,9 +234,31 @@ class FederatedClient:
         if not connected:
             self.logger.error("Failed to connect to server")
             return
-        
-        # Listen for commands
+
+        # Train once immediately, push update to server
+        await self._run_training()
+
+        # Then listen: server will send model_update after aggregation,
+        # which triggers the next training round automatically
         await self.listen()
+
+    async def _check_group_status(self):
+        """Check if the group is already in TRAINING state and start loop if so."""
+        try:
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                group_id = getattr(self, 'group_id', 'group_a')
+                url = f"{self.server_url}/api/groups/{group_id}"
+                async with session.get(url) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        group = data.get('group', {})
+                        if group.get('is_training'):
+                            self.training_allowed = True
+                            self.logger.info("Group already training - starting autonomous training")
+                            self._start_training_loop()
+        except Exception as e:
+            self.logger.debug(f"Could not check group status: {e}")
 
 
 class RESTClient:
@@ -295,7 +332,7 @@ def main():
     # Training config
     parser.add_argument('--config', type=str, default='config.yaml',
                         help='Config file path')
-    
+
     # Mode
     parser.add_argument('--mode', choices=['websocket', 'rest'], default='websocket',
                         help='Connection mode')
