@@ -167,11 +167,6 @@ export default function GroupsPage() {
                   </td>
                   <td className="p-4">
                     <div className="flex items-center justify-end gap-2">
-                      {!group.is_training && group.status !== 'COMPLETED' && user?.role === 'coordinator' && (
-                        <button onClick={() => controlGroup(group.group_id, 'start')} className="p-2 bg-green-600 hover:bg-green-700 rounded-lg transition" title="Start">
-                          <Play size={14} className="text-white" />
-                        </button>
-                      )}
                       {group.is_training && user?.role === 'coordinator' && (
                         <>
                           <button onClick={() => controlGroup(group.group_id, 'pause')} className="p-2 bg-yellow-600 hover:bg-yellow-700 rounded-lg transition" title="Pause">
@@ -186,6 +181,9 @@ export default function GroupsPage() {
                         <button onClick={() => controlGroup(group.group_id, 'resume')} className="p-2 bg-green-600 hover:bg-green-700 rounded-lg transition" title="Resume">
                           <Play size={14} className="text-white" />
                         </button>
+                      )}
+                      {!group.is_training && group.status !== 'COMPLETED' && group.status !== 'PAUSED' && (
+                        <span className="text-xs text-gray-500 italic mr-2">Auto-starts</span>
                       )}
                       <button onClick={() => router.push(`/dashboard/groups/${group.group_id}`)} className="p-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition" title="View Details">
                         <Layers size={14} className="text-white" />
