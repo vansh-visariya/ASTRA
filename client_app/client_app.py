@@ -85,10 +85,19 @@ class FederatedClient:
                 ping_timeout=10
             )
             
+            # Build data metadata
+            data_metadata = {
+                'modality': getattr(self, 'data_modality', 'vision'),
+                'samples': getattr(self, 'data_samples', None),
+            }
+            
             # Register with server
             await self.ws.send(json.dumps({
                 'type': 'register',
                 'client_id': self.client_id,
+                'group_id': getattr(self, 'group_id', 'group_a'),
+                'join_token': getattr(self, 'join_token', None),
+                'data_metadata': data_metadata,
                 'capabilities': {
                     'has_gpu': torch.cuda.is_available(),
                     'device': 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -100,9 +109,10 @@ class FederatedClient:
             
             if data.get('status') == 'registered':
                 self.is_connected = True
-                self.logger.info(f"Connected to server as {self.client_id}")
+                self.logger.info(f"Connected to server as {self.client_id} in group {data.get('group_id')}")
                 return True
             
+            self.logger.error(f"Registration failed: {data.get('reason', 'unknown')}")
             return False
         
         except Exception as e:
@@ -265,6 +275,19 @@ def main():
     parser.add_argument('--client-id', type=str, default=None,
                         help='Client ID (auto-generated if not provided)')
     
+    # Group authentication
+    parser.add_argument('--group-id', type=str, default='group_a',
+                        help='Group ID to join')
+    parser.add_argument('--join-token', type=str, default=None,
+                        help='Join token for group authentication')
+    
+    # Data metadata
+    parser.add_argument('--data-modality', type=str, default='vision',
+                        choices=['vision', 'text', 'multimodal'],
+                        help='Data modality (vision/text/multimodal)')
+    parser.add_argument('--data-samples', type=int, default=None,
+                        help='Number of data samples')
+    
     # Authentication
     parser.add_argument('--token', type=str, default=None,
                         help='Authentication token')
@@ -294,6 +317,11 @@ def main():
             client_id=args.client_id,
             config=config
         )
+        # Set additional attributes
+        client.group_id = args.group_id
+        client.join_token = args.join_token
+        client.data_modality = args.data_modality
+        client.data_samples = args.data_samples
         
         # Run client
         asyncio.run(client.run())

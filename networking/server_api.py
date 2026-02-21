@@ -5,6 +5,7 @@ Provides:
 - REST API for training control
 - WebSocket for live updates
 - Client registration and management
+- Group-based training with hybrid async windowing
 - Experiment tracking with SQLite
 """
 
@@ -21,10 +22,12 @@ import logging
 import sqlite3
 import time
 import uuid
+import threading
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from dataclasses import dataclass, field
 
 import numpy as np
 import torch
@@ -38,6 +41,368 @@ from core_engine.data_splitter import DataSplitter
 from core_engine.server import AsyncServer
 from core_engine.utils.seed import set_seed
 from model_registry.registry import get_registry
+
+
+# ============================================================================
+# Hybrid Async Window Configuration
+# ============================================================================
+
+@dataclass
+class AsyncWindowConfig:
+    """Configuration for hybrid async windowing."""
+    window_size: int = 3  # Aggregate when N updates received
+    time_limit: float = 20.0  # OR after T seconds elapsed
+    enabled: bool = True
+
+
+# ============================================================================
+# Training Group Management
+# ============================================================================
+
+@dataclass
+class TrainingGroup:
+    """Represents a federated learning training group."""
+    group_id: str
+    model_id: str
+    config: Dict[str, Any]
+    window_config: AsyncWindowConfig = field(default_factory=AsyncWindowConfig)
+    
+    # Security - join token (secret)
+    join_token: str = field(default_factory=lambda: uuid.uuid4().hex[:16])
+    
+    # Model state
+    model_version: int = 0
+    model: Any = None
+    
+    # Update buffer for hybrid windowing
+    pending_updates: List[Dict] = field(default_factory=list)
+    last_aggregation_time: float = field(default_factory=time.time)
+    
+    # Client tracking
+    clients: Dict[str, Dict] = field(default_factory=dict)
+    
+    # Aggregator
+    aggregator: Any = None
+    
+    # Status
+    status: str = 'CREATED'  # CREATED, WAITING, READY, TRAINING, PAUSED, COMPLETED, FAILED
+    is_training: bool = False
+    is_locked: bool = False  # Lock config when training starts
+    created_at: str = field(default_factory=lambda: datetime.now().isoformat())
+    
+    # Metrics
+    metrics_history: List[Dict] = field(default_factory=list)
+    
+    def add_client(self, client_id: str, client_info: Dict = None) -> None:
+        if client_id not in self.clients:
+            self.clients[client_id] = {
+                'status': 'active',
+                'joined_at': datetime.now().isoformat(),
+                'last_update': None,
+                'trust_score': 1.0,
+                'updates_count': 0,
+                'local_accuracy': 0.0,
+                'local_loss': 0.0,
+                'gradient_norm': 0.0,
+                **(client_info or {})
+            }
+    
+    def remove_client(self, client_id: str) -> None:
+        if client_id in self.clients:
+            self.clients[client_id]['status'] = 'disconnected'
+    
+    def add_update(self, client_id: str, update: Dict) -> bool:
+        """Add client update to buffer. Returns True if aggregation triggered."""
+        if client_id in self.clients:
+            self.clients[client_id]['last_update'] = time.time()
+            self.clients[client_id]['updates_count'] += 1
+            self.clients[client_id]['local_accuracy'] = update.get('meta', {}).get('train_accuracy', 0)
+            self.clients[client_id]['local_loss'] = update.get('meta', {}).get('train_loss', 0)
+            self.clients[client_id]['gradient_norm'] = update.get('meta', {}).get('gradient_norm', 0)
+        
+        self.pending_updates.append({
+            'client_id': client_id,
+            'update': update,
+            'timestamp': time.time()
+        })
+        
+        # Check hybrid triggers
+        size_triggered = len(self.pending_updates) >= self.window_config.window_size
+        time_triggered = (time.time() - self.last_aggregation_time) >= self.window_config.time_limit
+        
+        return size_triggered or time_triggered
+    
+    def get_window_status(self) -> Dict:
+        """Get current window status for UI."""
+        elapsed = time.time() - self.last_aggregation_time
+        return {
+            'pending_updates': len(self.pending_updates),
+            'window_size': self.window_config.window_size,
+            'time_elapsed': round(elapsed, 1),
+            'time_limit': self.window_config.time_limit,
+            'time_remaining': max(0, self.window_config.time_limit - elapsed),
+            'size_triggered': len(self.pending_updates) >= self.window_config.window_size,
+            'time_triggered': elapsed >= self.window_config.time_limit,
+            'trigger_reason': 'size' if len(self.pending_updates) >= self.window_config.window_size else ('time' if elapsed >= self.window_config.time_limit else 'waiting')
+        }
+    
+    def clear_updates(self) -> None:
+        """Clear buffer after aggregation."""
+        self.pending_updates.clear()
+        self.last_aggregation_time = time.time()
+    
+    def get_active_clients(self) -> List[str]:
+        return [cid for cid, info in self.clients.items() if info.get('status') == 'active']
+    
+    def to_dict(self, include_secret: bool = False) -> Dict:
+        return {
+            'group_id': self.group_id,
+            'model_id': self.model_id,
+            'model_version': self.model_version,
+            'status': self.status,
+            'is_training': self.is_training,
+            'is_locked': self.is_locked,
+            'created_at': self.created_at,
+            'join_token': self.join_token if include_secret else '***HIDDEN***',
+            'config': {
+                'local_epochs': self.config.get('local_epochs', 2),
+                'batch_size': self.config.get('batch_size', 32),
+                'lr': self.config.get('lr', 0.01),
+                'aggregator': self.config.get('aggregator', 'fedavg'),
+                'dp_enabled': self.config.get('dp_enabled', False),
+            },
+            'window_config': {
+                'window_size': self.window_config.window_size,
+                'time_limit': self.window_config.time_limit,
+                'enabled': self.window_config.enabled
+            },
+            'window_status': self.get_window_status(),
+            'client_count': len(self.clients),
+            'active_clients': self.get_active_clients(),
+            'pending_updates': len(self.pending_updates),
+            'metrics_history': self.metrics_history[-10:]  # Last 10 entries
+        }
+
+
+class GroupManager:
+    """Manages multiple training groups with hybrid async windowing."""
+    
+    def __init__(self, config: Dict[str, Any]):
+        self.config = config
+        self.groups: Dict[str, TrainingGroup] = {}
+        self.client_to_group: Dict[str, str] = {}
+        self.lock = threading.RLock()
+        self.logger = logging.getLogger(__name__)
+        
+        self._init_default_groups()
+    
+    def _init_default_groups(self):
+        """Initialize default groups from config."""
+        default_groups = self.config.get('groups', [
+            {
+                'group_id': 'default',
+                'model_id': 'simple_cnn_mnist',
+                'window_size': 3,
+                'time_limit': 20.0
+            }
+        ])
+        
+        for g in default_groups:
+            self.create_group(
+                group_id=g['group_id'],
+                model_id=g.get('model_id', 'simple_cnn_mnist'),
+                config=g.get('config', {}),
+                window_size=g.get('window_size', 3),
+                time_limit=g.get('time_limit', 20.0)
+            )
+    
+    def create_group(
+        self,
+        group_id: str,
+        model_id: str,
+        config: Dict[str, Any],
+        window_size: int = 3,
+        time_limit: float = 20.0
+    ) -> TrainingGroup:
+        """Create a new training group."""
+        with self.lock:
+            if group_id in self.groups:
+                return self.groups[group_id]
+            
+            # Generate or use provided join token
+            join_token = config.get('join_token') if config else None
+            if not join_token or join_token == "GENERATE_NEW":
+                join_token = uuid.uuid4().hex[:16]
+            
+            # Create aggregator for this group
+            aggregator = create_aggregator(config or {})
+            
+            group = TrainingGroup(
+                group_id=group_id,
+                model_id=model_id,
+                config=config,
+                join_token=join_token,
+                window_config=AsyncWindowConfig(
+                    window_size=window_size,
+                    time_limit=time_limit
+                ),
+                aggregator=aggregator
+            )
+            
+            self.groups[group_id] = group
+            self.logger.info(f"Created group: {group_id}")
+            
+            return group
+    
+    def delete_group(self, group_id: str) -> bool:
+        with self.lock:
+            if group_id not in self.groups:
+                return False
+            
+            for client_id, g_id in list(self.client_to_group.items()):
+                if g_id == group_id:
+                    del self.client_to_group[client_id]
+            
+            del self.groups[group_id]
+            return True
+    
+    def register_client(self, client_id: str, group_id: str, client_info: Dict = None) -> bool:
+        """Register client to a group."""
+        with self.lock:
+            if group_id not in self.groups:
+                return False
+            
+            # Check if already in another group
+            if client_id in self.client_to_group:
+                current = self.client_to_group[client_id]
+                if current != group_id:
+                    return False  # No migration allowed
+            
+            group = self.groups[group_id]
+            group.add_client(client_id, client_info)
+            self.client_to_group[client_id] = group_id
+            
+            return True
+    
+    def get_client_group(self, client_id: str) -> Optional[TrainingGroup]:
+        group_id = self.client_to_group.get(client_id)
+        return self.groups.get(group_id) if group_id else None
+    
+    def add_client_update(self, client_id: str, update: Dict) -> Optional[Dict]:
+        """Add update and check if aggregation triggered (hybrid windowing)."""
+        with self.lock:
+            group = self.get_client_group(client_id)
+            if not group:
+                return None
+            
+            triggered = group.add_update(client_id, update)
+            
+            result = {
+                'group_id': group.group_id,
+                'triggered': triggered,
+                'window_status': group.get_window_status()
+            }
+            
+            if triggered:
+                result['aggregate'] = True
+            
+            return result
+    
+    def aggregate_group(self, group_id: str) -> Optional[Dict]:
+        """Aggregate updates in a group's buffer."""
+        with self.lock:
+            if group_id not in self.groups:
+                return None
+            
+            group = self.groups[group_id]
+            
+            if len(group.pending_updates) == 0:
+                return None
+            
+            # Get all updates
+            updates = [u['update'] for u in group.pending_updates]
+            client_ids = [u['client_id'] for u in group.pending_updates]
+            
+            # Aggregate
+            if group.aggregator:
+                aggregated = group.aggregator.aggregate(updates)
+            else:
+                aggregated = np.mean([np.array(u) for u in updates], axis=0)
+            
+            # Update version
+            group.model_version += 1
+            group.clear_updates()
+            
+            self.logger.info(
+                f"Aggregated group {group_id}: {len(updates)} clients, version {group.model_version}"
+            )
+            
+            return {
+                'group_id': group_id,
+                'version': group.model_version,
+                'contributing_clients': client_ids,
+                'update_count': len(updates),
+                'aggregated_model': aggregated
+            }
+    
+    def get_all_groups(self, include_secret: bool = False) -> List[Dict]:
+        with self.lock:
+            return [g.to_dict(include_secret) for g in self.groups.values()]
+    
+    def start_group_training(self, group_id: str) -> bool:
+        """Start training for a group."""
+        with self.lock:
+            if group_id not in self.groups:
+                return False
+            group = self.groups[group_id]
+            if group.is_locked:
+                return False
+            
+            group.is_locked = True
+            group.is_training = True
+            group.status = 'TRAINING'
+            return True
+    
+    def pause_group_training(self, group_id: str) -> bool:
+        """Pause training for a group."""
+        with self.lock:
+            if group_id not in self.groups:
+                return False
+            group = self.groups[group_id]
+            group.is_training = False
+            group.status = 'PAUSED'
+            return True
+    
+    def resume_group_training(self, group_id: str) -> bool:
+        """Resume training for a group."""
+        with self.lock:
+            if group_id not in self.groups:
+                return False
+            group = self.groups[group_id]
+            group.is_training = True
+            group.status = 'TRAINING'
+            return True
+    
+    def stop_group_training(self, group_id: str) -> bool:
+        """Stop training for a group."""
+        with self.lock:
+            if group_id not in self.groups:
+                return False
+            group = self.groups[group_id]
+            group.is_training = False
+            group.status = 'COMPLETED'
+            return True
+    
+    def get_all_client_status(self) -> List[Dict]:
+        clients = []
+        for group_id, group in self.groups.items():
+            for client_id, info in group.clients.items():
+                clients.append({
+                    'client_id': client_id,
+                    'group_id': group_id,
+                    **info
+                })
+        return clients
 
 
 # ============================================================================
@@ -254,6 +619,7 @@ class FLServer:
         self.config = config
         self.connection_manager = ConnectionManager()
         self.db = ExperimentDB()
+        self.group_manager = GroupManager(config)
         
         self.server: Optional[AsyncServer] = None
         self.model_registry = get_registry()
@@ -568,6 +934,115 @@ async def get_server_status():
     }
 
 
+@app.get("/api/groups")
+async def list_groups():
+    """List all training groups with their async window status."""
+    include_secret = True  # DEBUG: always show tokens
+    groups = fl_server.group_manager.get_all_groups(include_secret)
+    return {"groups": groups, "count": len(groups)}
+
+
+@app.post("/api/groups")
+async def create_group(group_data: Dict):
+    """Create a new training group."""
+    group_id = group_data.get('group_id')
+    model_id = group_data.get('model_id', 'simple_cnn_mnist')
+    window_size = group_data.get('window_size', 3)
+    time_limit = group_data.get('time_limit', 20.0)
+    custom_token = group_data.get('join_token')
+    
+    # Build config with training parameters
+    config = {
+        'join_token': custom_token if custom_token else "GENERATE_NEW",
+        'local_epochs': group_data.get('local_epochs', 2),
+        'batch_size': group_data.get('batch_size', 32),
+        'lr': group_data.get('lr', 0.01),
+        'aggregator': group_data.get('aggregator', 'fedavg'),
+        'dp_enabled': group_data.get('dp_enabled', False),
+    }
+    
+    group = fl_server.group_manager.create_group(
+        group_id=group_id,
+        model_id=model_id,
+        config=config,
+        window_size=window_size,
+        time_limit=time_limit
+    )
+    
+    # Debug: return raw token directly
+    result = group.to_dict(include_secret=True)
+    result['debug_token'] = group.join_token
+    
+    return {"status": "created", "group": result}
+
+
+@app.get("/api/groups/{group_id}")
+async def get_group(group_id: str):
+    """Get specific group details (admin view with token)."""
+    group = fl_server.group_manager.groups.get(group_id)
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+    return {"group": group.to_dict(include_secret=True)}
+
+
+@app.post("/api/groups/{group_id}/start")
+async def start_group_training(group_id: str):
+    """Start training for a group."""
+    success = fl_server.group_manager.start_group_training(group_id)
+    if not success:
+        raise HTTPException(status_code=400, detail="Cannot start training")
+    return {"status": "started", "group_id": group_id}
+
+
+@app.post("/api/groups/{group_id}/pause")
+async def pause_group_training(group_id: str):
+    """Pause training for a group."""
+    success = fl_server.group_manager.pause_group_training(group_id)
+    if not success:
+        raise HTTPException(status_code=400, detail="Cannot pause training")
+    return {"status": "paused", "group_id": group_id}
+
+
+@app.post("/api/groups/{group_id}/resume")
+async def resume_group_training(group_id: str):
+    """Resume training for a group."""
+    success = fl_server.group_manager.resume_group_training(group_id)
+    if not success:
+        raise HTTPException(status_code=400, detail="Cannot resume training")
+    return {"status": "resumed", "group_id": group_id}
+
+
+@app.post("/api/groups/{group_id}/stop")
+async def stop_group_training(group_id: str):
+    """Stop training for a group."""
+    success = fl_server.group_manager.stop_group_training(group_id)
+    if not success:
+        raise HTTPException(status_code=400, detail="Cannot stop training")
+    return {"status": "stopped", "group_id": group_id}
+
+
+@app.get("/api/groups/{group_id}/window-status")
+async def get_group_window_status(group_id: str):
+    """Get async window status for a group."""
+    group = fl_server.group_manager.groups.get(group_id)
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+    return {
+        "group_id": group_id,
+        "status": group.status,
+        "is_training": group.is_training,
+        "model_version": group.model_version,
+        "window_status": group.get_window_status()
+    }
+
+
+@app.get("/api/clients")
+async def list_clients():
+    """List connected clients."""
+    clients = fl_server.group_manager.get_all_client_status()
+    return {"clients": clients, "count": len(clients)}
+
+
 # ============================================================================
 # WebSocket Endpoint
 # ============================================================================
@@ -583,13 +1058,60 @@ async def websocket_endpoint(websocket: WebSocket):
             message = json.loads(data)
             
             if message.get('type') == 'register':
-                await fl_server.handle_client_register(
-                    message['client_id'],
-                    message.get('capabilities', {})
-                )
+                client_id = message.get('client_id')
+                group_id = message.get('group_id', 'default')
+                join_token = message.get('join_token')
+                data_metadata = message.get('data_metadata', {})
+                capabilities = message.get('capabilities', {})
+                
+                # Validate group and token
+                group = fl_server.group_manager.groups.get(group_id)
+                if not group:
+                    await websocket.send_json({
+                        'status': 'rejected',
+                        'reason': 'group_not_found'
+                    })
+                elif group.is_locked and not fl_server.group_manager.client_to_group.get(client_id):
+                    await websocket.send_json({
+                        'status': 'rejected',
+                        'reason': 'group_locked'
+                    })
+                elif join_token != group.config.get('join_token'):
+                    await websocket.send_json({
+                        'status': 'rejected',
+                        'reason': 'invalid_token'
+                    })
+                else:
+                    # Register client
+                    success = fl_server.group_manager.register_client(
+                        client_id=client_id,
+                        group_id=group_id,
+                        client_info={
+                            **capabilities,
+                            'data_metadata': data_metadata,
+                            'connection': 'websocket'
+                        }
+                    )
+                    if success:
+                        await websocket.send_json({
+                            'status': 'registered',
+                            'client_id': client_id,
+                            'group_id': group_id,
+                            'model_id': group.model_id
+                        })
+                    else:
+                        await websocket.send_json({
+                            'status': 'rejected',
+                            'reason': 'registration_failed'
+                        })
             
             elif message.get('type') == 'update':
-                update = ClientUpdate(**message['update'])
+                if not fl_server.is_running:
+                    await websocket.send_json({'status': 'rejected', 'reason': 'server_not_running'})
+                    continue
+                    
+                update_data = message.get('update', {})
+                update = ClientUpdate(**update_data)
                 result = await fl_server.handle_client_update(update)
                 await websocket.send_json(result)
     

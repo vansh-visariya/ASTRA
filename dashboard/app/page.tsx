@@ -1,215 +1,383 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area } from 'recharts';
-import { Activity, Users, Shield, Lock, Database, Play, Pause, Square, Settings, Brain, Wifi, Gauge, Layers, Zap } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area, BarChart, Bar } from 'recharts';
+import { Activity, Users, Shield, Lock, Database, Play, Pause, Square, Settings, Brain, Wifi, Gauge, Layers, Zap, Plus, Trash2, Eye, EyeOff, RefreshCw, Clock, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
-const mockMetrics = Array.from({ length: 20 }, (_, i) => ({
-  step: i * 10,
-  accuracy: 0.1 + (i / 20) * 0.75 + Math.random() * 0.05,
-  loss: 2.5 - (i / 20) * 1.8 + Math.random() * 0.1,
-}));
+interface Group {
+  group_id: string;
+  model_id: string;
+  status: string;
+  is_training: boolean;
+  is_locked: boolean;
+  join_token: string;
+  window_config: { window_size: number; time_limit: number };
+  window_status: { pending_updates: number; window_size: number; time_elapsed: number; time_limit: number; time_remaining: number; trigger_reason: string };
+  client_count: number;
+  model_version: number;
+  active_clients: string[];
+  metrics_history: any[];
+}
 
-const mockClients = [
-  { id: 'client_001', status: 'active', trust: 0.98, latency: 45, accuracy: 0.89, gradient: 0.23 },
-  { id: 'client_002', status: 'active', trust: 0.95, latency: 52, accuracy: 0.87, gradient: 0.31 },
-  { id: 'client_003', status: 'active', trust: 0.72, latency: 120, accuracy: 0.76, gradient: 0.89 },
-  { id: 'client_004', status: 'slow', trust: 0.68, latency: 2500, accuracy: 0.71, gradient: 0.45 },
-  { id: 'client_005', status: 'quarantined', trust: 0.25, latency: 0, accuracy: 0.0, gradient: 5.2 },
-];
-
-const mockModels = [
-  { id: 'simple_cnn_mnist', type: 'Vision', params: '421K', peft: false, status: 'active' },
-  { id: 'clip-vit-base', type: 'MultiModal', params: '151M', peft: true, status: 'available' },
-  { id: 'resnet50', type: 'Vision', params: '25.6M', peft: false, status: 'available' },
-];
+interface Client {
+  client_id: string;
+  group_id: string;
+  status: string;
+  trust_score: number;
+  data_metadata?: { modality: string; samples: number };
+}
 
 export default function Dashboard() {
   const [connected, setConnected] = useState(false);
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [clients, setClients] = useState<Client[]>([]);
   const [serverStatus, setServerStatus] = useState<any>(null);
-  const [metrics] = useState(mockMetrics);
-  const [activeTab, setActiveTab] = useState('overview');
-  const [experimentRunning, setExperimentRunning] = useState(false);
+  const [activeTab, setActiveTab] = useState('groups');
+  const [loading, setLoading] = useState(false);
+  const [showToken, setShowToken] = useState<Record<string, boolean>>({});
+  
+  const [newGroup, setNewGroup] = useState({
+    group_id: '',
+    model_id: 'simple_cnn_mnist',
+    window_size: 3,
+    time_limit: 20,
+    local_epochs: 2,
+    batch_size: 32,
+    lr: 0.01
+  });
 
-  useEffect(() => {
-    const fetchStatus = async () => {
-      try {
-        const res = await fetch(`${API_URL}/api/server/status`);
-        const data = await res.json();
-        setServerStatus(data);
-        setConnected(true);
-      } catch {
-        setConnected(false);
-      }
-    };
-    fetchStatus();
-    const interval = setInterval(fetchStatus, 2000);
-    return () => clearInterval(interval);
+  const fetchData = useCallback(async () => {
+    try {
+      const [groupsRes, clientsRes, statusRes] = await Promise.all([
+        fetch(`${API_URL}/api/groups`).catch(() => ({ json: () => ({ groups: [] }) })),
+        fetch(`${API_URL}/api/clients`).catch(() => ({ json: () => ({ clients: [] }) })),
+        fetch(`${API_URL}/api/server/status`).catch(() => ({ json: () => ({}) }))
+      ]);
+      
+      const groupsData = await groupsRes.json();
+      const clientsData = await clientsRes.json();
+      const statusData = await statusRes.json();
+      
+      setGroups(groupsData.groups || []);
+      setClients(clientsData.clients || []);
+      setServerStatus(statusData);
+      setConnected(true);
+    } catch {
+      setConnected(false);
+    }
   }, []);
 
+  useEffect(() => {
+    fetchData();
+    const interval = setInterval(fetchData, 2000);
+    return () => clearInterval(interval);
+  }, [fetchData]);
+
+  const createGroup = async () => {
+    if (!newGroup.group_id) return;
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/api/groups`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newGroup)
+      });
+      if (res.ok) {
+        setNewGroup({ group_id: '', model_id: 'simple_cnn_mnist', window_size: 3, time_limit: 20 });
+        fetchData();
+      }
+    } catch (e) {
+      console.error('Failed to create group:', e);
+    }
+    setLoading(false);
+  };
+
+  const controlGroup = async (groupId: string, action: 'start' | 'pause' | 'resume' | 'stop') => {
+    setLoading(true);
+    try {
+      await fetch(`${API_URL}/api/groups/${groupId}/${action}`, { method: 'POST' });
+      fetchData();
+    } catch (e) {
+      console.error(`Failed to ${action} group:`, e);
+    }
+    setLoading(false);
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'TRAINING': return 'bg-green-900/50 text-green-400';
+      case 'PAUSED': return 'bg-yellow-900/50 text-yellow-400';
+      case 'COMPLETED': return 'bg-blue-900/50 text-blue-400';
+      case 'FAILED': return 'bg-red-900/50 text-red-400';
+      default: return 'bg-gray-700 text-gray-400';
+    }
+  };
+
+  const getTriggerColor = (trigger: string) => {
+    switch (trigger) {
+      case 'size': return 'bg-blue-900/50 text-blue-400';
+      case 'time': return 'bg-orange-900/50 text-orange-400';
+      default: return 'bg-gray-700 text-gray-400';
+    }
+  };
+
   const tabs = [
-    { id: 'overview', label: 'Overview', icon: Gauge },
+    { id: 'groups', label: 'Groups', icon: Layers },
     { id: 'clients', label: 'Clients', icon: Users },
     { id: 'models', label: 'Models', icon: Brain },
     { id: 'security', label: 'Security', icon: Shield },
     { id: 'settings', label: 'Settings', icon: Settings },
   ];
 
-  const renderOverview = () => (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-      <div className="bg-gray-800 rounded-xl p-5 border border-gray-700">
-        <div className="flex items-center justify-between mb-3">
-          <span className="text-gray-400 text-sm">Status</span>
-          <div className={`w-2 h-2 rounded-full ${experimentRunning ? 'bg-green-500 animate-pulse' : 'bg-yellow-500'}`} />
+  const renderGroups = () => (
+    <div className="space-y-6">
+      <div className="bg-gray-800 border border-gray-700 rounded-xl p-5">
+        <h3 className="font-semibold text-lg mb-4">Create New Group</h3>
+        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-7 gap-4">
+          <input
+            type="text"
+            placeholder="Group ID"
+            value={newGroup.group_id}
+            onChange={(e) => setNewGroup({ ...newGroup, group_id: e.target.value })}
+            className="bg-gray-900 border border-gray-700 rounded-lg p-3"
+          />
+          <select
+            value={newGroup.model_id}
+            onChange={(e) => setNewGroup({ ...newGroup, model_id: e.target.value })}
+            className="bg-gray-900 border border-gray-700 rounded-lg p-3"
+          >
+            <option value="simple_cnn_mnist">CNN (MNIST)</option>
+            <option value="simple_cnn_cifar">CNN (CIFAR)</option>
+            <option value="transformer">Transformer</option>
+          </select>
+          <input
+            type="number"
+            placeholder="Epochs"
+            value={newGroup.local_epochs}
+            onChange={(e) => setNewGroup({ ...newGroup, local_epochs: parseInt(e.target.value) })}
+            className="bg-gray-900 border border-gray-700 rounded-lg p-3"
+          />
+          <input
+            type="number"
+            placeholder="Batch Size"
+            value={newGroup.batch_size}
+            onChange={(e) => setNewGroup({ ...newGroup, batch_size: parseInt(e.target.value) })}
+            className="bg-gray-900 border border-gray-700 rounded-lg p-3"
+          />
+          <input
+            type="number"
+            step="0.001"
+            placeholder="LR"
+            value={newGroup.lr}
+            onChange={(e) => setNewGroup({ ...newGroup, lr: parseFloat(e.target.value) })}
+            className="bg-gray-900 border border-gray-700 rounded-lg p-3"
+          />
+          <input
+            type="number"
+            placeholder="Window"
+            value={newGroup.window_size}
+            onChange={(e) => setNewGroup({ ...newGroup, window_size: parseInt(e.target.value) })}
+            className="bg-gray-900 border border-gray-700 rounded-lg p-3"
+          />
+          <button
+            onClick={createGroup}
+            disabled={loading || !newGroup.group_id}
+            className="px-4 py-3 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 rounded-lg font-medium transition flex items-center justify-center gap-2"
+          >
+            <Plus size={18} /> Create
+          </button>
         </div>
-        <p className="text-2xl font-bold">{experimentRunning ? 'Training' : 'Idle'}</p>
-        <p className="text-gray-500 text-xs mt-1">Round: {serverStatus?.global_version || 0}</p>
       </div>
 
-      <div className="bg-gray-800 rounded-xl p-5 border border-gray-700">
-        <div className="flex items-center justify-between mb-3">
-          <span className="text-gray-400 text-sm">Active Clients</span>
-          <Users size={18} className="text-indigo-400" />
+      {groups.length === 0 ? (
+        <div className="bg-gray-800 border border-gray-700 rounded-xl-center">
+           p-8 text<Layers size={48} className="mx-auto text-gray-600 mb-4" />
+          <p className="text-gray-400">No groups yet. Create one above to get started.</p>
         </div>
-        <p className="text-2xl font-bold">{mockClients.filter(c => c.status === 'active').length}</p>
-        <p className="text-gray-500 text-xs mt-1">Total: {mockClients.length}</p>
-      </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {groups.map((group) => (
+            <div key={group.group_id} className="bg-gray-800 border border-gray-700 rounded-xl p-5">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <Layers size={20} className="text-indigo-400" />
+                  <h4 className="font-semibold text-lg">{group.group_id}</h4>
+                  {group.is_locked && <Lock size={14} className="text-yellow-500" />}
+                </div>
+                <span className={`px-2 py-1 rounded text-xs font-medium ${getStatusColor(group.status)}`}>
+                  {group.status}
+                </span>
+              </div>
 
-      <div className="bg-gray-800 rounded-xl p-5 border border-gray-700">
-        <div className="flex items-center justify-between mb-3">
-          <span className="text-gray-400 text-sm">Accuracy</span>
-          <Activity size={18} className="text-green-400" />
+              <div className="grid grid-cols-2 gap-3 mb-4">
+                <div className="bg-gray-900 rounded-lg p-3">
+                  <p className="text-gray-400 text-xs">Model</p>
+                  <p className="font-medium text-sm">{group.model_id}</p>
+                </div>
+                <div className="bg-gray-900 rounded-lg p-3">
+                  <p className="text-gray-400 text-xs">Clients</p>
+                  <p className="font-medium text-sm">{group.client_count}</p>
+                </div>
+                <div className="bg-gray-900 rounded-lg p-3">
+                  <p className="text-gray-400 text-xs">Version</p>
+                  <p className="font-medium text-sm">v{group.model_version}</p>
+                </div>
+                <div className="bg-gray-900 rounded-lg p-3">
+                  <p className="text-gray-400 text-xs">Join Token</p>
+                  <p className="font-medium text-xs font-mono">
+                    {showToken[group.group_id] ? (group.debug_token || group.join_token) : '••••••••••••'}
+                    <button onClick={() => setShowToken({ ...showToken, [group.group_id]: !showToken[group.group_id] })} className="ml-2 text-gray-400 hover:text-white">
+                      {showToken[group.group_id] ? <EyeOff size={12} /> : <Eye size={12} />}
+                    </button>
+                  </p>
+                  {group.debug_token && (
+                    <p className="text-xs text-red-400 mt-1">DEBUG: {group.debug_token}</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="bg-gray-900 rounded-lg p-4 mb-3">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-gray-400 text-sm">Async Window</span>
+                  <span className="text-xs text-gray-500">
+                    {group.window_status?.pending_updates || 0} / {group.window_config?.window_size || 3} updates
+                  </span>
+                </div>
+                
+                <div className="w-full h-2 bg-gray-700 rounded-full overflow-hidden mb-3">
+                  <div 
+                    className="h-full bg-indigo-500 rounded-full transition-all duration-500"
+                    style={{ width: `${Math.min(100, ((group.window_status?.pending_updates || 0) / (group.window_config?.window_size || 3)) * 100)}%` }}
+                  />
+                </div>
+                
+                <div className="flex items-center justify-between text-sm mb-2">
+                  <div className="flex items-center gap-2">
+                    <Clock size={14} className="text-gray-400" />
+                    <span className="text-gray-400">Timer:</span>
+                    <span className="font-medium">
+                      {group.window_status?.time_remaining?.toFixed(1) || 0}s remaining
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-gray-400 text-xs">Trigger:</span>
+                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${getTriggerColor(group.window_status?.trigger_reason || 'waiting')}`}>
+                      {group.window_status?.trigger_reason === 'size' ? 'Size-based' : 
+                       group.window_status?.trigger_reason === 'time' ? 'Time-based' : 
+                       `Waiting (${group.window_config?.window_size} updates OR ${group.window_config?.time_limit}s)`}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-2">
+                {!group.is_training && group.status !== 'COMPLETED' && (
+                  <button onClick={() => controlGroup(group.group_id, 'start')} className="flex-1 px-3 py-2 bg-green-600 hover:bg-green-700 rounded-lg text-sm font-medium transition flex items-center justify-center gap-2">
+                    <Play size={14} /> Start
+                  </button>
+                )}
+                {group.is_training && (
+                  <>
+                    <button onClick={() => controlGroup(group.group_id, 'pause')} className="flex-1 px-3 py-2 bg-yellow-600 hover:bg-yellow-700 rounded-lg text-sm font-medium transition flex items-center justify-center gap-2">
+                      <Pause size={14} /> Pause
+                    </button>
+                    <button onClick={() => controlGroup(group.group_id, 'stop')} className="flex-1 px-3 py-2 bg-red-600 hover:bg-red-700 rounded-lg text-sm font-medium transition flex items-center justify-center gap-2">
+                      <Square size={14} /> Stop
+                    </button>
+                  </>
+                )}
+                {!group.is_training && group.status === 'PAUSED' && (
+                  <button onClick={() => controlGroup(group.group_id, 'resume')} className="flex-1 px-3 py-2 bg-green-600 hover:bg-green-700 rounded-lg text-sm font-medium transition flex items-center justify-center gap-2">
+                    <Play size={14} /> Resume
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
         </div>
-        <p className="text-2xl font-bold text-green-400">
-          {metrics.length > 0 ? (metrics[metrics.length - 1].accuracy * 100).toFixed(1) : '0.0'}%
-        </p>
-        <p className="text-gray-500 text-xs mt-1">+2.3% from last round</p>
-      </div>
-
-      <div className="bg-gray-800 rounded-xl p-5 border border-gray-700">
-        <div className="flex items-center justify-between mb-3">
-          <span className="text-gray-400 text-sm">Privacy (ε)</span>
-          <Lock size={18} className="text-indigo-400" />
-        </div>
-        <p className="text-2xl font-bold">1.45</p>
-        <p className="text-gray-500 text-xs mt-1">Differential Privacy</p>
-      </div>
-
-      <div className="col-span-1 md:col-span-2 bg-gray-800 rounded-xl p-5 border border-gray-700">
-        <h3 className="font-semibold mb-4">Accuracy Over Time</h3>
-        <ResponsiveContainer width="100%" height={250}>
-          <AreaChart data={metrics}>
-            <defs>
-              <linearGradient id="colorAcc" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3}/>
-                <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
-              </linearGradient>
-            </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-            <XAxis dataKey="step" stroke="#6b7280" fontSize={12} />
-            <YAxis stroke="#6b7280" fontSize={12} domain={[0, 1]} />
-            <Tooltip contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '8px' }} />
-            <Area type="monotone" dataKey="accuracy" stroke="#6366f1" strokeWidth={2} fillOpacity={1} fill="url(#colorAcc)" />
-          </AreaChart>
-        </ResponsiveContainer>
-      </div>
-
-      <div className="col-span-1 md:col-span-2 bg-gray-800 rounded-xl p-5 border border-gray-700">
-        <h3 className="font-semibold mb-4">Loss Over Time</h3>
-        <ResponsiveContainer width="100%" height={250}>
-          <AreaChart data={metrics}>
-            <defs>
-              <linearGradient id="colorLoss" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#ef4444" stopOpacity={0.3}/>
-                <stop offset="95%" stopColor="#ef4444" stopOpacity={0}/>
-              </linearGradient>
-            </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-            <XAxis dataKey="step" stroke="#6b7280" fontSize={12} />
-            <YAxis stroke="#6b7280" fontSize={12} />
-            <Tooltip contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '8px' }} />
-            <Area type="monotone" dataKey="loss" stroke="#ef4444" strokeWidth={2} fillOpacity={1} fill="url(#colorLoss)" />
-          </AreaChart>
-        </ResponsiveContainer>
-      </div>
+      )}
     </div>
   );
 
   const renderClients = () => (
     <div className="bg-gray-800 rounded-xl overflow-hidden border border-gray-700">
-      <div className="p-5 border-b border-gray-700 flex items-center justify-between">
-        <h3 className="font-semibold">Connected Clients</h3>
-        <button className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-lg text-sm font-medium transition">
-          + Add Client
-        </button>
+      <div className="p-5 border-b border-gray-700">
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold">Connected Clients</h3>
+          <button onClick={fetchData} className="p-2 hover:bg-gray-700 rounded-lg transition">
+            <RefreshCw size={18} />
+          </button>
+        </div>
       </div>
-      <div className="overflow-x-auto">
-        <table className="w-full">
-          <thead className="bg-gray-900">
-            <tr>
-              <th className="text-left p-4 text-gray-400 text-sm font-medium">Client</th>
-              <th className="text-left p-4 text-gray-400 text-sm font-medium">Status</th>
-              <th className="text-left p-4 text-gray-400 text-sm font-medium">Trust</th>
-              <th className="text-left p-4 text-gray-400 text-sm font-medium">Latency</th>
-              <th className="text-left p-4 text-gray-400 text-sm font-medium">Accuracy</th>
-              <th className="text-left p-4 text-gray-400 text-sm font-medium">Grad Norm</th>
-            </tr>
-          </thead>
-          <tbody>
-            {mockClients.map((client, idx) => (
-              <tr key={idx} className="border-t border-gray-700 hover:bg-gray-750 transition">
-                <td className="p-4 font-medium">{client.id}</td>
-                <td className="p-4">
-                  <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                    client.status === 'active' ? 'bg-green-900/50 text-green-400' :
-                    client.status === 'slow' ? 'bg-yellow-900/50 text-yellow-400' :
-                    'bg-red-900/50 text-red-400'
-                  }`}>
-                    {client.status}
-                  </span>
-                </td>
-                <td className="p-4">
-                  <div className="flex items-center gap-2">
-                    <div className="w-24 h-2 bg-gray-700 rounded-full overflow-hidden">
-                      <div className={`h-full rounded-full ${
-                        client.trust > 0.7 ? 'bg-green-500' : client.trust > 0.4 ? 'bg-yellow-500' : 'bg-red-500'
-                      }`} style={{ width: `${client.trust * 100}%` }} />
-                    </div>
-                    <span className="text-sm text-gray-400">{(client.trust * 100).toFixed(0)}%</span>
-                  </div>
-                </td>
-                <td className="p-4 text-gray-400">{client.latency > 0 ? `${client.latency}ms` : '-'}</td>
-                <td className="p-4">{client.accuracy > 0 ? `${(client.accuracy * 100).toFixed(1)}%` : '-'}</td>
-                <td className="p-4 text-gray-400">{client.gradient.toFixed(3)}</td>
+      {clients.length === 0 ? (
+        <div className="p-8 text-center text-gray-400">
+          <Users size={48} className="mx-auto mb-4 opacity-50" />
+          <p>No clients connected</p>
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-gray-900">
+              <tr>
+                <th className="text-left p-4 text-gray-400 text-sm font-medium">Client</th>
+                <th className="text-left p-4 text-gray-400 text-sm font-medium">Group</th>
+                <th className="text-left p-4 text-gray-400 text-sm font-medium">Status</th>
+                <th className="text-left p-4 text-gray-400 text-sm font-medium">Trust</th>
+                <th className="text-left p-4 text-gray-400 text-sm font-medium">Data</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {clients.map((client, idx) => (
+                <tr key={idx} className="border-t border-gray-700 hover:bg-gray-750 transition">
+                  <td className="p-4 font-medium">{client.client_id}</td>
+                  <td className="p-4 text-gray-400">{client.group_id}</td>
+                  <td className="p-4">
+                    <span className={`px-3 py-1 rounded-full text-xs font-medium ${
+                      client.status === 'active' ? 'bg-green-900/50 text-green-400' : 'bg-gray-700 text-gray-400'
+                    }`}>
+                      {client.status}
+                    </span>
+                  </td>
+                  <td className="p-4">
+                    <div className="flex items-center gap-2">
+                      <div className="w-24 h-2 bg-gray-700 rounded-full overflow-hidden">
+                        <div className={`h-full rounded-full ${
+                          client.trust_score > 0.7 ? 'bg-green-500' : client.trust_score > 0.4 ? 'bg-yellow-500' : 'bg-red-500'
+                        }`} style={{ width: `${client.trust_score * 100}%` }} />
+                      </div>
+                      <span className="text-sm text-gray-400">{(client.trust_score * 100).toFixed(0)}%</span>
+                    </div>
+                  </td>
+                  <td className="p-4 text-gray-400">
+                    {client.data_metadata?.modality || 'N/A'}
+                    {client.data_metadata?.samples && ` (${client.data_metadata.samples})`}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 
   const renderModels = () => (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-      {mockModels.map((model, idx) => (
-        <div key={idx} className="bg-gray-800 border border-gray-700 rounded-xl p-5 hover:border-indigo-500/50 transition cursor-pointer">
+      {['simple_cnn_mnist', 'simple_cnn_cifar', 'transformer'].map((model, idx) => (
+        <div key={idx} className="bg-gray-800 border border-gray-700 rounded-xl p-5">
           <div className="flex items-center justify-between mb-3">
             <Brain size={24} className="text-indigo-400" />
-            <span className={`px-2 py-1 rounded text-xs ${model.status === 'active' ? 'bg-green-900/50 text-green-400' : 'bg-gray-700 text-gray-400'}`}>
-              {model.status}
-            </span>
+            <span className="px-2 py-1 rounded text-xs bg-gray-700 text-gray-400">Available</span>
           </div>
-          <h4 className="font-semibold mb-1">{model.id}</h4>
-          <p className="text-gray-400 text-sm mb-3">{model.type} • {model.params} params</p>
-          {model.peft && <span className="inline-block px-2 py-1 bg-indigo-900/50 text-indigo-400 text-xs rounded">PEFT</span>}
+          <h4 className="font-semibold mb-1">{model}</h4>
+          <p className="text-gray-400 text-sm">Vision • CNN/Transformer</p>
         </div>
       ))}
-      <div className="bg-gray-800/50 border-2 border-dashed border-gray-700 rounded-xl p-5 flex flex-col items-center justify-center cursor-pointer hover:border-indigo-500/50 transition min-h-[140px]">
-        <Zap size={32} className="text-gray-500 mb-2" />
-        <p className="text-gray-500">Add New Model</p>
-      </div>
     </div>
   );
 
@@ -223,11 +391,11 @@ export default function Dashboard() {
         <div className="space-y-3">
           <div className="flex justify-between p-3 bg-gray-900 rounded-lg">
             <span className="text-gray-400">Method</span>
-            <span className="font-medium">Hybrid</span>
+            <span className="font-medium">Hybrid (Trust + Staleness)</span>
           </div>
           <div className="flex justify-between p-3 bg-gray-900 rounded-lg">
-            <span className="text-gray-400">Trim Ratio</span>
-            <span className="font-medium">10%</span>
+            <span className="text-gray-400">Filtering</span>
+            <span className="font-medium">Multi-stage</span>
           </div>
         </div>
       </div>
@@ -239,11 +407,11 @@ export default function Dashboard() {
         <div className="space-y-3">
           <div className="flex justify-between p-3 bg-gray-900 rounded-lg">
             <span className="text-gray-400">Status</span>
-            <span className="text-green-400 font-medium">Enabled</span>
+            <span className="text-yellow-400 font-medium">Configurable</span>
           </div>
           <div className="flex justify-between p-3 bg-gray-900 rounded-lg">
-            <span className="text-gray-400">Epsilon (ε)</span>
-            <span className="font-medium">1.45</span>
+            <span className="text-gray-400">Clip Norm</span>
+            <span className="font-medium">1.0</span>
           </div>
         </div>
       </div>
@@ -252,32 +420,14 @@ export default function Dashboard() {
 
   const renderSettings = () => (
     <div className="bg-gray-800 border border-gray-700 rounded-xl p-5">
-      <h3 className="font-semibold mb-4">Experiment Controls</h3>
-      <div className="flex gap-3 mb-6">
-        {!experimentRunning ? (
-          <button onClick={() => setExperimentRunning(true)} className="flex items-center gap-2 px-6 py-3 bg-green-600 hover:bg-green-700 rounded-lg font-medium transition">
-            <Play size={18} /> Start
-          </button>
-        ) : (
-          <>
-            <button onClick={() => setExperimentRunning(false)} className="flex items-center gap-2 px-6 py-3 bg-yellow-600 hover:bg-yellow-700 rounded-lg font-medium transition">
-              <Pause size={18} /> Pause
-            </button>
-            <button className="flex items-center gap-2 px-6 py-3 bg-red-600 hover:bg-red-700 rounded-lg font-medium transition">
-              <Square size={18} /> Stop
-            </button>
-          </>
-        )}
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div>
-          <label className="block text-gray-400 text-sm mb-2">Clients</label>
-          <input type="number" defaultValue={10} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3" />
-        </div>
-        <div>
-          <label className="block text-gray-400 text-sm mb-2">Epochs</label>
-          <input type="number" defaultValue={2} className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3" />
-        </div>
+      <h3 className="font-semibold mb-4">Server Controls</h3>
+      <div className="flex gap-3">
+        <button className="flex items-center gap-2 px-6 py-3 bg-green-600 hover:bg-green-700 rounded-lg font-medium transition">
+          <Play size={18} /> Start Server
+        </button>
+        <button className="flex items-center gap-2 px-6 py-3 bg-red-600 hover:bg-red-700 rounded-lg font-medium transition">
+          <Square size={18} /> Stop Server
+        </button>
       </div>
     </div>
   );
@@ -296,9 +446,15 @@ export default function Dashboard() {
                 <p className="text-xs text-gray-500">Distributed Learning Dashboard</p>
               </div>
             </div>
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-700 rounded-lg">
-              <Wifi size={14} className={connected ? 'text-green-400' : 'text-red-400'} />
-              <span className="text-sm text-gray-400">{connected ? 'Connected' : 'Offline'}</span>
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-700 rounded-lg">
+                <Wifi size={14} className={connected ? 'text-green-400' : 'text-red-400'} />
+                <span className="text-sm text-gray-400">{connected ? 'Connected' : 'Offline'}</span>
+              </div>
+              <div className="text-right">
+                <p className="text-sm font-medium">{groups.length} Groups</p>
+                <p className="text-xs text-gray-500">{clients.length} Clients</p>
+              </div>
             </div>
           </div>
         </div>
@@ -320,7 +476,7 @@ export default function Dashboard() {
       </nav>
 
       <main className="max-w-7xl mx-auto px-4 py-6">
-        {activeTab === 'overview' && renderOverview()}
+        {activeTab === 'groups' && renderGroups()}
         {activeTab === 'clients' && renderClients()}
         {activeTab === 'models' && renderModels()}
         {activeTab === 'security' && renderSecurity()}
