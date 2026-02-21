@@ -1,7 +1,7 @@
 FROM python:3.10-slim
 
 LABEL maintainer="DevHacks Team"
-LABEL description="Async Federated Learning Framework"
+LABEL description="Federated Learning – Training Client"
 
 WORKDIR /app
 
@@ -16,10 +16,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 ENV PYTHONUNBUFFERED=1
-ENV CUDA_VISIBLE_DEVICES=0
+ENV SERVER_URL=http://server:5000
+ENV CLIENT_ID=client_000
 
-# Single-process mode (original behaviour)
-CMD ["python", "main.py", "--config", "config.yaml", "--demo"]
-
-# For distributed Docker mode, use docker-compose.yml instead:
-#   docker compose up --build
+CMD ["python", "client_runner.py"]

@@ -16,3 +16,6 @@ peft>=0.4.0
 bitsandbytes>=0.41.0
 accelerate>=0.20.0
 pillow>=9.5.0
+fastapi>=0.110.0
+uvicorn>=0.29.0
+requests>=2.31.0

@@ -1,7 +1,7 @@
 FROM python:3.10-slim
 
 LABEL maintainer="DevHacks Team"
-LABEL description="Async Federated Learning Framework"
+LABEL description="Federated Learning – Aggregation Server"
 
 WORKDIR /app
 
@@ -16,10 +16,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 ENV PYTHONUNBUFFERED=1
-ENV CUDA_VISIBLE_DEVICES=0
 
-# Single-process mode (original behaviour)
-CMD ["python", "main.py", "--config", "config.yaml", "--demo"]
+EXPOSE 5000
 
-# For distributed Docker mode, use docker-compose.yml instead:
-#   docker compose up --build
+CMD ["uvicorn", "server_app:app", "--host", "0.0.0.0", "--port", "5000"]
