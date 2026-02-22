@@ -27,7 +27,10 @@ class DataSplitter:
     
     def __init__(self, config: Dict[str, Any]):
         self.config = config
-        self.dataset_config = config.get('dataset', {})
+        raw_dataset = config.get('dataset', {})
+        if isinstance(raw_dataset, str):
+            raw_dataset = {'name': raw_dataset}
+        self.dataset_config = raw_dataset
         
         self.dataset_name = self.dataset_config.get('name', 'MNIST')
         self.split_method = self.dataset_config.get('split', 'dirichlet')
@@ -55,11 +58,12 @@ class DataSplitter:
     def _load_mnist(self) -> None:
         """Load MNIST dataset."""
         data_dir = './data/mnist'
-        
-        transform = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize((0.1307,), (0.3081,))
-        ])
+
+        transform = self._build_transform(
+            default_mean=(0.1307,),
+            default_std=(0.3081,),
+            force_grayscale=True
+        )
         
         self.train_dataset = datasets.MNIST(
             data_dir, train=True, download=True, transform=transform
@@ -71,11 +75,12 @@ class DataSplitter:
     def _load_cifar10(self) -> None:
         """Load CIFAR-10 dataset."""
         data_dir = './data/cifar10'
-        
-        transform = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-        ])
+
+        transform = self._build_transform(
+            default_mean=(0.5, 0.5, 0.5),
+            default_std=(0.5, 0.5, 0.5),
+            force_grayscale=False
+        )
         
         self.train_dataset = datasets.CIFAR10(
             data_dir, train=True, download=True, transform=transform
@@ -169,6 +174,28 @@ class DataSplitter:
             distribution = {int(u): int(c) / total for u, c in zip(unique, counts)}
             
             self.class_distributions[client_id] = distribution
+
+    def _build_transform(
+        self,
+        default_mean: Tuple[float, ...],
+        default_std: Tuple[float, ...],
+        force_grayscale: bool
+    ) -> transforms.Compose:
+        """Build dataset transforms with optional resizing and normalization overrides."""
+        image_size = self.dataset_config.get('image_size')
+        channels = self.dataset_config.get('channels')
+        normalize_mean = self.dataset_config.get('normalize_mean', default_mean)
+        normalize_std = self.dataset_config.get('normalize_std', default_std)
+
+        pipeline = []
+        if image_size:
+            pipeline.append(transforms.Resize((int(image_size), int(image_size))))
+        if force_grayscale and channels == 3:
+            pipeline.append(transforms.Grayscale(num_output_channels=3))
+        pipeline.append(transforms.ToTensor())
+        pipeline.append(transforms.Normalize(normalize_mean, normalize_std))
+
+        return transforms.Compose(pipeline)
     
     def get_client_data(self, client_id: int) -> Subset:
         """Get data for a specific client."""

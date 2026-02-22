@@ -23,6 +23,7 @@ import sqlite3
 import time
 import uuid
 import threading
+import requests
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -118,12 +119,19 @@ class TrainingGroup:
     
     def add_update(self, client_id: str, update: Dict) -> bool:
         """Add client update to buffer. Returns True if aggregation triggered."""
+        logger = logging.getLogger(__name__)
+        logger.info(f"[ADD-UPDATE] Client {client_id} in group {self.group_id}. Group clients: {list(self.clients.keys())}")
+        if client_id not in self.clients:
+            logger.warning(f"⚠️  Client {client_id} NOT in group {self.group_id} clients. Available: {list(self.clients.keys())}")
         if client_id in self.clients:
             self.clients[client_id]['last_update'] = time.time()
             self.clients[client_id]['updates_count'] += 1
-            self.clients[client_id]['local_accuracy'] = update.get('meta', {}).get('train_accuracy', 0)
-            self.clients[client_id]['local_loss'] = update.get('meta', {}).get('train_loss', 0)
+            train_acc = update.get('meta', {}).get('train_accuracy', 0)
+            train_loss = update.get('meta', {}).get('train_loss', 0)
+            self.clients[client_id]['local_accuracy'] = train_acc
+            self.clients[client_id]['local_loss'] = train_loss
             self.clients[client_id]['gradient_norm'] = update.get('meta', {}).get('gradient_norm', 0)
+            logger.info(f"✓ METRICS STORED: Client {client_id} in group {self.group_id} | acc={train_acc:.4f}, loss={train_loss:.4f}")
         
         self.pending_updates.append({
             'client_id': client_id,
@@ -281,11 +289,14 @@ class GroupManager:
 
     def normalize_update(self, update: Dict) -> Dict:
         """Ensure updates have fields expected by aggregators."""
+        logger = logging.getLogger(__name__)
+        logger.debug(f"NORMALIZE: Input meta={update.get('meta', {}).get('train_accuracy', 0)}")
         if 'delta' not in update:
             update['delta'] = self._decode_local_updates(update.get('local_updates'))
         update.setdefault('dataset_size', update.get('local_dataset_size', 1))
         update.setdefault('staleness_weight', 1.0)
         update.setdefault('trust', 1.0)
+        logger.debug(f"NORMALIZE: Output meta={update.get('meta', {}).get('train_accuracy', 0)}")
         return update
 
     def _start_training_watchdog(self, group_id: str) -> None:
@@ -1315,6 +1326,18 @@ async def list_models():
     return {"models": models, "count": len(models)}
 
 
+def _fetch_hf_model_metadata(model_name: str) -> Dict[str, Any]:
+    """Fetch lightweight metadata from HuggingFace for dataset sizing."""
+    try:
+        url = f"https://huggingface.co/api/models/{model_name}"
+        res = requests.get(url, timeout=5)
+        if res.status_code != 200:
+            return {}
+        return res.json() or {}
+    except Exception:
+        return {}
+
+
 @app.post("/api/models/register/hf")
 async def register_hf_model(model_name: str, use_peft: bool = False, peft_method: str = "lora"):
     """Register a HuggingFace model."""
@@ -1332,6 +1355,24 @@ async def register_hf_model(model_name: str, use_peft: bool = False, peft_method
             use_peft=use_peft,
             peft_config=peft_config
         )
+
+        hf_meta = _fetch_hf_model_metadata(model_name)
+        hf_config = (hf_meta.get('config') or {})
+        vision_config = hf_config.get('vision_config') or {}
+        image_size = hf_config.get('image_size') or vision_config.get('image_size')
+        if image_size:
+            model_info.config.setdefault('dataset', {})
+            model_info.config['dataset'].setdefault('image_size', image_size)
+            model_info.config['dataset'].setdefault('channels', 3)
+            model_info.config['dataset'].setdefault(
+                'normalize_mean',
+                (0.48145466, 0.4578275, 0.40821073)
+            )
+            model_info.config['dataset'].setdefault(
+                'normalize_std',
+                (0.26862954, 0.26130258, 0.27577711)
+            )
+
         return {"status": "registered", "model": model_info.to_dict()}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -1468,6 +1509,10 @@ async def get_group_window_status(group_id: str):
 async def list_clients():
     """List connected clients."""
     clients = fl_server.group_manager.get_all_client_status()
+    logger = logging.getLogger(__name__)
+    logger.info(f"[API-CLIENTS] Returning {len(clients)} clients")
+    for c in clients:
+        logger.info(f"  Client {c.get('client_id')} in group {c.get('group_id')}: acc={c.get('local_accuracy', 0):.4f}, loss={c.get('local_loss', 0):.4f}")
     return {"clients": clients, "count": len(clients)}
 
 
@@ -1514,6 +1559,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 else:
                     # Register client - be more lenient
                     try:
+                        logger = logging.getLogger(__name__)
+                        logger.info(f"[REGISTER] Registering client {client_id} to group {group_id}")
                         success = fl_server.group_manager.register_client(
                             client_id=client_id,
                             group_id=group_id,
@@ -1525,6 +1572,8 @@ async def websocket_endpoint(websocket: WebSocket):
                             }
                         )
                         if success:
+                            group = fl_server.group_manager.groups[group_id]
+                            logger.info(f"[REGISTER] Client {client_id} registered. Group now has {len(group.clients)} clients: {list(group.clients.keys())}")
                             # Register websocket for sending messages to client
                             fl_server.connection_manager.register_client(client_id, websocket)
                             await websocket.send_json({
@@ -1539,7 +1588,6 @@ async def websocket_endpoint(websocket: WebSocket):
                                 'reason': 'registration_failed'
                             })
                     except Exception as e:
-                        import logging
                         logger = logging.getLogger(__name__)
                         logger.error(f"Registration error: {e}")
                         await websocket.send_json({
@@ -1550,24 +1598,35 @@ async def websocket_endpoint(websocket: WebSocket):
             elif message.get('type') == 'update':
                 # Check if group is training
                 try:
+                    logger = logging.getLogger(__name__)
                     client_id = message.get('update', {}).get('client_id')
+                    received_meta = message.get('update', {}).get('meta', {})
+                    logger.info(f"[UPDATE-RECV] Client {client_id}: acc={received_meta.get('train_accuracy', 0):.4f}, loss={received_meta.get('train_loss', 0):.4f}")
                     group = fl_server.group_manager.get_client_group(client_id)
                     
                     if not group:
+                        logger.warning(f"[UPDATE] Client {client_id} not found in any group")
                         await websocket.send_json({'status': 'rejected', 'reason': 'group_not_found'})
                         continue
                     
                     if not group.is_training:
+                        logger.warning(f"[UPDATE] Group {group.group_id} not training")
                         await websocket.send_json({'status': 'rejected', 'reason': 'training_not_started'})
                         continue
                     
+                    logger.info(f"[UPDATE] Processing update for client {client_id} in group {group.group_id}")
                     update_payload = fl_server.group_manager.normalize_update(message.get('update', {}))
                     update_result = fl_server.group_manager.process_client_update(client_id, update_payload)
                     
+                    meta = message.get('update', {}).get('meta', {})
+                    acc = meta.get('train_accuracy', 0)
+                    loss = meta.get('train_loss', 0)
+                    logger = logging.getLogger(__name__)
+                    logger.info(f"[UPDATE] Client {client_id} in group {group.group_id}: acc={acc:.4f}, loss={loss:.4f}")
                     fl_server.group_manager.log_event('client_update', f'Client {client_id} sent update', group.group_id, {
                         'client_id': client_id,
-                        'accuracy': message.get('update', {}).get('meta', {}).get('train_accuracy', 0),
-                        'loss': message.get('update', {}).get('meta', {}).get('train_loss', 0)
+                        'accuracy': acc,
+                        'loss': loss
                     })
                     
                     if update_result.get('triggered') and update_result.get('aggregate'):
@@ -1596,8 +1655,51 @@ async def websocket_endpoint(websocket: WebSocket):
                     logger = logging.getLogger(__name__)
                     logger.error(f"Update handling error: {e}")
                     await websocket.send_json({'status': 'error', 'reason': 'update_failed'})
+
+            elif message.get('type') == 'metrics':
+                try:
+                    logger = logging.getLogger(__name__)
+                    client_id = message.get('client_id')
+                    logger.debug(f"Received metrics from {client_id}")
+                    
+                    group = fl_server.group_manager.get_client_group(client_id)
+
+                    if not group:
+                        logger.warning(f"Group not found for client {client_id}")
+                        await websocket.send_json({'status': 'rejected', 'reason': 'group_not_found'})
+                        continue
+
+                    metrics = message.get('meta', {})
+                    if client_id in group.clients:
+                        group.clients[client_id]['last_update'] = time.time()
+                        group.clients[client_id]['local_accuracy'] = metrics.get('train_accuracy', 0)
+                        group.clients[client_id]['local_loss'] = metrics.get('train_loss', 0)
+                        logger.debug(f"Updated client {client_id} metrics: acc={metrics.get('train_accuracy', 0):.4f}, loss={metrics.get('train_loss', 0):.4f}")
+
+                    fl_server.group_manager.log_event('client_metrics', f'Client {client_id} metrics', group.group_id, {
+                        'client_id': client_id,
+                        'accuracy': metrics.get('train_accuracy', 0),
+                        'loss': metrics.get('train_loss', 0)
+                    })
+
+                    logger.debug(f"Sending metrics acknowledgment to {client_id}")
+                    await websocket.send_json({'status': 'accepted', 'type': 'metrics'})
+                    logger.info(f"Metrics from {client_id} processed successfully")
+                except Exception as e:
+                    logger = logging.getLogger(__name__)
+                    logger.error(f"Metrics handling error: {e}", exc_info=True)
+                    try:
+                        await websocket.send_json({'status': 'error', 'reason': 'metrics_failed'})
+                    except Exception as send_err:
+                        logger.error(f"Failed to send error response: {send_err}")
     
     except WebSocketDisconnect:
+        logger = logging.getLogger(__name__)
+        logger.info("WebSocket disconnected normally")
+        fl_server.connection_manager.disconnect(websocket)
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.error(f"WebSocket error: {e}", exc_info=True)
         fl_server.connection_manager.disconnect(websocket)
 
 

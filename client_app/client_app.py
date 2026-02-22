@@ -41,6 +41,36 @@ from core_engine.model_zoo import create_model
 from core_engine.utils.seed import set_seed
 
 
+class HFVisionClassifier(nn.Module):
+    """Wrap HF vision models to produce class logits for supervised training."""
+
+    def __init__(self, base_model: nn.Module, num_classes: int = 10):
+        super().__init__()
+        self.base_model = base_model
+        hidden_size = getattr(getattr(base_model, 'config', None), 'hidden_size', None)
+        if hidden_size is None and hasattr(base_model, 'vision_model'):
+            hidden_size = getattr(getattr(base_model.vision_model, 'config', None), 'hidden_size', None)
+        if hidden_size is None:
+            raise ValueError("Unable to infer hidden size for HuggingFace model")
+        self.classifier = nn.Linear(hidden_size, num_classes)
+
+    def _pool_outputs(self, outputs: Any) -> torch.Tensor:
+        if hasattr(outputs, 'pooler_output') and outputs.pooler_output is not None:
+            return outputs.pooler_output
+        if hasattr(outputs, 'pooled_output') and outputs.pooled_output is not None:
+            return outputs.pooled_output
+        if hasattr(outputs, 'last_hidden_state') and outputs.last_hidden_state is not None:
+            return outputs.last_hidden_state.mean(dim=1)
+        if isinstance(outputs, (tuple, list)) and len(outputs) > 0:
+            return outputs[0].mean(dim=1)
+        raise ValueError("Unexpected HF output format for classifier pooling")
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        outputs = self.base_model(x)
+        pooled = self._pool_outputs(outputs)
+        return self.classifier(pooled)
+
+
 class FederatedClient:
     """
     Distributed Federated Learning Client.
@@ -66,6 +96,8 @@ class FederatedClient:
 
         self.local_client: Optional[LocalClient] = None
         self.current_global_version = 0
+        self.group_model_id: Optional[str] = None
+        self.group_model_info: Optional[Dict[str, Any]] = None
 
         self.logger = logging.getLogger(__name__)
         self._setup_logging()
@@ -83,8 +115,8 @@ class FederatedClient:
             ws_url = self.server_url.replace('http', 'ws') + '/ws'
             self.ws = await websockets.connect(
                 ws_url,
-                ping_interval=30,
-                ping_timeout=10
+                ping_interval=10,
+                ping_timeout=5
             )
             
             # Build data metadata
@@ -229,31 +261,210 @@ class FederatedClient:
                     entry.get('loss', 0.0),
                     entry.get('accuracy', 0.0)
                 )
+        train_loss = meta.get('train_loss', 0.0)
+        train_acc = meta.get('train_accuracy', 0.0)
         self.logger.info(
             "Training round complete: loss=%.4f, acc=%.4f, steps=%s",
-            meta.get('train_loss', 0.0),
-            meta.get('train_accuracy', 0.0),
+            train_loss,
+            train_acc,
             meta.get('local_steps', 0)
         )
+        self.logger.info(f"Meta dict for sending: train_loss={train_loss}, train_accuracy={train_acc}")
+
+        async def _send_metrics_once() -> bool:
+            if not self.ws:
+                return False
+            self.logger.info(
+                "Sending metrics message: client_id=%s, group_id=%s, meta_keys=%s",
+                self.client_id,
+                getattr(self, 'group_id', None),
+                list(meta.keys())
+            )
+            try:
+                await self.ws.send(json.dumps({
+                    'type': 'metrics',
+                    'client_id': self.client_id,
+                    'group_id': getattr(self, 'group_id', None),
+                    'meta': meta
+                }))
+                # Wait for metrics acknowledgment with short timeout
+                response = await asyncio.wait_for(self.ws.recv(), timeout=2.0)
+                ack = json.loads(response)
+                if ack.get('status') == 'accepted':
+                    self.logger.info("Metrics acknowledged by server")
+                    return True
+            except asyncio.TimeoutError:
+                self.logger.debug("No metrics acknowledgment within timeout")
+            except Exception as e:
+                self.logger.debug("Metrics message send failed: %s", e)
+            return False
+
+        async def _ensure_metrics_delivered() -> bool:
+            # Best effort on current connection
+            if await _send_metrics_once():
+                return True
+            # If WS dropped during long HF training, reconnect and retry once.
+            try:
+                await self.disconnect()
+            except Exception:
+                pass
+            if not await self.connect():
+                return False
+            return await _send_metrics_once()
+
+        metrics_delivered = await _ensure_metrics_delivered()
         
         # Encode update for transmission
-        encoded = base64.b64encode(update['local_updates']).decode('utf-8')
+        encoded_full = base64.b64encode(update['local_updates']).decode('utf-8')
+        # HF model deltas can be extremely large. If we try to send them over WebSocket,
+        # the server will typically close the connection and nothing gets persisted.
+        # In that case, send a meta-only update (empty local_updates) so the dashboard
+        # still reflects loss/accuracy.
+        max_update_chars = int(self.config.get('communication', {}).get('max_ws_update_chars', 8_000_000))
+        encoded = encoded_full
+        if len(encoded_full) > max_update_chars:
+            self.logger.warning(
+                "Update payload too large for WebSocket (%s chars > %s). Sending meta-only update (empty local_updates).",
+                len(encoded_full),
+                max_update_chars
+            )
+            encoded = ""
         
         # Send update to server
-        await self.ws.send(json.dumps({
-            'type': 'update',
-            'update': {
-                'client_id': self.client_id,
-                'client_version': self.current_global_version,
-                'local_updates': encoded,
-                'update_type': 'delta',
-                'local_dataset_size': update['local_dataset_size'],
-                'meta': update['meta']
-            }
-        }))
+        self.logger.info("Sending update message: client_id=%s, meta=%s", self.client_id, update.get('meta', {}))
+        try:
+            await self.ws.send(json.dumps({
+                'type': 'update',
+                'update': {
+                    'client_id': self.client_id,
+                    'client_version': self.current_global_version,
+                    'local_updates': encoded,
+                    'update_type': 'delta',
+                    'local_dataset_size': update['local_dataset_size'],
+                    'meta': update['meta']
+                }
+            }))
+        except Exception as e:
+            self.logger.warning("Failed to send update (connection may have closed): %s", e)
+            # Attempt to reconnect and retry
+            try:
+                await self.disconnect()
+                if not await self.connect():
+                    self.logger.error("Failed to reconnect after update send failure")
+                    raise RuntimeError("Failed to reconnect to server") from e
+                # If metrics weren't delivered previously, retry them on the fresh connection.
+                if not metrics_delivered:
+                    metrics_delivered = await _send_metrics_once()
+                # Retry update send
+                await self.ws.send(json.dumps({
+                    'type': 'update',
+                    'update': {
+                        'client_id': self.client_id,
+                        'client_version': self.current_global_version,
+                        'local_updates': encoded,
+                        'update_type': 'delta',
+                        'local_dataset_size': update['local_dataset_size'],
+                        'meta': update['meta']
+                    }
+                }))
+                self.logger.info("Update sent successfully after reconnect")
+            except Exception as retry_e:
+                self.logger.error("Failed to send update even after reconnect: %s", retry_e)
+                raise
         
         self.is_training = False
         self.logger.info("Update sent to server")
+
+    async def _sync_group_config(self):
+        """Sync training config and model info from server before training."""
+        try:
+            import aiohttp
+            group_id = getattr(self, 'group_id', 'group_a')
+            url = f"{self.server_url}/api/groups/{group_id}"
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as resp:
+                    if resp.status != 200:
+                        self.logger.warning("Failed to fetch group config: %s", resp.status)
+                        return
+                    data = await resp.json()
+
+                group = data.get('group', {})
+                cfg = group.get('config', {})
+
+                self.config.setdefault('client', {})
+                self.config['client'].update({
+                    'local_epochs': cfg.get('local_epochs', self.config['client'].get('local_epochs', 2)),
+                    'batch_size': cfg.get('batch_size', self.config['client'].get('batch_size', 32)),
+                    'lr': cfg.get('lr', self.config['client'].get('lr', 0.01))
+                })
+
+                if self.local_client:
+                    self.local_client._init_optimizer()
+                    self.local_client._init_data_loader()
+
+                model_id = group.get('model_id')
+                if model_id:
+                    model_changed = model_id != self.group_model_id
+                    self.group_model_id = model_id
+
+                    model_url = f"{self.server_url}/api/models/{model_id}"
+                    async with session.get(model_url) as model_resp:
+                        if model_resp.status == 200:
+                            model_data = await model_resp.json()
+                            self.group_model_info = model_data.get('model')
+                            self._apply_model_info(self.group_model_info)
+                        else:
+                            self.logger.warning("Failed to fetch model info for %s: %s", model_id, model_resp.status)
+
+                    if model_changed:
+                        self.local_client = None
+
+                self.logger.info(
+                    "Synced group config: epochs=%s, batch_size=%s, lr=%s, model_id=%s",
+                    self.config['client'].get('local_epochs'),
+                    self.config['client'].get('batch_size'),
+                    self.config['client'].get('lr'),
+                    self.group_model_id
+                )
+
+        except Exception as e:
+            self.logger.warning("Failed to sync group config: %s", e)
+
+    def _apply_model_info(self, model_info: Optional[Dict[str, Any]]):
+        """Apply model info to local config for model initialization."""
+        if not model_info:
+            return
+
+        model_config = model_info.get('config') or {}
+        for key, value in model_config.items():
+            if isinstance(value, dict) and isinstance(self.config.get(key), dict):
+                self.config[key].update(value)
+            else:
+                self.config[key] = value
+
+        architecture = (model_info.get('architecture') or '').lower()
+        model_type = (model_info.get('model_type') or '').lower()
+        source = (model_info.get('source') or '').lower()
+        if architecture:
+            self.config.setdefault('model', {})
+            if architecture in ('cnn', 'mlp'):
+                self.config['model']['type'] = architecture
+            else:
+                self.config['model']['type'] = 'cnn'
+
+        if source == 'huggingface' and model_type in ('vision', 'multimodal'):
+            self.config.setdefault('dataset', {})
+            self.config['dataset'].setdefault('image_size', 224)
+            self.config['dataset'].setdefault('channels', 3)
+            self.config['dataset'].setdefault('num_classes', 10)  # Ensure num_classes is set
+            self.config['dataset'].setdefault(
+                'normalize_mean',
+                (0.48145466, 0.4578275, 0.40821073)
+            )
+            self.config['dataset'].setdefault(
+                'normalize_std',
+                (0.26862954, 0.26130258, 0.27577711)
+            )
     
     def _initialize_local_client(self):
         """Initialize local FL client."""
@@ -264,7 +475,21 @@ class FederatedClient:
         )
         
         # Create model
-        model_factory = lambda: create_model(self.config)
+        def model_factory():
+            model_info = self.group_model_info or {}
+            source = model_info.get('source')
+            if source == 'huggingface':
+                from core_engine.hf_models import load_hf_peft_model
+                model_name = model_info.get('model_path') or model_info.get('architecture')
+                model_cfg = model_info.get('config') or {}
+                model, _ = load_hf_peft_model(model_name, model_cfg, device='cpu')
+                model_type = (model_info.get('model_type') or '').lower()
+                if model_type in ('vision', 'multimodal'):
+                    num_classes = self.config.get('dataset', {}).get('num_classes', 10)
+                    return HFVisionClassifier(model, num_classes=num_classes)
+                return model
+
+            return create_model(self.config)
         
         # Create client
         self.local_client = LocalClient(
@@ -283,6 +508,8 @@ class FederatedClient:
         if not connected:
             self.logger.error("Failed to connect to server")
             return
+
+        await self._sync_group_config()
 
         # Train once immediately, push update to server
         await self._run_training()

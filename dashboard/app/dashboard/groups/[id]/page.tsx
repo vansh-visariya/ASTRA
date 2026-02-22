@@ -119,6 +119,12 @@ export default function GroupDetailPage() {
     }
   };
 
+  const formatAccuracyPercent = (value: number | null | undefined) => {
+    const v = typeof value === 'number' && Number.isFinite(value) ? value : 0;
+    const pct = v <= 1 ? v * 100 : v;
+    return `${pct.toFixed(1)}%`;
+  };
+
   if (!group) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -327,7 +333,7 @@ export default function GroupDetailPage() {
                       </span>
                     </td>
                     <td className="p-4 text-gray-300">{client.updates_count || 0}</td>
-                    <td className="p-4 text-green-400">{(client.local_accuracy || 0).toFixed(1)}%</td>
+                    <td className="p-4 text-green-400">{formatAccuracyPercent(client.local_accuracy)}</td>
                     <td className="p-4 text-red-400">{(client.local_loss || 0).toFixed(4)}</td>
                     <td className="p-4">
                       <div className="flex items-center gap-2">

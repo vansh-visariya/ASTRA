@@ -109,7 +109,10 @@ def create_model(config: Dict[str, Any]) -> nn.Module:
         cnn_config = model_config.get('cnn', {})
         cnn_name = cnn_config.get('name', 'simple_cnn')
         
-        dataset = config.get('dataset', {}).get('name', 'MNIST')
+        dataset_cfg = config.get('dataset', {})
+        if isinstance(dataset_cfg, str):
+            dataset_cfg = {'name': dataset_cfg}
+        dataset = dataset_cfg.get('name', 'MNIST')
         
         if dataset == 'CIFAR10':
             return CIFAR10CNN(num_classes=10)
