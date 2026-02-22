@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://10.146.11.202:8000';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 interface GroupMetrics {
   version: number;
@@ -60,6 +60,7 @@ export default function GroupDetailPage() {
   const [logs, setLogs] = useState<Log[]>([]);
   const [logFilter, setLogFilter] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('overview');
+  const [joinRequests, setJoinRequests] = useState<any[]>([]);
 
   const fetchData = async () => {
     try {
@@ -67,10 +68,15 @@ export default function GroupDetailPage() {
         ? `${API_URL}/api/logs?group_id=${id}&event_type=${logFilter}`
         : `${API_URL}/api/logs?group_id=${id}`;
 
-      const [groupRes, clientsRes, logsRes] = await Promise.all([
+      const requestsPromise = user?.role === 'admin' 
+        ? fetch(`${API_URL}/api/groups/join-requests?group_id=${id}`, { headers: { 'Authorization': `Bearer ${token}` } })
+        : Promise.resolve({ ok: true, json: async () => ({ requests: [] }) });
+
+      const [groupRes, clientsRes, logsRes, requestsRes] = await Promise.all([
         fetch(`${API_URL}/api/groups/${id}`, { headers: { 'Authorization': `Bearer ${token}` } }),
         fetch(`${API_URL}/api/clients`, { headers: { 'Authorization': `Bearer ${token}` } }),
-        fetch(logsUrl, { headers: { 'Authorization': `Bearer ${token}` } })
+        fetch(logsUrl, { headers: { 'Authorization': `Bearer ${token}` } }),
+        requestsPromise
       ]);
 
       if (groupRes.ok) {
@@ -87,9 +93,32 @@ export default function GroupDetailPage() {
         const logsData = await logsRes.json();
         setLogs(logsData.logs || []);
       }
+
+      if (requestsRes.ok) {
+        const requestsData = await requestsRes.json();
+        setJoinRequests(requestsData.requests || []);
+      }
     } catch (e) {
       console.error('Failed to fetch data:', e);
     }
+  };
+
+  const handleApproveRequest = async (requestId: number) => {
+    await fetch(`${API_URL}/api/groups/join-requests/approve`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ request_id: requestId, group_id: id, join_token: 'AUTO' })
+    });
+    fetchData();
+  };
+
+  const handleRejectRequest = async (requestId: number) => {
+    await fetch(`${API_URL}/api/groups/join-requests/reject`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ request_id: requestId, group_id: id, reason: 'Rejected' })
+    });
+    fetchData();
   };
 
   useEffect(() => {
@@ -154,7 +183,7 @@ export default function GroupDetailPage() {
           <p className="text-gray-400">{group.model_id} • Version {group.model_version}</p>
         </div>
         
-        {user?.role === 'coordinator' && (
+        {user?.role === 'admin' && (
           <div className="flex gap-2">
             {group.is_training && (
               <>
@@ -299,8 +328,46 @@ export default function GroupDetailPage() {
       )}
 
       {activeTab === 'participants' && (
-        <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-          {clients.length === 0 ? (
+        <div className="space-y-6">
+          {/* Debug info */}
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+            <p className="text-gray-400 text-sm">User: {user?.username} | Role: {user?.role} | Requests: {joinRequests.length}</p>
+          </div>
+          
+          {/* Pending Join Requests - Show for admin */}
+          {(user?.role === 'admin' || user?.role === 'coordinator') && joinRequests.filter((r: any) => r.status === 'pending').length > 0 && (
+            <div className="bg-yellow-900/20 border border-yellow-800 rounded-xl p-6">
+              <h3 className="text-lg font-semibold text-yellow-400 mb-4">Pending Join Requests</h3>
+              <div className="space-y-3">
+                {joinRequests.filter((r: any) => r.status === 'pending').map((req: any) => (
+                  <div key={req.id} className="flex items-center justify-between bg-gray-900 rounded-lg p-4">
+                    <div>
+                      <p className="text-white font-medium">User ID: {req.user_id} | Group: {req.group_id}</p>
+                      <p className="text-gray-400 text-sm">{new Date(req.requested_at).toLocaleString()}</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={() => handleApproveRequest(req.id)} className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg text-white text-sm">Approve</button>
+                      <button onClick={() => handleRejectRequest(req.id)} className="px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg text-white text-sm">Reject</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Show all join requests for debugging */}
+          {user?.role === 'admin' && joinRequests.length > 0 && (
+            <div className="bg-gray-800 border border-gray-700 rounded-xl p-4">
+              <p className="text-white text-sm mb-2">All requests in state:</p>
+              {joinRequests.map((r: any) => (
+                <p key={r.id} className="text-gray-400 text-xs">ID={r.id}, group={r.group_id}, status={r.status}, user_id={r.user_id}</p>
+              ))}
+            </div>
+          )}
+
+          {/* Connected Clients */}
+          <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+            {clients.length === 0 ? (
             <div className="p-12 text-center text-gray-400">
               <Users size={48} className="mx-auto mb-4 opacity-50" />
               <p>No participants connected</p>
@@ -342,6 +409,7 @@ export default function GroupDetailPage() {
               </tbody>
             </table>
           )}
+        </div>
         </div>
       )}
 

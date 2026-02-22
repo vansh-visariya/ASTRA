@@ -1002,23 +1002,42 @@ async def lifespan(app: FastAPI):
         'server': {'optimizer': 'sgd', 'server_lr': 0.5, 'momentum': 0.9, 'async_lambda': 0.2, 'aggregator_window': 5},
         'robust': {'method': 'fedavg', 'trim_ratio': 0.1},
         'privacy': {'dp_enabled': False},
-        'training': {'total_steps': 1000, 'eval_interval_steps': 10}
+        'training': {'total_steps': 1000, 'eval_interval_steps': 10},
+        'heterogeneous': {'mapping_method': 'average', 'allow_partial_updates': True, 'min_param_overlap': 0.5},
     }
     
     fl_server = FLServer(config)
-
+    
     # Setup Socket.IO
     from aiohttp import web
     socketio_app = web.Application()
-
+    
     # Start background timer for time-based aggregation
     aggregation_timer_task = asyncio.create_task(_aggregation_timer())
-
+    
     yield
-
+    
     aggregation_timer_task.cancel()
     if fl_server:
         fl_server.stop_experiment()
+
+
+# Extended API registration
+_extended_api_registered = False
+
+def _register_extended_endpoints(app, config):
+    """Register extended API endpoints."""
+    global _extended_api_registered
+    if _extended_api_registered:
+        return
+    
+    try:
+        from api.extended_endpoints import setup_extended_api
+        platform = setup_extended_api(app, config)
+        print("[INFO] Extended API endpoints registered")
+        _extended_api_registered = True
+    except Exception as e:
+        print(f"[WARN] Could not register extended endpoints: {e}")
 
 
 async def _aggregation_timer():
@@ -1044,6 +1063,9 @@ async def _aggregation_timer():
 
 
 app = FastAPI(title="Federated Learning API", lifespan=lifespan)
+
+# Register extended API endpoints at startup
+_register_extended_endpoints(app, {})
 
 app.add_middleware(
     CORSMiddleware,
@@ -1151,7 +1173,7 @@ ALGORITHM = "HS256"
 
 # In-memory user store (use DB in production)
 users_db: Dict[str, Dict] = {
-    "admin": {"password": "admin", "role": "coordinator", "name": "Admin"},
+    "admin": {"password": "adminpass", "role": "admin", "name": "Admin"},
     "observer": {"password": "observer", "role": "observer", "name": "Observer"},
 }
 

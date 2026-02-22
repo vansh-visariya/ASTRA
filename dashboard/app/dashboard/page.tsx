@@ -5,7 +5,7 @@ import { useAuth } from '@/components/AuthContext';
 import { Layers, Users, Activity, Shield, Zap, TrendingUp, Plus } from 'lucide-react';
 import Link from 'next/link';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://10.146.11.202:8000';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 interface SystemMetrics {
   total_groups: number;
