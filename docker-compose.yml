@@ -1,0 +1,88 @@
+version: '3.8'
+
+services:
+  # ===========================================================================
+  # Federated Learning API Server
+  # ===========================================================================
+  fl_server:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    container_name: fl_server
+    ports:
+      - "8000:8000"
+    environment:
+      - ENV=${ENV:-dev}
+      - SERVER_HOST=0.0.0.0
+      - SERVER_PORT=8000
+      - DB_PATH=/data/experiments.db
+      - SECRET_KEY=${SECRET_KEY:-dev-secret-key}
+      - JWT_ALGORITHM=HS256
+      - ACCESS_TOKEN_EXPIRE_MINUTES=60
+    volumes:
+      - ./data:/data
+      - ./models:/models
+    networks:
+      - fl_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ===========================================================================
+  # Dashboard (React Frontend)
+  # ===========================================================================
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    container_name: fl_dashboard
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://fl_server:8000
+      - REACT_APP_WS_URL=ws://fl_server:8000
+    depends_on:
+      - fl_server
+    networks:
+      - fl_network
+    restart: unless-stopped
+
+  # ===========================================================================
+  # Client Template (for multi-PC deployment)
+  # ===========================================================================
+  client_template:
+    build:
+      context: .
+      dockerfile: Dockerfile.client
+    container_name: fl_client_template
+    environment:
+      - SERVER_URL=http://fl_server:8000
+      - CLIENT_MODE=websocket
+    networks:
+      - fl_network
+    restart: on-failure
+
+  # ===========================================================================
+  # Optional: Redis for caching
+  # ===========================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: fl_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - fl_network
+    profiles:
+      - production
+
+networks:
+  fl_network:
+    driver: bridge
+
+volumes:
+  redis_data:
