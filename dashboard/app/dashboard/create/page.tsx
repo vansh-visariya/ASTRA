@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/components/AuthContext';
-import { Layers, Brain, Clock, Shield, Zap, ArrowLeft, Plus } from 'lucide-react';
+import { Layers, Brain, Clock, Shield, Zap, ArrowLeft, Plus, Sparkles, ExternalLink, Loader2 } from 'lucide-react';
 import Link from 'next/link';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -17,11 +17,25 @@ interface Model {
   source: string;
 }
 
+interface Recommendation {
+  id: string;
+  model_type: string;
+  model_size: string;
+  estimated_params: number;
+  expected_accuracy: number;
+  reasoning: string;
+  source: string;
+  model_id: string;
+  model_name: string;
+}
+
 export default function CreateGroupPage() {
   const { token, user } = useAuth();
   const router = useRouter();
   const [models, setModels] = useState<Model[]>([]);
+  const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [loading, setLoading] = useState(false);
+  // main branch: model choice & HF search/register states
   const [modelChoice, setModelChoice] = useState<'registry' | 'huggingface' | 'custom'>('registry');
   const [hfQuery, setHfQuery] = useState('');
   const [hfResults, setHfResults] = useState<string[]>([]);
@@ -32,6 +46,19 @@ export default function CreateGroupPage() {
   const [customArchitecture, setCustomArchitecture] = useState('cnn');
   const [customModelType, setCustomModelType] = useState('vision');
   const [customDataset, setCustomDataset] = useState('MNIST');
+  // temp branch: AI recommendations & quick HF add states
+  const [loadingRecs, setLoadingRecs] = useState(false);
+  const [showHfForm, setShowHfForm] = useState(false);
+  const [hfUrl, setHfUrl] = useState('');
+  const [addingHf, setAddingHf] = useState(false);
+  const [metadata, setMetadata] = useState({
+    dataset_size: 5000,
+    num_classes: 10,
+    has_gpu: false,
+    gpu_memory_mb: null as number | null,
+    cpu_cores: null as number | null,
+  });
+
   const [form, setForm] = useState({
     group_id: '',
     model_id: 'simple_cnn_mnist',
@@ -61,6 +88,7 @@ export default function CreateGroupPage() {
     fetchModels();
   }, [token]);
 
+  // main branch: HuggingFace search
   const searchHuggingFace = async () => {
     if (!hfQuery.trim()) {
       setHfResults([]);
@@ -78,6 +106,7 @@ export default function CreateGroupPage() {
     }
   };
 
+  // main branch: register HF model via API
   const registerHfModel = async (): Promise<string> => {
     const params = new URLSearchParams({
       model_name: hfModelName,
@@ -96,6 +125,7 @@ export default function CreateGroupPage() {
     return data.model?.model_id || data.model_id;
   };
 
+  // main branch: register custom model
   const registerCustomModel = async (): Promise<string> => {
     const params = new URLSearchParams({
       model_id: customModelId,
@@ -127,10 +157,82 @@ export default function CreateGroupPage() {
     return data.model?.model_id || customModelId;
   };
 
+  // temp branch: fetch AI recommendations
+  const fetchRecommendations = async () => {
+    setLoadingRecs(true);
+    try {
+      const res = await fetch(`${API_URL}/api/recommendations/unified`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(metadata)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setRecommendations(data.recommendations || []);
+      }
+    } catch (e) {
+      console.error('Failed to fetch recommendations:', e);
+    }
+    setLoadingRecs(false);
+  };
+
+  // temp branch: quick add HuggingFace model by URL
+  const handleAddHuggingFace = async () => {
+    if (!hfUrl.trim()) return;
+    setAddingHf(true);
+    try {
+      const res = await fetch(`${API_URL}/api/recommendations/add-huggingface`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ model_url: hfUrl, use_peft: false })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          setForm({ ...form, model_id: data.model.model_id });
+          setShowHfForm(false);
+          setHfUrl('');
+          // Refresh models
+          const refreshRes = await fetch(`${API_URL}/api/models`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (refreshRes.ok) {
+            const refreshData = await refreshRes.json();
+            setModels(refreshData.models || []);
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Failed to add HF model:', e);
+    }
+    setAddingHf(false);
+  };
+
+  // temp branch: select an AI recommendation
+  const handleSelectRecommendation = (rec: Recommendation) => {
+    if (rec.model_id) {
+      setModelChoice('registry');
+      setForm({ ...form, model_id: rec.model_id });
+    } else {
+      const matching = models.find(m => m.model_type === rec.model_type);
+      if (matching) {
+        setModelChoice('registry');
+        setForm({ ...form, model_id: matching.model_id });
+      }
+    }
+  };
+
+  // main branch: handleSubmit with modelChoice-based registration
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    
+
     try {
       let selectedModelId = form.model_id;
       if (modelChoice === 'huggingface') {
@@ -141,13 +243,13 @@ export default function CreateGroupPage() {
       }
       const res = await fetch(`${API_URL}/api/groups`, {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({ ...form, model_id: selectedModelId })
       });
-      
+
       if (res.ok) {
         router.push('/dashboard/groups');
       } else {
@@ -167,16 +269,30 @@ export default function CreateGroupPage() {
     return num.toString();
   };
 
-  if (user?.role !== 'coordinator') {
+  // temp branch: source badge for recommendations
+  const getSourceBadge = (source: string) => {
+    switch (source) {
+      case 'gemini':
+        return <span className="text-xs px-2 py-0.5 rounded bg-purple-900/50 text-purple-400">AI</span>;
+      case 'builtin':
+        return <span className="text-xs px-2 py-0.5 rounded bg-blue-900/50 text-blue-400">Built-in</span>;
+      case 'huggingface':
+        return <span className="text-xs px-2 py-0.5 rounded bg-yellow-900/50 text-yellow-400">HF</span>;
+      default:
+        return null;
+    }
+  };
+
+  if (!user || user.role !== 'admin') {
     return (
       <div className="flex items-center justify-center h-64">
-        <p className="text-gray-400">Access denied. Coordinators only.</p>
+        <p className="text-gray-400">Access denied. Admins only.</p>
       </div>
     );
   }
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
+    <div className="max-w-6xl mx-auto space-y-6">
       <div className="flex items-center gap-4">
         <Link href="/dashboard/groups" className="p-2 hover:bg-gray-800 rounded-lg transition">
           <ArrowLeft size={20} className="text-gray-400" />
@@ -188,6 +304,7 @@ export default function CreateGroupPage() {
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
+        {/* Basic Info */}
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
           <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
             <Layers size={20} className="text-indigo-400" />
@@ -221,10 +338,141 @@ export default function CreateGroupPage() {
           </div>
         </div>
 
+        {/* AI Recommendations (from temp branch) */}
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+              <Sparkles size={20} className="text-purple-400" />
+              AI Model Recommendations
+            </h2>
+            <button
+              type="button"
+              onClick={fetchRecommendations}
+              disabled={loadingRecs}
+              className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 rounded-lg text-white text-sm flex items-center gap-2 transition"
+            >
+              {loadingRecs ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+              Get Recommendations
+            </button>
+          </div>
+
+          {/* Metadata inputs for recommendations */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+            <div>
+              <label className="block text-gray-500 text-xs mb-1">Dataset Size</label>
+              <input
+                type="number"
+                value={metadata.dataset_size}
+                onChange={(e) => setMetadata({ ...metadata, dataset_size: parseInt(e.target.value) })}
+                className="w-full bg-gray-950 border border-gray-800 rounded-lg py-2 px-3 text-white text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-gray-500 text-xs mb-1">Num Classes</label>
+              <input
+                type="number"
+                value={metadata.num_classes}
+                onChange={(e) => setMetadata({ ...metadata, num_classes: parseInt(e.target.value) })}
+                className="w-full bg-gray-950 border border-gray-800 rounded-lg py-2 px-3 text-white text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-gray-500 text-xs mb-1">Has GPU</label>
+              <button
+                type="button"
+                onClick={() => setMetadata({ ...metadata, has_gpu: !metadata.has_gpu })}
+                className={`w-full py-2 rounded-lg border text-sm transition ${
+                  metadata.has_gpu ? 'bg-green-900/30 border-green-600 text-green-400' : 'bg-gray-950 border-gray-800 text-gray-400'
+                }`}
+              >
+                {metadata.has_gpu ? 'Yes' : 'No'}
+              </button>
+            </div>
+            <div>
+              <label className="block text-gray-500 text-xs mb-1">CPU Cores</label>
+              <input
+                type="number"
+                value={metadata.cpu_cores || ''}
+                onChange={(e) => setMetadata({ ...metadata, cpu_cores: parseInt(e.target.value) || null })}
+                className="w-full bg-gray-950 border border-gray-800 rounded-lg py-2 px-3 text-white text-sm"
+                placeholder="e.g., 4"
+              />
+            </div>
+          </div>
+
+          {recommendations.length > 0 && (
+            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-3">
+              {recommendations.map((rec) => (
+                <button
+                  key={rec.id}
+                  type="button"
+                  onClick={() => handleSelectRecommendation(rec)}
+                  className={`p-3 rounded-lg border text-left transition ${
+                    form.model_id === rec.model_id
+                      ? 'border-purple-500 bg-purple-900/20'
+                      : 'border-gray-800 hover:border-gray-700 bg-gray-950'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    {getSourceBadge(rec.source)}
+                    <span className="text-xs text-gray-500">{rec.model_size}</span>
+                  </div>
+                  <p className="text-white font-medium text-sm truncate">{rec.model_type}</p>
+                  <p className="text-gray-500 text-xs mt-1">{formatParams(rec.estimated_params)} params</p>
+                  <p className="text-purple-400 text-xs mt-1">Acc: {(rec.expected_accuracy * 100).toFixed(0)}%</p>
+                  <p className="text-gray-600 text-xs mt-1 line-clamp-2">{rec.reasoning}</p>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Add HuggingFace Model (quick add from temp branch) */}
+          <div className="mt-4 pt-4 border-t border-gray-800">
+            {!showHfForm ? (
+              <button
+                type="button"
+                onClick={() => setShowHfForm(true)}
+                className="text-sm text-yellow-400 hover:text-yellow-300 flex items-center gap-1"
+              >
+                <ExternalLink size={14} />
+                Add from HuggingFace
+              </button>
+            ) : (
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={hfUrl}
+                  onChange={(e) => setHfUrl(e.target.value)}
+                  placeholder="e.g., facebook/resnet-50 or https://huggingface.co/facebook/resnet-50"
+                  className="flex-1 bg-gray-950 border border-gray-800 rounded-lg py-2 px-3 text-white text-sm"
+                />
+                <button
+                  type="button"
+                  onClick={handleAddHuggingFace}
+                  disabled={addingHf || !hfUrl.trim()}
+                  className="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 disabled:opacity-50 rounded-lg text-white text-sm flex items-center gap-2"
+                >
+                  {addingHf ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+                  Add
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setShowHfForm(false); setHfUrl(''); }}
+                  className="px-3 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-gray-400 text-sm"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Model Selection (combined from both branches) */}
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
           <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
             <Brain size={20} className="text-indigo-400" />
             Model Configuration
+            <span className="text-gray-500 text-sm font-normal">(Selected: {form.model_id})</span>
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <button
@@ -410,6 +658,7 @@ export default function CreateGroupPage() {
           )}
         </div>
 
+        {/* Training Config */}
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
           <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
             <Zap size={20} className="text-indigo-400" />
@@ -464,6 +713,7 @@ export default function CreateGroupPage() {
           </div>
         </div>
 
+        {/* Async Window */}
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
           <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
             <Clock size={20} className="text-indigo-400" />

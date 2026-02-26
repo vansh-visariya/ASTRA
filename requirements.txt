@@ -25,3 +25,4 @@ pyjwt>=2.8.0
 requests>=2.31.0
 fastapi_socketio
 aiohttp
+bcrypt>=4.1.0

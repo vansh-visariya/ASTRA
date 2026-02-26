@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { Layers, Eye, Play, Pause, Square, RefreshCw, Lock, Clock, Users } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://10.146.11.202:8000';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 interface Group {
   group_id: string;
@@ -91,7 +91,7 @@ export default function GroupsPage() {
           <button onClick={fetchGroups} className="p-2 bg-gray-800 hover:bg-gray-700 rounded-lg transition">
             <RefreshCw size={18} className="text-gray-400" />
           </button>
-          {user?.role === 'coordinator' && (
+          {user?.role === 'admin' && (
             <Link href="/dashboard/create" className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-lg text-white font-medium transition">
               + Create Group
             </Link>
@@ -104,7 +104,7 @@ export default function GroupsPage() {
           <Layers size={48} className="mx-auto text-gray-600 mb-4" />
           <h3 className="text-white font-semibold mb-2">No groups yet</h3>
           <p className="text-gray-400 mb-4">Create your first federated learning group to get started.</p>
-          {user?.role === 'coordinator' && (
+          {user?.role === 'admin' && (
             <Link href="/dashboard/create" className="inline-flex px-4 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-lg text-white font-medium transition">
               Create Group
             </Link>
@@ -167,7 +167,7 @@ export default function GroupsPage() {
                   </td>
                   <td className="p-4">
                     <div className="flex items-center justify-end gap-2">
-                      {group.is_training && user?.role === 'coordinator' && (
+                      {group.is_training && user?.role === 'admin' && (
                         <>
                           <button onClick={() => controlGroup(group.group_id, 'pause')} className="p-2 bg-yellow-600 hover:bg-yellow-700 rounded-lg transition" title="Pause">
                             <Pause size={14} className="text-white" />
@@ -177,7 +177,7 @@ export default function GroupsPage() {
                           </button>
                         </>
                       )}
-                      {group.status === 'PAUSED' && user?.role === 'coordinator' && (
+                      {group.status === 'PAUSED' && user?.role === 'admin' && (
                         <button onClick={() => controlGroup(group.group_id, 'resume')} className="p-2 bg-green-600 hover:bg-green-700 rounded-lg transition" title="Resume">
                           <Play size={14} className="text-white" />
                         </button>
