@@ -68,8 +68,8 @@ export default function GroupDetailPage() {
         ? `${API_URL}/api/logs?group_id=${id}&event_type=${logFilter}`
         : `${API_URL}/api/logs?group_id=${id}`;
 
-      const requestsPromise = user?.role === 'admin' 
-        ? fetch(`${API_URL}/api/groups/join-requests?group_id=${id}`, { headers: { 'Authorization': `Bearer ${token}` } })
+      const requestsPromise = user?.role === 'admin'
+        ? fetch(`${API_URL}/api/join/join-requests?group_id=${id}`, { headers: { 'Authorization': `Bearer ${token}` } })
         : Promise.resolve({ ok: true, json: async () => ({ requests: [] }) });
 
       const [groupRes, clientsRes, logsRes, requestsRes] = await Promise.all([
@@ -104,7 +104,7 @@ export default function GroupDetailPage() {
   };
 
   const handleApproveRequest = async (requestId: number) => {
-    await fetch(`${API_URL}/api/groups/join-requests/approve`, {
+    await fetch(`${API_URL}/api/join/join-requests/approve`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ request_id: requestId, group_id: id, join_token: 'AUTO' })
@@ -113,7 +113,7 @@ export default function GroupDetailPage() {
   };
 
   const handleRejectRequest = async (requestId: number) => {
-    await fetch(`${API_URL}/api/groups/join-requests/reject`, {
+    await fetch(`${API_URL}/api/join/join-requests/reject`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ request_id: requestId, group_id: id, reason: 'Rejected' })
@@ -188,7 +188,7 @@ export default function GroupDetailPage() {
           </div>
           <p className="text-gray-400">{group.model_id} • Version {group.model_version}</p>
         </div>
-        
+
         {user?.role === 'admin' && (
           <div className="flex gap-2">
             {group.is_training && (
@@ -220,11 +220,10 @@ export default function GroupDetailPage() {
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
-            className={`px-4 py-3 text-sm font-medium capitalize transition border-b-2 ${
-              activeTab === tab
+            className={`px-4 py-3 text-sm font-medium capitalize transition border-b-2 ${activeTab === tab
                 ? 'border-indigo-500 text-indigo-400'
                 : 'border-transparent text-gray-400 hover:text-white'
-            }`}
+              }`}
           >
             {tab}
           </button>
@@ -244,7 +243,7 @@ export default function GroupDetailPage() {
               </div>
             </div>
           )}
-          
+
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
               <div className="flex items-center gap-3 mb-2">
@@ -337,11 +336,11 @@ export default function GroupDetailPage() {
         <div className="space-y-6">
           {/* Debug info */}
           <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-            <p className="text-gray-400 text-sm">User: {user?.username} | Role: {user?.role} | Requests: {joinRequests.length}</p>
+            <p className="text-gray-400 text-sm">User: {user?.username} | Role: {user?.role} | Requests: {joinRequests.length} | debug: {joinRequests.filter((r: any) => r.status === 'pending').length}</p>
           </div>
-          
+
           {/* Pending Join Requests - Show for admin */}
-          {(user?.role === 'admin' || user?.role === 'coordinator') && joinRequests.filter((r: any) => r.status === 'pending').length > 0 && (
+          {(user?.role === 'admin') && joinRequests.filter((r: any) => r.status === 'pending').length > 0 && (
             <div className="bg-yellow-900/20 border border-yellow-800 rounded-xl p-6">
               <h3 className="text-lg font-semibold text-yellow-400 mb-4">Pending Join Requests</h3>
               <div className="space-y-3">
@@ -374,48 +373,48 @@ export default function GroupDetailPage() {
           {/* Connected Clients */}
           <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
             {clients.length === 0 ? (
-            <div className="p-12 text-center text-gray-400">
-              <Users size={48} className="mx-auto mb-4 opacity-50" />
-              <p>No participants connected</p>
-            </div>
-          ) : (
-            <table className="w-full">
-              <thead className="bg-gray-950">
-                <tr>
-                  <th className="text-left p-4 text-gray-400">Client</th>
-                  <th className="text-left p-4 text-gray-400">Status</th>
-                  <th className="text-left p-4 text-gray-400">Updates</th>
-                  <th className="text-left p-4 text-gray-400">Accuracy</th>
-                  <th className="text-left p-4 text-gray-400">Loss</th>
-                  <th className="text-left p-4 text-gray-400">Trust</th>
-                </tr>
-              </thead>
-              <tbody>
-                {clients.map((client) => (
-                  <tr key={client.client_id} className="border-t border-gray-800">
-                    <td className="p-4 text-white font-mono">{client.client_id}</td>
-                    <td className="p-4">
-                      <span className={`px-3 py-1 rounded-full text-xs ${client.status === 'active' ? 'bg-green-900/50 text-green-400' : 'bg-gray-700 text-gray-400'}`}>
-                        {client.status}
-                      </span>
-                    </td>
-                    <td className="p-4 text-gray-300">{client.updates_count || 0}</td>
-                    <td className="p-4 text-green-400">{formatAccuracyPercent(client.local_accuracy)}</td>
-                    <td className="p-4 text-red-400">{(client.local_loss || 0).toFixed(4)}</td>
-                    <td className="p-4">
-                      <div className="flex items-center gap-2">
-                        <div className="w-20 h-2 bg-gray-700 rounded-full">
-                          <div className="h-full bg-green-500 rounded-full" style={{ width: `${(client.trust_score || 0) * 100}%` }} />
-                        </div>
-                        <span className="text-gray-400 text-sm">{(client.trust_score || 0).toFixed(0)}%</span>
-                      </div>
-                    </td>
+              <div className="p-12 text-center text-gray-400">
+                <Users size={48} className="mx-auto mb-4 opacity-50" />
+                <p>No participants connected</p>
+              </div>
+            ) : (
+              <table className="w-full">
+                <thead className="bg-gray-950">
+                  <tr>
+                    <th className="text-left p-4 text-gray-400">Client</th>
+                    <th className="text-left p-4 text-gray-400">Status</th>
+                    <th className="text-left p-4 text-gray-400">Updates</th>
+                    <th className="text-left p-4 text-gray-400">Accuracy</th>
+                    <th className="text-left p-4 text-gray-400">Loss</th>
+                    <th className="text-left p-4 text-gray-400">Trust</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
+                </thead>
+                <tbody>
+                  {clients.map((client) => (
+                    <tr key={client.client_id} className="border-t border-gray-800">
+                      <td className="p-4 text-white font-mono">{client.client_id}</td>
+                      <td className="p-4">
+                        <span className={`px-3 py-1 rounded-full text-xs ${client.status === 'active' ? 'bg-green-900/50 text-green-400' : 'bg-gray-700 text-gray-400'}`}>
+                          {client.status}
+                        </span>
+                      </td>
+                      <td className="p-4 text-gray-300">{client.updates_count || 0}</td>
+                      <td className="p-4 text-green-400">{formatAccuracyPercent(client.local_accuracy)}</td>
+                      <td className="p-4 text-red-400">{(client.local_loss || 0).toFixed(4)}</td>
+                      <td className="p-4">
+                        <div className="flex items-center gap-2">
+                          <div className="w-20 h-2 bg-gray-700 rounded-full">
+                            <div className="h-full bg-green-500 rounded-full" style={{ width: `${(client.trust_score || 0) * 100}%` }} />
+                          </div>
+                          <span className="text-gray-400 text-sm">{(client.trust_score || 0).toFixed(0)}%</span>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
         </div>
       )}
 

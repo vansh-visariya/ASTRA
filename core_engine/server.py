@@ -116,13 +116,18 @@ class AsyncServer:
                 'delta': update_vector,
                 'staleness_weight': staleness_weight,
                 'trust': trust_score,
-                'timestamp': client_update.get('timestamp', time.time())
+                'timestamp': client_update.get('timestamp', time.time()),
+                'local_dataset_size': client_update.get('local_dataset_size', 1)
             })
             
             self._maybe_aggregate()
     
     def _decode_update(self, encoded_update: Any) -> np.ndarray:
         """Decode client update from transport format."""
+        if encoded_update is None:
+            self.logger.warning("Received null update, returning zero array")
+            return np.array([], dtype=np.float32)
+        
         if isinstance(encoded_update, bytes):
             return np.frombuffer(encoded_update, dtype=np.float32)
         elif isinstance(encoded_update, np.ndarray):
@@ -173,7 +178,7 @@ class AsyncServer:
             
             if param_idx + param_size <= len(delta):
                 param_data = delta[param_idx:param_idx + param_size].reshape(param_shape)
-                param.data.add_(torch.from_numpy(param_data).float()).to(param.data.device)
+                param.data.add_(torch.from_numpy(param_data).float().to(param.device))
             param_idx += param_size
     
     def _check_adaptive_lr(self) -> None:

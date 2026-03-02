@@ -22,10 +22,8 @@ import asyncio
 import base64
 import json
 import logging
-import sys
 import time
 import uuid
-from pathlib import Path
 from typing import Any, Dict, Optional
 
 import numpy as np
@@ -226,10 +224,6 @@ class FederatedClient:
 
         elif msg_type == 'training_stopped':
             self.logger.info("Training stopped by server")
-
-        elif msg_type == 'train_command':
-            # Legacy: still handle direct train commands for backward compat
-            await self._run_training()
 
         elif msg_type == 'config_update':
             self.config.update(message.get('config', {}))
@@ -522,23 +516,7 @@ class FederatedClient:
         # which triggers the next training round automatically
         await self.listen()
 
-    async def _check_group_status(self):
-        """Check if the group is already in TRAINING state and start loop if so."""
-        try:
-            import aiohttp
-            async with aiohttp.ClientSession() as session:
-                group_id = getattr(self, 'group_id', 'group_a')
-                url = f"{self.server_url}/api/groups/{group_id}"
-                async with session.get(url) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        group = data.get('group', {})
-                        if group.get('is_training'):
-                            self.training_allowed = True
-                            self.logger.info("Group already training - starting autonomous training")
-                            self._start_training_loop()
-        except Exception as e:
-            self.logger.debug(f"Could not check group status: {e}")
+
 
 
 class RESTClient:

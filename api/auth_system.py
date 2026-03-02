@@ -26,12 +26,20 @@ import jwt
 import bcrypt
 
 
-# NOTE: In production you MUST override this via the SECRET_KEY environment variable.
-SECRET_KEY = os.getenv("SECRET_KEY", "dev_secret_key_change_in_production")
-if SECRET_KEY == "dev_secret_key_change_in_production":
+# Security: SECRET_KEY MUST be set via environment variable in production.
+# In development, a fallback is used with a loud warning.
+SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    _env = os.getenv("ENV", "dev").lower()
+    if _env == "prod":
+        raise RuntimeError(
+            "FATAL: SECRET_KEY environment variable is not set. "
+            "This is required in production. Set a random string of at least 32 characters."
+        )
+    SECRET_KEY = "dev_secret_key_change_in_production"
     logging.getLogger(__name__).warning(
-        "Using default development SECRET_KEY. "
-        "Set the SECRET_KEY environment variable for production deployments."
+        "SECRET_KEY not set — using insecure default. "
+        "Set the SECRET_KEY environment variable before deploying to production."
     )
 ALGORITHM = "HS256"
 TOKEN_EXPIRY_HOURS = 24
@@ -444,7 +452,7 @@ class JoinRequestManager:
             cursor = conn.cursor()
             if group_id:
                 cursor.execute(
-                    '''SELECT jr.id, jr.group_id, jr.user_id, u.username, jr.requested_at, jr.metadata_json
+                    '''SELECT jr.id, jr.group_id, jr.user_id, u.username, jr.status, jr.requested_at, jr.metadata_json
                        FROM join_requests jr
                        JOIN users u ON jr.user_id = u.id
                        WHERE jr.group_id = ? AND jr.status = 'pending'
@@ -453,7 +461,7 @@ class JoinRequestManager:
                 )
             else:
                 cursor.execute(
-                    '''SELECT jr.id, jr.group_id, jr.user_id, u.username, jr.requested_at, jr.metadata_json
+                    '''SELECT jr.id, jr.group_id, jr.user_id, u.username, jr.status, jr.requested_at, jr.metadata_json
                        FROM join_requests jr
                        JOIN users u ON jr.user_id = u.id
                        WHERE jr.status = 'pending'
@@ -467,6 +475,7 @@ class JoinRequestManager:
                     'group_id': row['group_id'],
                     'user_id': row['user_id'],
                     'username': row['username'],
+                    'status': row['status'],
                     'requested_at': row['requested_at'],
                     'metadata': json.loads(row['metadata_json']) if row['metadata_json'] else {}
                 }

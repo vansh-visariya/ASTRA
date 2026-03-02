@@ -117,7 +117,8 @@ def hybrid_aggregator(
     updates: List[np.ndarray],
     trust_scores: List[float],
     staleness_weights: List[float],
-    config: Dict[str, Any]
+    config: Dict[str, Any],
+    dataset_sizes: List[int] = None
 ) -> np.ndarray:
     """
     Hybrid robust aggregator with multiple filtering stages.
@@ -143,6 +144,9 @@ def hybrid_aggregator(
     
     if len(updates) == 1:
         return updates[0].copy()
+    
+    if dataset_sizes is None:
+        dataset_sizes = [1] * len(updates)
     
     robust_config = config.get('robust', {})
     trust_config = config.get('trust', {})
@@ -197,14 +201,17 @@ def hybrid_aggregator(
     similarity_scores = np.array(similarity_scores)
     similarity_mask = similarity_scores >= sim_threshold
     
-    final_updates = [filtered_updates[i] for i in range(len(filtered_updates)) if similarity_mask[i]]
-    final_trust = [filtered_trust[i] for i in range(len(filtered_trust)) if similarity_mask[i]]
-    final_staleness = [staleness_weights[i] for i in range(len(staleness_weights)) if similarity_mask[i]]
+    final_indices = [i for i in range(len(filtered_updates)) if similarity_mask[i]]
+    final_updates = [filtered_updates[i] for i in final_indices]
+    final_trust = [filtered_trust[i] for i in final_indices]
+    final_staleness = [staleness_weights[i] for i in final_indices]
+    final_dataset_sizes = [dataset_sizes[i] for i in final_indices] if dataset_sizes else None
     
     if not final_updates:
         final_updates = [filtered_updates[0]]
         final_trust = [filtered_trust[0]]
         final_staleness = [1.0]
+        final_dataset_sizes = [1]
     
     robust_delta = trimmed_mean(final_updates, trim_ratio)
     
@@ -213,7 +220,11 @@ def hybrid_aggregator(
     trust_weights = compute_trust_weights(final_trust, trust_power)
     staleness_w = np.array(final_staleness)
     
-    combined_weights = trust_weights * staleness_w
+    if final_dataset_sizes is not None and len(final_dataset_sizes) == len(final_updates):
+        data_weights = np.array(final_dataset_sizes) / sum(final_dataset_sizes)
+        combined_weights = trust_weights * staleness_w * data_weights
+    else:
+        combined_weights = trust_weights * staleness_w
     combined_weights = np.nan_to_num(combined_weights, nan=0.0)
     combined_weights = combined_weights / (np.sum(combined_weights) + 1e-8)
     

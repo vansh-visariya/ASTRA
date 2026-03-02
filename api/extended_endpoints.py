@@ -210,7 +210,8 @@ def create_auth_router(platform: FLPlatformIntegration) -> APIRouter:
 def create_group_join_router(platform: FLPlatformIntegration) -> APIRouter:
     """Create group joining router."""
     
-    router = APIRouter(prefix="/api/groups", tags=["Group Joining"])
+    # Use /api/join prefix to avoid conflict with /api/groups/{group_id} catch-all
+    router = APIRouter(prefix="/api/join", tags=["Group Joining"])
     
     @router.post("/join-request")
     async def request_join_group(
@@ -236,7 +237,7 @@ def create_group_join_router(platform: FLPlatformIntegration) -> APIRouter:
     ):
         """Get pending join requests (admin only)."""
         requests = platform.get_join_requests(
-            token=None,  # Already verified by require_admin
+            token=None,  # Already verified by require_admin dependency
             group_id=group_id
         )
         return {"requests": requests, "count": len(requests)}
@@ -290,7 +291,6 @@ def create_group_join_router(platform: FLPlatformIntegration) -> APIRouter:
         result = platform.reject_join_request(
             token=token,
             request_id=request.request_id,
-            group_id=request.group_id,
             reason=request.reason
         )
         

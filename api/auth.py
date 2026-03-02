@@ -53,7 +53,7 @@ class AuthToken:
         payload = {
             "client_id": client_id,
             "role": role.value,
-            "exp": expire.isoformat()
+            "exp": expire
         }
         
         return jwt.encode(payload, self.secret_key, algorithm=self.algorithm)

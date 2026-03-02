@@ -210,13 +210,18 @@ class FLPlatformIntegration:
     
     def get_join_requests(
         self,
-        token: str,
+        token: Optional[str],
         group_id: Optional[str] = None
     ) -> List[Dict[str, Any]]:
-        """Get pending join requests (admin only)."""
-        payload = self.require_role(token, ['admin'])
-        if not payload:
-            return []
+        """Get pending join requests (admin only).
+        
+        If token is None, assumes caller already verified admin access
+        (e.g., via FastAPI Depends(require_admin)).
+        """
+        if token is not None:
+            payload = self.require_role(token, ['admin'])
+            if not payload:
+                return []
         
         return self.auth_manager.join_request_manager.get_pending_requests(group_id)
     
@@ -233,31 +238,33 @@ class FLPlatformIntegration:
             return {'success': False, 'error': 'Unauthorized'}
         
         # Get request details
-        requests = self.auth_manager.join_request_manager.get_pending_requests(group_id)
-        request = next((r for r in requests if r['id'] == request_id), None)
+        pending = self.auth_manager.join_request_manager.get_pending_requests(group_id)
+        target_request = next((r for r in pending if r['id'] == request_id), None)
         
-        if not request:
+        if not target_request:
             return {'success': False, 'error': 'Request not found'}
         
-        # Create and validate token
-        token, nonce = self.auth_manager.token_manager.create_join_token(group_id, request['user_id'])
+        # Create a secure join token for the user
+        secure_join_token, nonce = self.auth_manager.token_manager.create_join_token(
+            group_id, target_request['user_id']
+        )
         
         # Update request
         success = self.auth_manager.join_request_manager.approve_request(
             request_id,
             admin_payload['user_id'],
-            token
+            secure_join_token
         )
         
         if success:
             # Notify user
             self.notification_service.notify_join_approved(
-                user_id=request['user_id'],
+                user_id=target_request['user_id'],
                 group_id=group_id,
-                token=token  # In production, this should be encrypted
+                token=secure_join_token  # In production, this should be encrypted
             )
             
-            return {'success': True, 'token': token}
+            return {'success': True, 'token': secure_join_token}
         
         return {'success': False, 'error': 'Failed to approve request'}
     
@@ -272,23 +279,22 @@ class FLPlatformIntegration:
         if not admin_payload:
             return {'success': False, 'error': 'Unauthorized'}
         
+        # Fetch request details BEFORE rejecting (so it's still 'pending')
+        all_pending = self.auth_manager.join_request_manager.get_pending_requests()
+        target_request = next((r for r in all_pending if r['id'] == request_id), None)
+        
         success = self.auth_manager.join_request_manager.reject_request(
             request_id,
             admin_payload['user_id']
         )
         
-        # Notify user
-        if success:
-            # Get request details for notification
-            requests = self.auth_manager.join_request_manager.get_pending_requests()
-            request = next((r for r in requests if r['id'] == request_id), None)
-            
-            if request:
-                self.notification_service.notify_join_rejected(
-                    user_id=request['user_id'],
-                    group_id=request['group_id'],
-                    reason=reason
-                )
+        # Notify user using details captured before rejection
+        if success and target_request:
+            self.notification_service.notify_join_rejected(
+                user_id=target_request['user_id'],
+                group_id=target_request['group_id'],
+                reason=reason
+            )
         
         return {'success': success}
     

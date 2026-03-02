@@ -33,7 +33,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import torch
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -293,6 +293,12 @@ class GroupManager:
         logger.debug(f"NORMALIZE: Input meta={update.get('meta', {}).get('train_accuracy', 0)}")
         if 'delta' not in update:
             update['delta'] = self._decode_local_updates(update.get('local_updates'))
+        # Validate: reject NaN/Inf updates that would poison the global model
+        delta = update.get('delta')
+        if delta is not None and hasattr(delta, '__len__') and len(delta) > 0:
+            if np.any(np.isnan(delta)) or np.any(np.isinf(delta)):
+                logger.warning("Rejecting update with NaN/Inf values")
+                update['delta'] = np.zeros_like(delta)
         update.setdefault('dataset_size', update.get('local_dataset_size', 1))
         update.setdefault('staleness_weight', 1.0)
         update.setdefault('trust', 1.0)
@@ -510,6 +516,23 @@ class GroupManager:
                 f"Aggregated group {group_id}: {len(updates)} clients, v{group.model_version}, acc={global_accuracy:.4f}, loss={global_loss:.4f}"
             )
 
+            # Broadcast to all connected WebSocket clients (including dashboard)
+            if self.connection_manager:
+                import asyncio
+                try:
+                    asyncio.create_task(self.connection_manager.broadcast({
+                        'type': 'aggregation_complete',
+                        'group_id': group_id,
+                        'version': group.model_version,
+                        'accuracy': global_accuracy,
+                        'loss': global_loss,
+                        'contributing_clients': len(updates),
+                        'completed_rounds': group.completed_rounds,
+                        'timestamp': time.time()
+                    }))
+                except RuntimeError:
+                    pass  # No event loop running (e.g., during tests)
+
             if group.max_rounds is not None and group.completed_rounds >= group.max_rounds:
                 group.is_training = False
                 group.status = 'COMPLETED'
@@ -565,6 +588,22 @@ class GroupManager:
 
         await self.broadcast_to_group(group_id, {
             'type': 'training_started',
+            'group_id': group_id,
+            'config': {
+                'local_epochs': group.config.get('local_epochs', 2),
+                'batch_size': group.config.get('batch_size', 32),
+                'lr': group.config.get('lr', 0.01),
+            }
+        })
+
+    async def trigger_clients_training(self, group_id: str):
+        """Explicitly trigger a new local training round for all clients in a group."""
+        group = self.groups.get(group_id)
+        if not group:
+            return
+
+        await self.broadcast_to_group(group_id, {
+            'type': 'train_command',
             'group_id': group_id,
             'config': {
                 'local_epochs': group.config.get('local_epochs', 2),
@@ -1023,12 +1062,10 @@ async def lifespan(app: FastAPI):
     from aiohttp import web
     socketio_app = web.Application()
     
-    # Start background timer for time-based aggregation
-    aggregation_timer_task = asyncio.create_task(_aggregation_timer())
+    # Note: time-based aggregation is handled by per-group _training_watchdog
     
     yield
     
-    aggregation_timer_task.cancel()
     if fl_server:
         fl_server.stop_experiment()
 
@@ -1051,36 +1088,20 @@ def _register_extended_endpoints(app, config):
         print(f"[WARN] Could not register extended endpoints: {e}")
 
 
-async def _aggregation_timer():
-    """Background task: check all groups for time-based aggregation trigger."""
-    while True:
-        await asyncio.sleep(5)  # check every 5 seconds
-        if not fl_server:
-            continue
-        for group_id, group in list(fl_server.group_manager.groups.items()):
-            if len(group.pending_updates) == 0:
-                continue
-            elapsed = time.time() - group.last_aggregation_time
-            if elapsed >= group.window_config.time_limit:
-                agg_result = fl_server.group_manager.aggregate_group(group_id)
-                if agg_result:
-                    await fl_server.group_manager.broadcast_to_group(group_id, {
-                        'type': 'model_update',
-                        'version': agg_result['version'],
-                        'group_id': group_id,
-                        'accuracy': agg_result.get('accuracy', 0),
-                        'loss': agg_result.get('loss', 0)
-                    })
-
-
 app = FastAPI(title="Federated Learning API", lifespan=lifespan)
 
-# Register extended API endpoints at startup
+# Register extended API endpoints at module level (auth, join requests, notifications, etc.)
+# These endpoints don't depend on fl_server — they use their own FLPlatformIntegration.
 _register_extended_endpoints(app, {})
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:8000",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:8000",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -1144,6 +1165,8 @@ async def health():
 @app.post("/api/experiments/start")
 async def start_experiment(config: ExperimentConfig):
     """Start a new federated learning experiment."""
+    if not fl_server:
+        raise HTTPException(status_code=503, detail="Server not ready")
     fl_server.start_experiment(config.experiment_id, config.config)
     return {"status": "started", "experiment_id": config.experiment_id}
 
@@ -1151,6 +1174,8 @@ async def start_experiment(config: ExperimentConfig):
 @app.post("/api/experiments/{experiment_id}/control")
 async def control_experiment(experiment_id: str, command: ControlCommand):
     """Control experiment (pause, resume, stop)."""
+    if not fl_server:
+        raise HTTPException(status_code=503, detail="Server not ready")
     if command.command == "pause":
         fl_server.pause_experiment()
     elif command.command == "resume":
@@ -1168,16 +1193,13 @@ async def get_experiment_metrics(experiment_id: str):
     return {"experiment_id": experiment_id, "metrics": metrics}
 
 
-@app.get("/api/models")
-async def list_models():
-    """List registered models."""
-    models = fl_server.model_registry.list_models()
-    return {"models": models}
 
 
 @app.get("/api/system/metrics")
 async def get_system_metrics():
     """Get system-wide metrics for dashboard."""
+    if not fl_server:
+        raise HTTPException(status_code=503, detail="Server not ready")
     groups = fl_server.group_manager.get_all_groups()
     clients = fl_server.group_manager.get_all_client_status()
     
@@ -1251,6 +1273,84 @@ async def register_client(client: ClientRegister):
     
     return {"status": "registered", "client_id": client_id}
 
+
+@app.post("/api/join/activate/{group_id}")
+async def join_group_as_client(group_id: str, request: Request):
+    """Join an FL group as a participant after admin approval.
+    
+    Bridges the auth system (join request approval) with the FL system (group registration).
+    The client must have an approved join request for this group.
+    """
+    if not fl_server:
+        raise HTTPException(status_code=503, detail="Server not ready")
+    
+    # Verify JWT token
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="No authorization token")
+    
+    token = auth_header.replace("Bearer ", "")
+    
+    # Verify token via extended platform integration
+    try:
+        from api.integration import get_platform_integration
+        platform = get_platform_integration()
+        payload = platform.verify_token(token)
+        if not payload:
+            raise HTTPException(status_code=401, detail="Invalid token")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=401, detail="Token verification failed")
+    
+    user_id = payload.get("user_id")
+    username = payload.get("sub", f"user_{user_id}")
+    
+    # Verify join request is approved
+    try:
+        status = platform.get_user_join_status(user_id, group_id)
+        if not status or status.get("status") != "approved":
+            raise HTTPException(
+                status_code=403, 
+                detail="Join request not approved. Please request to join first and wait for admin approval."
+            )
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=400, detail="Could not verify join status")
+    
+    # Check group exists in FL server
+    group = fl_server.group_manager.groups.get(group_id)
+    if not group:
+        raise HTTPException(status_code=404, detail=f"Group '{group_id}' not found")
+    
+    # Generate a client ID from the username
+    client_id = f"{username}_{group_id}"
+    
+    # Register client in the FL group
+    group.add_client(client_id, {"user_id": user_id, "username": username})
+    
+    # Register in database
+    fl_server.db.register_client(client_id, fl_server.experiment_id or 'default')
+    
+    # Log the join event
+    fl_server.log_event(
+        'client_joined',
+        f'Client {username} joined group {group_id}',
+        group_id,
+        {'client_id': client_id, 'user_id': user_id, 'username': username}
+    )
+    
+    # Auto-start training if this is the first client
+    if len(group.clients) == 1 and not group.is_training:
+        await fl_server.start_training_for_group(group_id)
+    
+    return {
+        "status": "joined",
+        "client_id": client_id,
+        "group_id": group_id,
+        "message": f"Successfully joined group {group_id}"
+    }
 
 @app.get("/api/server/status")
 async def get_server_status():
@@ -1342,8 +1442,8 @@ async def validate_model(model_id: str):
 @app.get("/api/groups")
 async def list_groups():
     """List all training groups with their async window status."""
-    include_secret = True  # DEBUG: always show tokens
-    groups = fl_server.group_manager.get_all_groups(include_secret)
+    # Do NOT expose raw join tokens in the general listing.
+    groups = fl_server.group_manager.get_all_groups(include_secret=False)
     return {"groups": groups, "count": len(groups)}
 
 
@@ -1374,10 +1474,8 @@ async def create_group(group_data: Dict):
         time_limit=time_limit
     )
     
-    # Debug: return raw token directly
+    # For create we still return the real token once, for the admin caller.
     result = group.to_dict(include_secret=True)
-    result['debug_token'] = group.join_token
-    
     return {"status": "created", "group": result}
 
 

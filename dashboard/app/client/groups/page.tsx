@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/components/AuthContext';
-import { 
-  Users, Lock, Clock, CheckCircle, 
+import {
+  Users, Lock, Clock, CheckCircle,
   XCircle, Loader2, Plus, RefreshCw
 } from 'lucide-react';
 
@@ -37,19 +37,19 @@ export default function ClientGroupsPage() {
   const fetchGroups = async () => {
     if (!token) return;
     setLoading(true);
-    
+
     try {
       const res = await fetch(`${API_URL}/api/groups`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await res.json();
       setGroups(data.groups || []);
-      
+
       // Check join status for each group
       const statuses: Record<string, JoinRequest> = {};
       for (const group of data.groups || []) {
         try {
-          const statusRes = await fetch(`${API_URL}/api/groups/my-requests/${group.group_id}`, {
+          const statusRes = await fetch(`${API_URL}/api/join/my-requests/${group.group_id}`, {
             headers: { 'Authorization': `Bearer ${token}` }
           });
           const statusData = await statusRes.json();
@@ -73,11 +73,11 @@ export default function ClientGroupsPage() {
   const handleJoinRequest = async (groupId: string) => {
     if (!token) return;
     setJoining(groupId);
-    
+
     try {
-      const res = await fetch(`${API_URL}/api/groups/join-request`, {
+      const res = await fetch(`${API_URL}/api/join/join-request`, {
         method: 'POST',
-        headers: { 
+        headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
@@ -88,12 +88,12 @@ export default function ClientGroupsPage() {
           }
         })
       });
-      
+
       const data = await res.json();
-      
+
       setJoinStatus(prev => ({
         ...prev,
-        [groupId]: { 
+        [groupId]: {
           status: res.ok ? 'pending' : 'error',
           message: data.detail || 'Request submitted'
         }
@@ -165,7 +165,7 @@ export default function ClientGroupsPage() {
       ) : (
         <div className="grid gap-4">
           {groups.map((group) => (
-            <div 
+            <div
               key={group.group_id}
               className="bg-gray-900 border border-gray-800 rounded-xl p-6"
             >
@@ -178,7 +178,7 @@ export default function ClientGroupsPage() {
                   <p className="text-gray-400 text-sm mt-1">
                     Model: <span className="text-emerald-400">{group.model_id}</span>
                   </p>
-                  
+
                   <div className="flex items-center gap-4 mt-3 text-sm text-gray-500">
                     <span className="flex items-center gap-1">
                       <Users size={14} /> {group.client_count} clients
@@ -191,7 +191,7 @@ export default function ClientGroupsPage() {
                     </span>
                   </div>
                 </div>
-                
+
                 <div className="ml-4">
                   {joinStatus[group.group_id]?.status === 'pending' ? (
                     <button
@@ -200,11 +200,51 @@ export default function ClientGroupsPage() {
                     >
                       <Clock size={16} /> Pending
                     </button>
+                  ) : joinStatus[group.group_id]?.status === 'joined' ? (
+                    <button
+                      disabled
+                      className="px-4 py-2 bg-emerald-800 text-emerald-300 rounded-lg flex items-center gap-2 cursor-not-allowed"
+                    >
+                      <CheckCircle size={16} /> Joined
+                    </button>
                   ) : joinStatus[group.group_id]?.status === 'approved' ? (
                     <button
+                      onClick={async () => {
+                        setJoining(group.group_id);
+                        try {
+                          const res = await fetch(`${API_URL}/api/join/activate/${group.group_id}`, {
+                            method: 'POST',
+                            headers: { 'Authorization': `Bearer ${token}` }
+                          });
+                          const data = await res.json();
+                          if (res.ok) {
+                            setJoinStatus(prev => ({
+                              ...prev,
+                              [group.group_id]: { status: 'joined', message: data.message || 'Joined!' }
+                            }));
+                          } else {
+                            setJoinStatus(prev => ({
+                              ...prev,
+                              [group.group_id]: { status: 'approved', message: data.detail || 'Join failed' }
+                            }));
+                          }
+                        } catch {
+                          setJoinStatus(prev => ({
+                            ...prev,
+                            [group.group_id]: { status: 'approved', message: 'Network error' }
+                          }));
+                        } finally {
+                          setJoining(null);
+                        }
+                      }}
+                      disabled={joining === group.group_id}
                       className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition flex items-center gap-2"
                     >
-                      <CheckCircle size={16} /> Join Group
+                      {joining === group.group_id ? (
+                        <><Loader2 size={16} className="animate-spin" /> Joining...</>
+                      ) : (
+                        <><CheckCircle size={16} /> Join Group</>
+                      )}
                     </button>
                   ) : joining === group.group_id ? (
                     <button
@@ -223,13 +263,12 @@ export default function ClientGroupsPage() {
                   )}
                 </div>
               </div>
-              
+
               {joinStatus[group.group_id]?.message && joinStatus[group.group_id]?.status !== 'pending' && (
-                <div className={`mt-4 p-3 rounded-lg text-sm ${
-                  joinStatus[group.group_id]?.status === 'error' 
-                    ? 'bg-red-900/30 text-red-400' 
-                    : 'bg-gray-800 text-gray-400'
-                }`}>
+                <div className={`mt-4 p-3 rounded-lg text-sm ${joinStatus[group.group_id]?.status === 'error'
+                  ? 'bg-red-900/30 text-red-400'
+                  : 'bg-gray-800 text-gray-400'
+                  }`}>
                   {joinStatus[group.group_id]?.message}
                 </div>
               )}

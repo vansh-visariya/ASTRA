@@ -10,6 +10,7 @@ References:
 """
 
 import argparse
+import copy
 import json
 import logging
 import os
@@ -113,13 +114,15 @@ def run_training_loop(
     server.stop()
 
 
-def run_demo_mode(config: Dict[str, Any]) -> None:
+def run_demo_mode(config: Dict[str, Any]) -> Dict[str, Any]:
     """Run a quick demo with reduced parameters."""
     logger = get_logger(__name__)
     logger.info("Running in DEMO mode")
     print("="*50)
     print("DEMO MODE: Minimal config for testing")
     print("="*50)
+    
+    config = copy.deepcopy(config)
     
     # Check for GPU
     has_gpu = torch.cuda.is_available()
@@ -147,7 +150,7 @@ def run_demo_mode(config: Dict[str, Any]) -> None:
     config['robust']['method'] = 'fedavg'
     config['privacy']['dp_enabled'] = False
     config['malicious']['ratio'] = 0.0
-    
+
     return config
 
 
