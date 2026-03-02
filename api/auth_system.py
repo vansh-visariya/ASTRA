@@ -16,6 +16,7 @@ import secrets
 import sqlite3
 import hashlib
 import logging
+import os
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass
@@ -25,7 +26,13 @@ import jwt
 import bcrypt
 
 
-SECRET_KEY = "dev_secret_key_change_in_production"
+# NOTE: In production you MUST override this via the SECRET_KEY environment variable.
+SECRET_KEY = os.getenv("SECRET_KEY", "dev_secret_key_change_in_production")
+if SECRET_KEY == "dev_secret_key_change_in_production":
+    logging.getLogger(__name__).warning(
+        "Using default development SECRET_KEY. "
+        "Set the SECRET_KEY environment variable for production deployments."
+    )
 ALGORITHM = "HS256"
 TOKEN_EXPIRY_HOURS = 24
 

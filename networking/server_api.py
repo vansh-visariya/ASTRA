@@ -33,11 +33,11 @@ from dataclasses import dataclass, field
 import numpy as np
 import torch
 import uvicorn
-import jwt
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from api.auth_system import get_auth_manager
 from core_engine.aggregator import create_aggregator
 from core_engine.data_splitter import DataSplitter
 from core_engine.server import AsyncServer
@@ -1175,83 +1175,6 @@ async def list_models():
     return {"models": models}
 
 
-# ============================================================================
-# Authentication System
-# ============================================================================
-
-SECRET_KEY = "dev_secret_key_change_in_production"
-ALGORITHM = "HS256"
-
-# In-memory user store (use DB in production)
-users_db: Dict[str, Dict] = {
-    "admin": {"password": "adminpass", "role": "admin", "name": "Admin"},
-    "observer": {"password": "observer", "role": "observer", "name": "Observer"},
-}
-
-
-def create_token(user_id: str, role: str) -> str:
-    """Create JWT token."""
-    payload = {
-        "sub": user_id,
-        "role": role,
-        "exp": datetime.utcnow() + timedelta(days=1)
-    }
-    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
-
-
-def verify_token(token: str) -> Optional[Dict]:
-    """Verify JWT token."""
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        return payload
-    except jwt.PyJWTError:
-        return None
-
-
-class LoginRequest(BaseModel):
-    username: str
-    password: str
-
-
-@app.post("/api/auth/login")
-async def login(credentials: LoginRequest):
-    """Authenticate user and return JWT."""
-    user = users_db.get(credentials.username)
-    if not user or user["password"] != credentials.password:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-    
-    token = create_token(credentials.username, user["role"])
-    return {
-        "token": token,
-        "user": {
-            "username": credentials.username,
-            "role": user["role"],
-            "name": user["name"]
-        }
-    }
-
-
-@app.get("/api/auth/me")
-async def get_current_user(authorization: str = None):
-    """Get current user info from token."""
-    if not authorization:
-        raise HTTPException(status_code=401, detail="No token provided")
-    
-    token = authorization.replace("Bearer ", "")
-    payload = verify_token(token)
-    
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid token")
-    
-    user = users_db.get(payload["sub"])
-    return {
-        "username": payload["sub"],
-        "role": payload["role"],
-        "name": user["name"] if user else "Unknown"
-    }
-
-
-# System metrics endpoint
 @app.get("/api/system/metrics")
 async def get_system_metrics():
     """Get system-wide metrics for dashboard."""
@@ -1552,6 +1475,18 @@ async def get_logs(limit: int = 100, event_type: str = None, group_id: str = Non
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket for live updates."""
+    # Require JWT token on the WebSocket query string for authentication.
+    token = websocket.query_params.get("token")
+    if not token:
+        await websocket.close(code=1008)
+        return
+
+    auth_manager = get_auth_manager()
+    payload = auth_manager.verify_token(token)
+    if not payload:
+        await websocket.close(code=1008)
+        return
+
     await fl_server.connection_manager.connect(websocket)
     
     try:

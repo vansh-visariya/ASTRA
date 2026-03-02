@@ -93,6 +93,7 @@ class FederatedClient:
         self.ws: Optional[websockets.WebSocketClientProtocol] = None
         self.is_connected = False
         self.is_training = False
+        self.token: Optional[str] = None
 
         self.local_client: Optional[LocalClient] = None
         self.current_global_version = 0
@@ -113,6 +114,9 @@ class FederatedClient:
         """Connect to server via WebSocket."""
         try:
             ws_url = self.server_url.replace('http', 'ws') + '/ws'
+            if self.token:
+                separator = '&' if '?' in ws_url else '?'
+                ws_url = f"{ws_url}{separator}token={self.token}"
             self.ws = await websockets.connect(
                 ws_url,
                 ping_interval=10,
@@ -635,6 +639,7 @@ def main():
         client.join_token = args.join_token
         client.data_modality = args.data_modality
         client.data_samples = args.data_samples
+        client.token = args.token
         
         # Run client
         asyncio.run(client.run())

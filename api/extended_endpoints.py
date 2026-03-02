@@ -114,20 +114,18 @@ class TrustScoreUpdate(BaseModel):
 
 def get_current_user(
     authorization: str = Header(None),
-    platform: FLPlatformIntegration = Depends(get_platform_integration)
+    platform: FLPlatformIntegration = Depends(get_platform_integration),
 ) -> Dict[str, Any]:
     """Get current authenticated user from token."""
-    from networking.server_api import verify_token as server_verify_token
-    
     if not authorization:
         raise HTTPException(status_code=401, detail="No authorization header")
-    
+
     token = authorization.replace("Bearer ", "")
-    payload = server_verify_token(token)
-    
+    payload = platform.verify_token(token)
+
     if not payload:
         raise HTTPException(status_code=401, detail="Invalid token")
-    
+
     return payload
 
 
