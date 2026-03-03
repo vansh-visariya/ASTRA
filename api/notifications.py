@@ -117,48 +117,20 @@ class Notification:
 
 
 class NotificationDatabase:
-    """Persistent notification storage."""
+    """Persistent notification storage backed by AstraDB."""
     
-    def __init__(self, db_path: str = "./notifications.db"):
-        self.db_path = db_path
-        self._init_db()
+    def __init__(self, db=None):
+        if db is None:
+            from api.database import get_db
+            db = get_db()
+        self._db = db
     
     @contextmanager
     def _get_connection(self):
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        try:
+        with self._db.connection() as conn:
             yield conn
-        finally:
-            conn.close()
     
-    def _init_db(self):
-        """Initialize notification tables."""
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS notifications (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    notification_type TEXT NOT NULL,
-                    priority TEXT NOT NULL,
-                    title TEXT NOT NULL,
-                    message TEXT,
-                    user_id INTEGER,
-                    group_id TEXT,
-                    data_json TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    read_at TIMESTAMP,
-                    read BOOLEAN DEFAULT 0
-                )
-            ''')
-            
-            cursor.execute('''
-                CREATE INDEX IF NOT EXISTS idx_notifications_user 
-                ON notifications(user_id, read, created_at)
-            ''')
-            
-            conn.commit()
+    # Schema managed by AstraDB — no _init_db needed
     
     def create(self, notification: Notification) -> int:
         """Create a new notification."""
@@ -334,8 +306,8 @@ class WebSocketNotifier:
 class NotificationService:
     """Main notification service combining all notification channels."""
     
-    def __init__(self, db_path: str = "./notifications.db"):
-        self.db = NotificationDatabase(db_path)
+    def __init__(self, db=None):
+        self.db = NotificationDatabase(db=db)
         self.ws_notifier = WebSocketNotifier()
         self.logger = logging.getLogger(__name__)
         
@@ -527,8 +499,8 @@ def get_notification_service() -> NotificationService:
     return _notification_service
 
 
-def init_notification_service(db_path: str = "./notifications.db") -> NotificationService:
-    """Initialize the notification service."""
+def init_notification_service(db=None) -> NotificationService:
+    """Initialize the notification service with an AstraDB instance."""
     global _notification_service
-    _notification_service = NotificationService(db_path)
+    _notification_service = NotificationService(db=db)
     return _notification_service

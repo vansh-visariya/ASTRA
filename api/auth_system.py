@@ -58,118 +58,26 @@ class User:
     is_active: bool = True
 
 
+
 class UserDatabase:
-    """SQLite-based user database."""
+    """User database backed by AstraDB."""
     
-    def __init__(self, db_path: str = "./users.db"):
-        self.db_path = db_path
+    def __init__(self, db=None):
+        """Initialize with an AstraDB instance or create one."""
+        if db is None:
+            from api.database import get_db
+            db = get_db()
+        self._db = db
         self.logger = logging.getLogger(__name__)
-        self._init_db()
     
     @contextmanager
     def _get_connection(self):
-        """Context manager for database connections."""
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        try:
+        """Delegate to AstraDB connection."""
+        with self._db.connection() as conn:
             yield conn
-        finally:
-            conn.close()
     
-    def _init_db(self):
-        """Initialize database schema."""
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            
-            # Users table
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS users (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    username TEXT UNIQUE NOT NULL,
-                    password_hash TEXT NOT NULL,
-                    role TEXT NOT NULL CHECK(role IN ('admin', 'client', 'observer')),
-                    email TEXT,
-                    full_name TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    is_active BOOLEAN DEFAULT 1
-                )
-            ''')
-            
-            # Trust scores table
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS trust_scores (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-                    group_id TEXT,
-                    score REAL DEFAULT 1.0,
-                    quarantined BOOLEAN DEFAULT 0,
-                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE(user_id, group_id)
-                )
-            ''')
-            
-            # Join requests table
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS join_requests (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    group_id TEXT NOT NULL,
-                    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-                    status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'approved', 'rejected')),
-                    requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    resolved_at TIMESTAMP,
-                    resolved_by INTEGER REFERENCES users(id),
-                    token_delivered BOOLEAN DEFAULT 0,
-                    token_delivered_at TIMESTAMP,
-                    request_nonce TEXT UNIQUE NOT NULL,
-                    metadata_json TEXT
-                )
-            ''')
-            
-            # Secure messages table
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS secure_messages (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    from_user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-                    to_user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-                    group_id TEXT,
-                    message_type TEXT NOT NULL,
-                    encrypted_content BLOB NOT NULL,
-                    nonce BLOB NOT NULL,
-                    signature BLOB,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    read_at TIMESTAMP,
-                    UNIQUE(from_user_id, to_user_id, group_id, message_type)
-                )
-            ''')
-            
-            # Used tokens for replay protection
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS used_tokens (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    token_hash TEXT UNIQUE NOT NULL,
-                    used_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    expires_at TIMESTAMP NOT NULL
-                )
-            ''')
-            
-            conn.commit()
-            
-            self._create_default_admin()
-    
-    def _create_default_admin(self):
-        """Create default admin user if not exists."""
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('SELECT id FROM users WHERE username = ?', ('admin',))
-            if not cursor.fetchone():
-                # Create default admin
-                admin_password = bcrypt.hashpw(b'admin', bcrypt.gensalt()).decode('utf-8')
-                cursor.execute(
-                    'INSERT INTO users (username, password_hash, role, full_name) VALUES (?, ?, ?, ?)',
-                    ('admin', admin_password, 'admin', 'System Admin')
-                )
-                conn.commit()
-                self.logger.info("Created default admin user")
+    # Schema managed by AstraDB — no _init_db or _create_default_admin needed
+
     
     def create_user(
         self,
@@ -630,8 +538,8 @@ class TrustScoreManager:
 class AuthManager:
     """Main authentication manager combining all auth components."""
     
-    def __init__(self, db_path: str = "./users.db"):
-        self.user_db = UserDatabase(db_path)
+    def __init__(self, db=None):
+        self.user_db = UserDatabase(db=db)
         self.token_manager = TokenManager(self.user_db)
         self.join_request_manager = JoinRequestManager(self.user_db)
         self.trust_score_manager = TrustScoreManager(self.user_db)
@@ -756,8 +664,8 @@ def get_auth_manager() -> AuthManager:
     return _auth_manager
 
 
-def init_auth_manager(db_path: str = "./users.db") -> AuthManager:
-    """Initialize the auth manager with custom database path."""
+def init_auth_manager(db=None) -> AuthManager:
+    """Initialize the auth manager with an AstraDB instance."""
     global _auth_manager
-    _auth_manager = AuthManager(db_path)
+    _auth_manager = AuthManager(db=db)
     return _auth_manager

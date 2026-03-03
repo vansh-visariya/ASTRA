@@ -68,19 +68,21 @@ class FLPlatformIntegration:
     
     def _init_auth(self):
         """Initialize authentication system."""
-        db_path = self.config.get('auth', {}).get('db_path', './users.db')
-        self.auth_manager: AuthManager = init_auth_manager(db_path)
-        self.logger.info(f"Auth system initialized with DB: {db_path}")
+        from api.database import get_db
+        db = get_db()
+        self.auth_manager: AuthManager = init_auth_manager(db=db)
+        self.logger.info("Auth system initialized with unified AstraDB")
     
     def _init_notifications(self):
         """Initialize notification system."""
-        db_path = self.config.get('notifications', {}).get('db_path', './notifications.db')
-        self.notification_service: NotificationService = init_notification_service(db_path)
+        from api.database import get_db
+        db = get_db()
+        self.notification_service: NotificationService = init_notification_service(db=db)
         
         # Register notification handlers
         self._register_notification_handlers()
         
-        self.logger.info(f"Notification system initialized with DB: {db_path}")
+        self.logger.info("Notification system initialized with unified AstraDB")
     
     def _register_notification_handlers(self):
         """Register handlers for notification events."""

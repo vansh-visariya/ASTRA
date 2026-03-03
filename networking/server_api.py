@@ -19,6 +19,7 @@ sys.path.insert(0, str(project_root))
 import asyncio
 import json
 import logging
+import os
 import sqlite3
 import time
 import uuid
@@ -38,6 +39,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from api.auth_system import get_auth_manager
+from api.database import get_db, init_db
 from core_engine.aggregator import create_aggregator
 from core_engine.data_splitter import DataSplitter
 from core_engine.server import AsyncServer
@@ -214,7 +216,7 @@ class GroupManager:
         # Event logs
         self.event_logs: List[Dict] = []
         
-        self._init_default_groups()
+        self._load_groups_from_db()
     
     async def broadcast_to_group(self, group_id: str, message: Dict):
         """Broadcast message to all clients in a group."""
@@ -226,25 +228,64 @@ class GroupManager:
         for client_id in group.clients:
             await self.connection_manager.send_to(client_id, message)
     
-    def _init_default_groups(self):
-        """Initialize default groups from config."""
-        default_groups = self.config.get('groups', [
-            {
-                'group_id': 'default',
-                'model_id': 'simple_cnn_mnist',
-                'window_size': 3,
-                'time_limit': 20.0
-            }
-        ])
-        
-        for g in default_groups:
-            self.create_group(
-                group_id=g['group_id'],
-                model_id=g.get('model_id', 'simple_cnn_mnist'),
-                config=g.get('config', {}),
-                window_size=g.get('window_size', 3),
-                time_limit=g.get('time_limit', 20.0)
-            )
+    def _load_groups_from_db(self):
+        """Load persisted groups from database on startup."""
+        try:
+            db = get_db()
+            db_groups = db.get_all_groups()
+            
+            if db_groups:
+                for g in db_groups:
+                    gid = g['group_id']
+                    if gid in self.groups:
+                        continue
+                    
+                    config = json.loads(g.get('config_json', '{}')) if isinstance(g.get('config_json'), str) else (g.get('config_json') or {})
+                    config.setdefault('auto_continue', False)
+                    
+                    aggregator = create_aggregator(config)
+                    
+                    group = TrainingGroup(
+                        group_id=gid,
+                        model_id=g.get('model_id', 'simple_cnn_mnist'),
+                        config=config,
+                        join_token=g.get('join_token', ''),
+                        window_config=AsyncWindowConfig(
+                            window_size=g.get('window_size', 3),
+                            time_limit=g.get('time_limit', 20.0)
+                        ),
+                        aggregator=aggregator,
+                        max_rounds=config.get('max_rounds')
+                    )
+                    group.status = g.get('status', 'IDLE')
+                    
+                    self.groups[gid] = group
+                    self.logger.info(f"Restored group from DB: {gid} (status={group.status})")
+                
+                self.logger.info(f"Loaded {len(db_groups)} groups from database")
+            else:
+                # No persisted groups - create default
+                self.create_group(
+                    group_id='default',
+                    model_id='simple_cnn_mnist',
+                    config={},
+                    window_size=3,
+                    time_limit=20.0
+                )
+                self.logger.info("Created default group (no groups in DB)")
+        except Exception as e:
+            self.logger.warning(f"Could not load groups from DB: {e}")
+            if not self.groups:
+                aggregator = create_aggregator({})
+                group = TrainingGroup(
+                    group_id='default',
+                    model_id='simple_cnn_mnist',
+                    config={},
+                    join_token=uuid.uuid4().hex[:16],
+                    window_config=AsyncWindowConfig(window_size=3, time_limit=20.0),
+                    aggregator=aggregator
+                )
+                self.groups['default'] = group
     
     def log_event(self, event_type: str, message: str, group_id: str = None, details: Dict = None):
         """Add an event to the log."""
@@ -392,6 +433,20 @@ class GroupManager:
             self.groups[group_id] = group
             self.logger.info(f"Created group: {group_id}")
             
+            # Persist to database
+            try:
+                db = get_db()
+                db.create_group(
+                    group_id=group_id,
+                    model_id=model_id,
+                    config=config,
+                    join_token=join_token,
+                    window_size=window_size,
+                    time_limit=int(time_limit)
+                )
+            except Exception as e:
+                self.logger.warning(f"Could not persist group {group_id} to DB: {e}")
+            
             return group
     
     def delete_group(self, group_id: str) -> bool:
@@ -404,6 +459,14 @@ class GroupManager:
                     del self.client_to_group[client_id]
             
             del self.groups[group_id]
+            
+            # Remove from database
+            try:
+                db = get_db()
+                db.delete_group(group_id)
+            except Exception as e:
+                self.logger.warning(f"Could not delete group {group_id} from DB: {e}")
+            
             return True
     
     def register_client(self, client_id: str, group_id: str, client_info: Dict = None) -> bool:
@@ -512,6 +575,16 @@ class GroupManager:
                 'loss': global_loss
             })
             
+            # Save global model weights to disk
+            self.save_model_weights(
+                group_id=group_id,
+                model_version=group.model_version,
+                aggregated_weights=aggregated,
+                accuracy=global_accuracy,
+                loss=global_loss,
+                num_clients=len(updates)
+            )
+            
             self.logger.info(
                 f"Aggregated group {group_id}: {len(updates)} clients, v{group.model_version}, acc={global_accuracy:.4f}, loss={global_loss:.4f}"
             )
@@ -551,6 +624,54 @@ class GroupManager:
                 'update_count': len(updates),
                 'aggregated_model': aggregated
             }
+    
+    def save_model_weights(self, group_id: str, model_version: int,
+                           aggregated_weights, accuracy: float, loss: float,
+                           num_clients: int):
+        """Save global model weights to disk and record in DB."""
+        try:
+            import torch
+            save_dir = os.path.join('models', 'global', group_id)
+            os.makedirs(save_dir, exist_ok=True)
+            
+            file_path = os.path.join(save_dir, f'model_v{model_version}.pt')
+            torch.save({
+                'version': model_version,
+                'weights': aggregated_weights,
+                'accuracy': accuracy,
+                'loss': loss,
+                'num_clients': num_clients,
+                'timestamp': datetime.now().isoformat(),
+                'group_id': group_id
+            }, file_path)
+            
+            # Also save as latest
+            latest_path = os.path.join(save_dir, 'model_latest.pt')
+            torch.save({
+                'version': model_version,
+                'weights': aggregated_weights,
+                'accuracy': accuracy,
+                'loss': loss,
+                'num_clients': num_clients,
+                'timestamp': datetime.now().isoformat(),
+                'group_id': group_id
+            }, latest_path)
+            
+            # Record in database
+            db = get_db()
+            db.save_model_record(
+                group_id=group_id,
+                model_type='global',
+                file_path=file_path,
+                version=model_version,
+                accuracy=accuracy,
+                loss=loss,
+                num_clients=num_clients
+            )
+            
+            self.logger.info(f"Saved global model v{model_version} for group {group_id} → {file_path}")
+        except Exception as e:
+            self.logger.warning(f"Could not save model for group {group_id}: {e}")
     
     def get_all_groups(self, include_secret: bool = False) -> List[Dict]:
         with self.lock:
@@ -763,135 +884,7 @@ class ConnectionManager:
 # Database Manager
 # ============================================================================
 
-class ExperimentDB:
-    """SQLite-based experiment tracking."""
-    
-    def __init__(self, db_path: str = "./experiments.db"):
-        self.db_path = db_path
-        self._init_db()
-    
-    def _init_db(self):
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS experiments (
-                id INTEGER PRIMARY KEY,
-                experiment_id TEXT UNIQUE,
-                config_json TEXT,
-                status TEXT,
-                start_time TEXT,
-                end_time TEXT
-            )
-        ''')
-        
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS metrics (
-                id INTEGER PRIMARY KEY,
-                experiment_id TEXT,
-                step INTEGER,
-                timestamp TEXT,
-                metrics_json TEXT,
-                FOREIGN KEY (experiment_id) REFERENCES experiments(experiment_id)
-            )
-        ''')
-        
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS clients (
-                id INTEGER PRIMARY KEY,
-                client_id TEXT UNIQUE,
-                experiment_id TEXT,
-                status TEXT,
-                trust_score REAL,
-                last_seen TEXT,
-                FOREIGN KEY (experiment_id) REFERENCES experiments(experiment_id)
-            )
-        ''')
-        
-        conn.commit()
-        conn.close()
-    
-    def create_experiment(self, experiment_id: str, config: Dict) -> None:
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute(
-            'INSERT INTO experiments (experiment_id, config_json, status, start_time) VALUES (?, ?, ?, ?)',
-            (experiment_id, json.dumps(config), 'pending', datetime.now().isoformat())
-        )
-        
-        conn.commit()
-        conn.close()
-    
-    def update_experiment_status(self, experiment_id: str, status: str) -> None:
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        end_time = datetime.now().isoformat() if status in ['completed', 'failed'] else None
-        
-        cursor.execute(
-            'UPDATE experiments SET status = ?, end_time = ? WHERE experiment_id = ?',
-            (status, end_time, experiment_id)
-        )
-        
-        conn.commit()
-        conn.close()
-    
-    def log_metrics(self, experiment_id: str, step: int, metrics: Dict) -> None:
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute(
-            'INSERT INTO metrics (experiment_id, step, timestamp, metrics_json) VALUES (?, ?, ?, ?)',
-            (experiment_id, step, datetime.now().isoformat(), json.dumps(metrics))
-        )
-        
-        conn.commit()
-        conn.close()
-    
-    def register_client(self, client_id: str, experiment_id: str) -> None:
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute(
-            'INSERT OR REPLACE INTO clients (client_id, experiment_id, status, trust_score, last_seen) VALUES (?, ?, ?, ?, ?)',
-            (client_id, experiment_id, 'active', 1.0, datetime.now().isoformat())
-        )
-        
-        conn.commit()
-        conn.close()
-    
-    def update_client(self, client_id: str, trust_score: float, status: str = 'active') -> None:
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute(
-            'UPDATE clients SET trust_score = ?, status = ?, last_seen = ? WHERE client_id = ?',
-            (trust_score, status, datetime.now().isoformat(), client_id)
-        )
-        
-        conn.commit()
-        conn.close()
-    
-    def get_experiment_metrics(self, experiment_id: str) -> List[Dict]:
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute(
-            'SELECT step, timestamp, metrics_json FROM metrics WHERE experiment_id = ? ORDER BY step',
-            (experiment_id,)
-        )
-        
-        results = []
-        for row in cursor.fetchall():
-            results.append({
-                'step': row[0],
-                'timestamp': row[1],
-                **json.loads(row[2])
-            })
-        
-        conn.close()
-        return results
+# ExperimentDB removed — all database access is now via AstraDB (api/database.py)
 
 
 # ============================================================================
@@ -904,7 +897,7 @@ class FLServer:
     def __init__(self, config: Dict[str, Any]):
         self.config = config
         self.connection_manager = ConnectionManager()
-        self.db = ExperimentDB()
+        self.db = get_db()
         self.group_manager = GroupManager(config, self.connection_manager)
         
         self.server: Optional[AsyncServer] = None
@@ -945,7 +938,7 @@ class FLServer:
     async def handle_client_register(self, client_id: str, capabilities: Dict) -> Dict:
         """Handle client registration."""
         self.connection_manager.register_client(client_id, None)
-        self.db.register_client(client_id, self.experiment_id or 'default')
+        self.db.register_fl_client(client_id, self.experiment_id or 'default')
         
         self.logger.info(f"Client registered: {client_id}")
         
@@ -1266,7 +1259,7 @@ async def register_client(client: ClientRegister):
     capabilities = client.capabilities
     
     # Register in database
-    fl_server.db.register_client(client_id, fl_server.experiment_id or 'default')
+    fl_server.db.register_fl_client(client_id, fl_server.experiment_id or 'default')
     
     # Add to connected clients
     fl_server.connection_manager.register_client(client_id, None)
@@ -1331,10 +1324,10 @@ async def join_group_as_client(group_id: str, request: Request):
     group.add_client(client_id, {"user_id": user_id, "username": username})
     
     # Register in database
-    fl_server.db.register_client(client_id, fl_server.experiment_id or 'default')
+    fl_server.db.register_fl_client(client_id, fl_server.experiment_id or 'default')
     
     # Log the join event
-    fl_server.log_event(
+    fl_server.group_manager.log_event(
         'client_joined',
         f'Client {username} joined group {group_id}',
         group_id,
@@ -1343,7 +1336,7 @@ async def join_group_as_client(group_id: str, request: Request):
     
     # Auto-start training if this is the first client
     if len(group.clients) == 1 and not group.is_training:
-        await fl_server.start_training_for_group(group_id)
+        fl_server.group_manager.start_group_training(group_id)
     
     return {
         "status": "joined",
