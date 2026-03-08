@@ -260,7 +260,51 @@ class GroupManager:
                     group.status = g.get('status', 'IDLE')
                     
                     self.groups[gid] = group
-                    self.logger.info(f"Restored group from DB: {gid} (status={group.status})")
+                    
+                    # Reload FL clients for this group
+                    try:
+                        with db.connection() as conn:
+                            client_rows = conn.execute(
+                                "SELECT client_id, user_id, trust_score, status, joined_at FROM fl_clients WHERE group_id = ?",
+                                (gid,)
+                            ).fetchall()
+                            for cr in client_rows:
+                                cid = cr['client_id']
+                                group.clients[cid] = {
+                                    'has_gpu': False,
+                                    'device': 'cpu',
+                                    'data_metadata': {},
+                                    'connection': 'none',
+                                    'last_update': None,
+                                    'updates_count': 0,
+                                    'local_accuracy': 0,
+                                    'local_loss': 0,
+                                    'trust_score': cr['trust_score'] or 1.0,
+                                    'status': 'offline',
+                                    'joined_at': cr['joined_at'],
+                                    'gradient_norm': 0,
+                                }
+                                self.client_to_group[cid] = gid
+                    except Exception as e:
+                        self.logger.warning(f"Could not load clients for group {gid}: {e}")
+                    
+                    # Reload metrics history for this group
+                    try:
+                        with db.connection() as conn:
+                            metric_rows = conn.execute(
+                                "SELECT step, timestamp, metrics_json FROM metrics WHERE group_id = ? ORDER BY step",
+                                (gid,)
+                            ).fetchall()
+                            for mr in metric_rows:
+                                m = json.loads(mr['metrics_json'])
+                                group.metrics_history.append(m)
+                            if metric_rows:
+                                group.model_version = len(metric_rows)
+                                group.completed_rounds = len(metric_rows)
+                    except Exception as e:
+                        self.logger.warning(f"Could not load metrics for group {gid}: {e}")
+                    
+                    self.logger.info(f"Restored group from DB: {gid} (status={group.status}, clients={len(group.clients)}, rounds={group.completed_rounds})")
                 
                 self.logger.info(f"Loaded {len(db_groups)} groups from database")
             else:
@@ -496,6 +540,19 @@ class GroupManager:
             group.add_client(client_id, client_info)
             self.client_to_group[client_id] = group_id
             
+            # Persist FL client to database
+            try:
+                db = get_db()
+                user_id = client_info.get('user_id') if client_info else None
+                db.register_fl_client(
+                    client_id=client_id,
+                    experiment_id=group_id,
+                    user_id=user_id,
+                    group_id=group_id
+                )
+            except Exception as e:
+                self.logger.warning(f"Could not persist client {client_id} to DB: {e}")
+            
             self.log_event('client_joined', f'Client {client_id} joined group {group_id}', group_id, {'client_id': client_id})
             
             return True
@@ -565,6 +622,24 @@ class GroupManager:
                 'loss': global_loss,
                 'clients': len(updates)
             })
+            
+            # Persist metrics to database
+            try:
+                db = get_db()
+                db.log_metrics(
+                    experiment_id=group_id,
+                    step=group.model_version,
+                    metrics={
+                        'version': group.model_version,
+                        'timestamp': time.time(),
+                        'accuracy': global_accuracy,
+                        'loss': global_loss,
+                        'clients': len(updates)
+                    },
+                    group_id=group_id
+                )
+            except Exception as e:
+                self.logger.warning(f"Could not persist metrics for group {group_id}: {e}")
             
             group.clear_updates()
             
@@ -1813,7 +1888,8 @@ async def websocket_endpoint(websocket: WebSocket):
                                 'loss': agg_result.get('loss', 0)
                             })
                             
-                            if group.is_training and group.config.get('auto_continue', False):
+                            # Always trigger next training round after aggregation
+                            if group.is_training:
                                 asyncio.create_task(
                                     fl_server.group_manager.trigger_clients_training(group.group_id)
                                 )

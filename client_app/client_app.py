@@ -191,7 +191,8 @@ class FederatedClient:
             return
 
         if msg_type == 'model_update':
-            # Server sent new aggregated model - update and train again
+            # Server sent new aggregated model - update version
+            # Training will be triggered by the subsequent train_command
             await self._download_model(message)
         
         elif msg_type == 'train_command':
@@ -214,10 +215,11 @@ class FederatedClient:
             await self._run_training()
 
         elif msg_type == 'training_started':
-            # Server notifies training is open
+            # Server notifies training is open — start first round
             if message.get('config'):
                 self.config.update({'client': {**self.config.get('client', {}), **message['config']}})
-            self.logger.info("Training opened by server")
+            self.logger.info("Training opened by server, starting local training...")
+            await self._run_training()
 
         elif msg_type == 'training_paused':
             self.logger.info("Training paused by server")
@@ -379,7 +381,10 @@ class FederatedClient:
             import aiohttp
             group_id = getattr(self, 'group_id', 'group_a')
             url = f"{self.server_url}/api/groups/{group_id}"
-            async with aiohttp.ClientSession() as session:
+            headers = {}
+            if self.token:
+                headers['Authorization'] = f'Bearer {self.token}'
+            async with aiohttp.ClientSession(headers=headers) as session:
                 async with session.get(url) as resp:
                     if resp.status != 200:
                         self.logger.warning("Failed to fetch group config: %s", resp.status)
@@ -500,7 +505,7 @@ class FederatedClient:
         self.logger.info(f"Local client initialized with {len(train_data)} samples")
     
     async def run(self):
-        """Main client loop."""
+        """Main client: connect → train once → send update → exit."""
         # Connect to server
         connected = await self.connect()
         if not connected:
@@ -509,12 +514,26 @@ class FederatedClient:
 
         await self._sync_group_config()
 
-        # Train once immediately, push update to server
+        # Train once and send update to server
+        self.logger.info("Starting single training run...")
         await self._run_training()
 
-        # Then listen: server will send model_update after aggregation,
-        # which triggers the next training round automatically
-        await self.listen()
+        # Wait briefly for server to accept the update
+        try:
+            response = await asyncio.wait_for(self.ws.recv(), timeout=10.0)
+            data = json.loads(response)
+            if data.get('status') == 'accepted':
+                self.logger.info("✓ Update accepted by server")
+            else:
+                self.logger.info(f"Server response: {data}")
+        except asyncio.TimeoutError:
+            self.logger.info("No final server response within timeout")
+        except Exception:
+            pass
+
+        # Disconnect cleanly
+        await self.disconnect()
+        self.logger.info("Training complete. Exiting.")
 
 
 
