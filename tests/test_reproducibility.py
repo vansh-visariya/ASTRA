@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import torch
 
-from core_engine.utils.seed import set_seed
+from astra.core.utils.seed import set_seed
 
 
 class TestReproducibility:

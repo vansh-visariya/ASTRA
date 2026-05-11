@@ -5,7 +5,7 @@ Unit tests for compression methods.
 import numpy as np
 import pytest
 
-from core_engine.compression import (
+from astra.core.compression import (
     topk_sparsify,
     decompress_topk,
     quantize_vector,

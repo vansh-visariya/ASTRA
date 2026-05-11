@@ -6,7 +6,7 @@ from typing import Dict
 
 from fastapi import APIRouter, HTTPException
 
-from networking.state import get_fl_server
+from astra.app.state import get_fl_server
 
 router = APIRouter()
 

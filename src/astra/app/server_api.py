@@ -15,9 +15,10 @@ Provides:
 import sys
 from pathlib import Path
 
-# Add project root to path
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
+# Add src/ to path so `import astra` resolves to src/astra/
+_src_root = Path(__file__).parent.parent.parent  # src/astra/app/ -> src/
+if str(_src_root) not in sys.path:
+    sys.path.insert(0, str(_src_root))
 
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -28,15 +29,15 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi_socketio import SocketManager
 
-from api.database import init_db
-from core_engine.server import AsyncServer
+from astra.app.database import init_db
+from astra.core.server import AsyncServer
 
-import networking.state as state
-from networking.fl_server import FLServer
-from networking.websocket_handler import websocket_endpoint, register_socketio_handlers
+import astra.app.state as state
+from astra.app.fl_server import FLServer
+from astra.infra.websocket_handler import websocket_endpoint, register_socketio_handlers
 
 # Route modules
-from networking.routes import system, groups, clients, models, experiments
+from astra.app.routes import system, groups, clients, models, experiments
 
 
 # ============================================================================
@@ -84,7 +85,7 @@ def _register_extended_endpoints(app, config):
         return
 
     try:
-        from api.extended_endpoints import setup_extended_api
+        from astra.app.extended_endpoints import setup_extended_api
         platform = setup_extended_api(app, config)
         print("[INFO] Extended API endpoints registered")
         _extended_api_registered = True

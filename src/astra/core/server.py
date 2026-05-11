@@ -23,10 +23,10 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 
-from core_engine.aggregator import Aggregator
-from core_engine.trust_manager import TrustManager
-from core_engine.privacy import clip_and_noise
-from core_engine.utils.metrics import compute_accuracy, compute_loss
+from astra.core.aggregation.aggregator import Aggregator
+from astra.core.trust_manager import TrustManager
+from astra.core.privacy.privacy import clip_and_noise
+from astra.core.utils.metrics import compute_accuracy, compute_loss
 
 
 class AsyncServer:

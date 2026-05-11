@@ -121,7 +121,7 @@ class NotificationDatabase:
     
     def __init__(self, db=None):
         if db is None:
-            from api.database import get_db
+            from astra.app.database import get_db
             db = get_db()
         self._db = db
     

@@ -20,9 +20,9 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, Subset
 
-from core_engine.privacy import clip_and_noise, secure_aggregate_masking
-from core_engine.malicious_simulator import MaliciousSimulator
-from core_engine.compression import topk_sparsify
+from astra.core.privacy.privacy import clip_and_noise, secure_aggregate_masking
+from astra.core.privacy.malicious_simulator import MaliciousSimulator
+from astra.core.compression import topk_sparsify
 
 
 class FLClient:

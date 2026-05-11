@@ -12,16 +12,16 @@ from typing import Any, Dict, Optional
 
 import numpy as np
 
-from api.database import get_db
-from core_engine.aggregator import create_aggregator
-from core_engine.data_splitter import DataSplitter
-from core_engine.server import AsyncServer
-from core_engine.utils.seed import set_seed
-from model_registry.registry import get_registry
+from astra.app.database import get_db
+from astra.core.aggregation.aggregator import create_aggregator
+from astra.core.data_splitter import DataSplitter
+from astra.core.server import AsyncServer
+from astra.core.utils.seed import set_seed
+from astra.infra.registry import get_registry
 
-from networking.connection_manager import ConnectionManager
-from networking.group_manager import GroupManager
-from networking.models import ClientUpdate
+from astra.infra.connection_manager import ConnectionManager
+from astra.app.group_manager import GroupManager
+from astra.infra.models import ClientUpdate
 
 
 class FLServer:
@@ -46,7 +46,7 @@ class FLServer:
 
     def _setup_server(self):
         """Initialize the FL server."""
-        from core_engine.model_zoo import create_model
+        from astra.core.models.model_zoo import create_model
 
         # Create model
         model = create_model(self.config)

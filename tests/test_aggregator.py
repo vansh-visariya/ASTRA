@@ -5,7 +5,7 @@ Unit tests for robust aggregation methods.
 import numpy as np
 import pytest
 
-from core_engine.robust_aggregation import (
+from astra.core.aggregation.robust import (
     trimmed_mean,
     coordinate_median,
     hybrid_aggregator

@@ -5,7 +5,7 @@ Unit tests for trust manager.
 import numpy as np
 import pytest
 
-from core_engine.trust_manager import TrustManager
+from astra.core.trust_manager import TrustManager
 
 
 class TestTrustManager:

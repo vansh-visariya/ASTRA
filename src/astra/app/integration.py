@@ -16,7 +16,7 @@ import logging
 import os
 from typing import Any, Dict, List, Optional
 
-from api.auth_system import (
+from astra.infra.security.auth import (
     AuthManager,
     get_auth_manager,
     init_auth_manager,
@@ -24,25 +24,25 @@ from api.auth_system import (
     JoinRequestManager,
     TrustScoreManager
 )
-from api.notifications import (
+from astra.app.notifications import (
     NotificationService,
     NotificationType,
     NotificationPriority,
     get_notification_service,
     init_notification_service
 )
-from api.model_recommender import (
+from astra.app.model_recommender import (
     ModelRecommendationService,
     ClientMetadata,
     get_recommendation_service,
     init_recommendation_service
 )
-from core_engine.heterogeneous_aggregation import (
+from astra.core.aggregation.heterogeneous import (
     HeterogeneousAggregator,
     BaselineModelManager,
     create_heterogeneous_aggregator
 )
-from core_engine.inference import (
+from astra.core.inference import (
     InferenceModule,
     create_inference_module,
     ServerSideInference,
@@ -68,14 +68,14 @@ class FLPlatformIntegration:
     
     def _init_auth(self):
         """Initialize authentication system."""
-        from api.database import get_db
+        from astra.app.database import get_db
         db = get_db()
         self.auth_manager: AuthManager = init_auth_manager(db=db)
         self.logger.info("Auth system initialized with unified AstraDB")
     
     def _init_notifications(self):
         """Initialize notification system."""
-        from api.database import get_db
+        from astra.app.database import get_db
         db = get_db()
         self.notification_service: NotificationService = init_notification_service(db=db)
         

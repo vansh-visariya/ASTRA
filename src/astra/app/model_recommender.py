@@ -556,7 +556,7 @@ class ModelRecommendationService:
         
         try:
             # Import here to avoid circular imports
-            from model_registry.registry import get_registry
+            from astra.infra.registry import get_registry
             registry = get_registry()
             
             model_info = registry.register_hf_model(

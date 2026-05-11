@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from networking.fl_server import FLServer
+    from astra.app.fl_server import FLServer
 
 fl_server: "FLServer | None" = None
 

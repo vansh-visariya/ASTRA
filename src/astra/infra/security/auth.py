@@ -65,7 +65,7 @@ class UserDatabase:
     def __init__(self, db=None):
         """Initialize with an AstraDB instance or create one."""
         if db is None:
-            from api.database import get_db
+            from astra.app.database import get_db
             db = get_db()
         self._db = db
         self.logger = logging.getLogger(__name__)

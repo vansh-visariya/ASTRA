@@ -178,7 +178,7 @@ class MetricsTracker:
     
     def _init_loggers(self) -> None:
         """Initialize loggers."""
-        from core_engine.utils.logging_utils import JSONLLogger
+        from astra.core.utils.logging_utils import JSONLLogger
         
         self.jsonl_logger = JSONLLogger(
             self.log_dir / 'metrics.jsonl'

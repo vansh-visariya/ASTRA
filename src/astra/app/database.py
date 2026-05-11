@@ -334,11 +334,12 @@ class AstraDB:
     def _ensure_default_admin(self):
         """Create default admin user if not exists."""
         import bcrypt
+        default_password = os.getenv("ASTRA_DEFAULT_ADMIN_PASSWORD", "adminpass")
         with self.connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT id FROM users WHERE username = ?", ("admin",))
             if not cursor.fetchone():
-                pw = bcrypt.hashpw(b"adminpass", bcrypt.gensalt()).decode("utf-8")
+                pw = bcrypt.hashpw(default_password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
                 cursor.execute(
                     "INSERT INTO users (username, password_hash, role, full_name) VALUES (?, ?, ?, ?)",
                     ("admin", pw, "admin", "System Admin")

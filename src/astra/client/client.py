@@ -13,9 +13,10 @@ CLI client that:
 import sys
 from pathlib import Path
 
-# Add project root to path
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
+# Add src/ to path so `import astra` resolves to src/astra/
+_src_root = Path(__file__).parent.parent.parent  # src/astra/client/ -> src/
+if str(_src_root) not in sys.path:
+    sys.path.insert(0, str(_src_root))
 
 import argparse
 import asyncio
@@ -35,10 +36,10 @@ import torch.nn as nn
 import websockets
 from websockets.exceptions import ConnectionClosed
 
-from core_engine.client import FLClient as LocalClient
-from core_engine.data_splitter import DataSplitter
-from core_engine.model_zoo import create_model
-from core_engine.utils.seed import set_seed
+from astra.core.client import FLClient as LocalClient
+from astra.core.data_splitter import DataSplitter
+from astra.core.models.model_zoo import create_model
+from astra.core.utils.seed import set_seed
 
 
 class HFVisionClassifier(nn.Module):
@@ -484,7 +485,7 @@ class FederatedClient:
             model_info = self.group_model_info or {}
             source = model_info.get('source')
             if source == 'huggingface':
-                from core_engine.hf_models import load_hf_peft_model
+                from astra.core.models.hf_models import load_hf_peft_model
                 model_name = model_info.get('model_path') or model_info.get('architecture')
                 model_cfg = model_info.get('config') or {}
                 model, _ = load_hf_peft_model(model_name, model_cfg, device='cpu')

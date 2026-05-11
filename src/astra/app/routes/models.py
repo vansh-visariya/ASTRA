@@ -9,8 +9,8 @@ import requests
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
-from api.database import get_db
-from networking.state import get_fl_server
+from astra.app.database import get_db
+from astra.app.state import get_fl_server
 
 router = APIRouter()
 

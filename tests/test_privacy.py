@@ -5,7 +5,7 @@ Unit tests for privacy mechanisms.
 import numpy as np
 import pytest
 
-from core_engine.privacy import (
+from astra.core.privacy.privacy import (
     clip_and_noise,
     secure_aggregate_masking,
     estimate_epsilon

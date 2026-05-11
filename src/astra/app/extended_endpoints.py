@@ -23,8 +23,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from pydantic.fields import Field
 
-from api.auth_system import AuthManager, get_auth_manager
-from api.integration import (
+from astra.infra.security.auth import AuthManager, get_auth_manager
+from astra.app.integration import (
     FLPlatformIntegration,
     get_platform_integration,
     init_platform_integration
@@ -469,12 +469,12 @@ def create_recommendation_router(platform: FLPlatformIntegration) -> APIRouter:
         current_user: Dict = Depends(get_current_user)
     ):
         """Get unified recommendations (Gemini + builtin + custom HF models)."""
-        from api.model_recommender import metadata_from_dict, ClientMetadata
+        from astra.app.model_recommender import metadata_from_dict, ClientMetadata
         
         metadata = metadata_from_dict(request.dict())
         
         # Get builtin models from registry
-        from model_registry.registry import get_registry
+        from astra.infra.registry import get_registry
         registry = get_registry()
         builtin_models = registry.list_models()
         
@@ -535,7 +535,7 @@ def create_recommendation_router(platform: FLPlatformIntegration) -> APIRouter:
         current_user: Dict = Depends(get_current_user)
     ):
         """Get all available builtin models."""
-        from model_registry.registry import get_registry
+        from astra.infra.registry import get_registry
         registry = get_registry()
         models = registry.list_models()
         return {"models": models, "count": len(models)}

@@ -5,8 +5,8 @@ Client management REST endpoints.
 import logging
 from fastapi import APIRouter, HTTPException, Request
 
-from networking.models import ClientRegister
-from networking.state import get_fl_server
+from astra.infra.models import ClientRegister
+from astra.app.state import get_fl_server
 
 router = APIRouter()
 
@@ -53,7 +53,7 @@ async def join_group_as_client(group_id: str, request: Request):
 
     # Verify token via extended platform integration
     try:
-        from api.integration import get_platform_integration
+        from astra.app.integration import get_platform_integration
         platform = get_platform_integration()
         payload = platform.verify_token(token)
         if not payload:
@@ -141,7 +141,7 @@ async def get_client_training_status(request: Request):
     token = auth_header.replace("Bearer ", "")
 
     try:
-        from api.integration import get_platform_integration
+        from astra.app.integration import get_platform_integration
         platform = get_platform_integration()
         payload = platform.verify_token(token)
         if not payload:
@@ -196,7 +196,7 @@ async def get_client_training_status(request: Request):
     # Also check which groups user has approved join requests for but hasn't activated yet
     pending_activations = []
     try:
-        from api.integration import get_platform_integration
+        from astra.app.integration import get_platform_integration
         platform = get_platform_integration()
         # Get all groups and check join status
         for group_id in fl_server.group_manager.groups:

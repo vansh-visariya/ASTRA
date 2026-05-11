@@ -448,7 +448,7 @@ class ModelDistiller:
         Returns:
             Student model
         """
-        from core_engine.model_zoo import SimpleCNN, SimpleMLP
+        from astra.core.models.model_zoo import SimpleCNN, SimpleMLP
         
         target_params = int(teacher_param_count * compression_ratio)
         

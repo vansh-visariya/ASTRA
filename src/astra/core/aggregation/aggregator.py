@@ -12,8 +12,8 @@ from typing import Any
 
 import numpy as np
 
-from core_engine.exceptions import AggregationError, ConfigurationError
-from core_engine.robust_aggregation import (
+from astra.core.exceptions import AggregationError, ConfigurationError
+from astra.core.aggregation.robust import (
     coordinate_median,
     hybrid_aggregator,
     trimmed_mean,

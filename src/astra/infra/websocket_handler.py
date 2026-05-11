@@ -12,13 +12,13 @@ import time
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from api.auth_system import get_auth_manager
-from networking.models import ClientUpdate
+from astra.infra.security.auth import get_auth_manager
+from astra.infra.models import ClientUpdate
 
 
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket for live updates."""
-    from networking.state import get_fl_server
+    from astra.app.state import get_fl_server
     fl_server = get_fl_server()
 
     # Require JWT token on the WebSocket query string for authentication.
@@ -62,7 +62,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     has_approved_join = False
                     if not already_registered and not join_token and payload:
                         try:
-                            from api.integration import get_platform_integration
+                            from astra.app.integration import get_platform_integration
                             platform = get_platform_integration()
                             user_id = payload.get("user_id")
                             join_status = platform.get_user_join_status(user_id, group_id)
@@ -240,7 +240,7 @@ def register_socketio_handlers(socket_manager):
     @socket_manager.on('register')
     async def register(sid, data):
         """Handle client registration via Socket.IO"""
-        from networking.state import get_fl_server
+        from astra.app.state import get_fl_server
         fl_server = get_fl_server()
 
         client_id = data.get('client_id')
@@ -252,7 +252,7 @@ def register_socketio_handlers(socket_manager):
     @socket_manager.on('update')
     async def handle_update(sid, data):
         """Handle client update via Socket.IO"""
-        from networking.state import get_fl_server
+        from astra.app.state import get_fl_server
         fl_server = get_fl_server()
 
         try:

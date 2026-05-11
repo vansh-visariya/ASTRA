@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "astra"
+version = "0.1.0"
+description = "Async Scalable Training & Research Architecture — Federated Learning Platform"
+requires-python = ">=3.10"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+# Ensures src/astra/ is importable when running pytest from the repo root.
+# conftest.py handles the sys.path insertion; this just marks the testpaths.
+testpaths = ["tests"]
+pythonpath = ["src"]

@@ -17,10 +17,10 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
-from api.database import get_db
-from core_engine.aggregator import create_aggregator
+from astra.app.database import get_db
+from astra.core.aggregation.aggregator import create_aggregator
 
-from networking.training_group import AsyncWindowConfig, TrainingGroup
+from astra.app.training_group import AsyncWindowConfig, TrainingGroup
 
 
 class GroupManager:

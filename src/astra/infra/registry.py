@@ -92,7 +92,7 @@ class ModelRegistry:
     
     def _register_builtin_models(self) -> None:
         """Register built-in CNN/MLP models."""
-        from core_engine.model_zoo import SimpleCNN, CIFAR10CNN, SimpleMLP
+        from astra.core.models.model_zoo import SimpleCNN, CIFAR10CNN, SimpleMLP
         
         # SimpleCNN for MNIST
         model = SimpleCNN(num_classes=10)
@@ -143,7 +143,7 @@ class ModelRegistry:
         Returns:
             ModelInfo object
         """
-        from core_engine.hf_models import load_hf_peft_model
+        from astra.core.models.hf_models import load_hf_peft_model
         
         model_id = f"hf_{model_name.replace('/', '_')}"
         
@@ -277,7 +277,7 @@ class ModelRegistry:
         Returns:
             ModelInfo object
         """
-        from core_engine.model_zoo import create_model
+        from astra.core.models.model_zoo import create_model
         
         config['model']['type'] = architecture
         
@@ -328,7 +328,7 @@ class ModelRegistry:
         model_info = self.models[model_id]
         
         if model_info.source == 'huggingface':
-            from core_engine.hf_models import load_hf_peft_model
+            from astra.core.models.hf_models import load_hf_peft_model
             model, _ = load_hf_peft_model(
                 model_info.model_path,
                 model_info.config,
@@ -337,7 +337,7 @@ class ModelRegistry:
         elif model_info.source == 'local':
             model = torch.load(model_info.model_path, map_location=device)
         else:
-            from core_engine.model_zoo import create_model
+            from astra.core.models.model_zoo import create_model
             config = {'model': {'type': model_info.architecture}, **model_info.config}
             model = create_model(config)
             model = model.to(device)
