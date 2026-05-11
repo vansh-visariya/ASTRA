@@ -1,6 +1,6 @@
 FROM python:3.10-slim
 
-LABEL maintainer="DevHacks Team"
+LABEL maintainer="Vansh"
 LABEL description="Async Federated Learning Framework"
 
 WORKDIR /app
