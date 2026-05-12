@@ -1,17 +1,16 @@
 # ASTRA — Async Scalable Training & Research Architecture
 
-> A production-ready distributed **Federated Learning** platform with real-time networking, a dual-panel web dashboard (Admin + Client), robust aggregation, trust scoring, differential privacy, and model management.
+A distributed **Federated Learning** platform — clients train locally, the server aggregates updates without ever seeing raw data. Includes a dual-panel web dashboard (Admin + Client), Byzantine-robust aggregation, trust scoring, differential privacy, and HuggingFace model support.
 
 ---
 
 ## Table of Contents
 
-- [Overview](#overview)
-- [Architecture](#architecture)
+- [How It Works](#how-it-works)
 - [Features](#features)
 - [Project Structure](#project-structure)
 - [Quick Start](#quick-start)
-- [Dashboard](#dashboard)
+- [Running a Client](#running-a-client)
 - [API Reference](#api-reference)
 - [Configuration](#configuration)
 - [Testing](#testing)
@@ -19,116 +18,32 @@
 
 ---
 
-## Overview
+## How It Works
 
-ASTRA is a **Federated Learning (FL)** platform designed for distributed model training across multiple clients without centralizing sensitive data. It implements a **hybrid asynchronous windowed aggregation** strategy — clients submit model updates independently, and the server aggregates them when a configurable window of updates is reached or a time limit expires.
-
-### Key Capabilities
-
-- **Asynchronous Training** — Clients train at their own pace; no synchronized rounds required
-- **Group-Based Training** — Multiple training groups can run simultaneously with separate models
-- **Robust Aggregation** — Multiple strategies (FedAvg, Trimmed Mean, Krum, Median) to resist poisoning attacks
-- **Trust & Reputation** — Byzantine-tolerant trust scoring with automatic quarantine of malicious clients
-- **Differential Privacy** — Optional DP noise injection with configurable epsilon budgets
-- **HuggingFace Integration** — Load any HF model and fine-tune with LoRA/PEFT across the federation
-- **Real-Time Dashboard** — Admin and Client dashboards with live metrics, group management, and join request workflow
-
----
-
-## Architecture
-
-```
-┌──────────────────────────────────────────────────────────────┐
-│                        ASTRA Platform                        │
-├──────────────────────────────────────────────────────────────┤
-│                                                              │
-│  ┌─────────────┐     ┌─────────────────┐     ┌───────────┐  │
-│  │   Admin     │     │   API Server    │     │  Client   │  │
-│  │  Dashboard  │────▶│   (FastAPI)     │◀────│   App     │  │
-│  │  :3000      │     │   :8000         │     │  (Python) │  │
-│  └─────────────┘     └────────┬────────┘     └───────────┘  │
-│                               │                              │
-│  ┌─────────────┐     ┌───────┴────────┐     ┌───────────┐  │
-│  │   Client    │     │  Core Engine   │     │  Model    │  │
-│  │  Dashboard  │     │  - Aggregator  │     │  Registry │  │
-│  │  :3000      │     │  - Privacy     │     │  - HF     │  │
-│  └─────────────┘     │  - Trust       │     │  - Custom │  │
-│                      │  - Compression │     │  - PEFT   │  │
-│                      └────────────────┘     └───────────┘  │
-│                                                              │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │  Auth System (JWT) │ Notifications │ Join Requests   │   │
-│  └──────────────────────────────────────────────────────┘   │
-└──────────────────────────────────────────────────────────────┘
-```
-
-### Data Flow
-1. **Admin** creates a training group with a model (HuggingFace or custom)
-2. **Clients** browse available groups and request to join
-3. **Admin** approves join requests from the dashboard
-4. **Client** activates their membership → registers as an FL participant
-5. **Training** starts automatically — clients train locally and submit updates
-6. **Server** aggregates updates using the chosen strategy (FedAvg, Krum, etc.)
-7. **Dashboard** shows real-time metrics, accuracy, loss, and client status
+1. **Admin** creates a training group and picks a model (built-in CNN/MLP or any HuggingFace model)
+2. **Clients** browse groups on their dashboard and request to join
+3. **Admin** approves join requests
+4. **Client** activates membership → registered as an FL participant
+5. **Training** — clients train locally on their own data and push gradient updates to the server
+6. **Server** aggregates updates using the configured strategy (FedAvg, Trimmed Mean, Median, or Hybrid); triggers when **N updates arrive** or a **time window expires** — whichever comes first
+7. **Dashboard** streams live metrics, trust scores, and training logs via WebSocket
 
 ---
 
 ## Features
 
-### Core Engine (`core_engine/`)
-
-| Feature | File | Description |
-|---------|------|-------------|
-| Async Server | `server.py` | Asynchronous FL server with staleness-weighted aggregation |
-| Aggregation | `aggregator.py` | Factory for aggregation strategies |
-| Robust Aggregation | `robust_aggregation.py` | FedAvg, Trimmed Mean, Krum, Median — Byzantine-resilient |
-| Trust Manager | `trust_manager.py` | Client reputation scoring, anomaly detection, quarantine |
-| Differential Privacy | `privacy.py` | DP-SGD with per-client epsilon budgets and gradient clipping |
-| Gradient Compression | `compression.py` | Top-k sparsification, quantization, random sketching |
-| Heterogeneous Models | `heterogeneous_aggregation.py` | Aggregate updates from different model architectures |
-| HuggingFace Models | `hf_models.py` | Load and fine-tune any HF transformer model |
-| PEFT/LoRA | `hf_models.py` | Parameter-efficient fine-tuning across the federation |
-| Model Zoo | `model_zoo.py` | Built-in CNN, MLP, ResNet architectures |
-| Data Splitting | `data_splitter.py` | IID, Dirichlet, pathological splits for non-IID simulation |
-| Personalization | `personalization.py` | Per-client model personalization layers |
-| Inference | `inference.py` | Model inference and evaluation pipeline |
-| Attack Demos | `attack_demos.py` | Byzantine, label-flip, and free-rider attack simulations |
-
-### API Layer (`api/`)
-
-| Feature | File | Description |
-|---------|------|-------------|
-| Authentication | `auth.py` | JWT-based auth with role verification (admin/client/observer) |
-| User Management | `auth_system.py` | SQLite-backed user DB, signup, login, API keys, join requests |
-| Platform Integration | `integration.py` | Orchestrates auth, notifications, trust, recommendations |
-| Extended Endpoints | `extended_endpoints.py` | Group joining, notifications, trust scores, model recommendations |
-| Notifications | `notifications.py` | In-app notification system with read/unread tracking |
-| Model Recommender | `model_recommender.py` | AI-powered model recommendations via Gemini API |
-
-### Networking (`networking/`)
-
-| Feature | File | Description |
-|---------|------|-------------|
-| Server API | `server_api.py` | FastAPI server with REST + WebSocket, group management, experiment tracking |
-| Client App | `client_app/client_app.py` | Python client with auto-reconnection, local training, model sync |
-
-### Dashboard (`dashboard/`)
-
-The dashboard is a **Next.js** application with two distinct interfaces:
-
-#### Admin Dashboard (`/dashboard`)
-- **Overview** — System metrics, active groups, aggregation stats
-- **Groups** — Create/manage training groups, set models, configure window sizes
-- **Group Detail** — Live participants, pending join requests (approve/reject), training logs
-- **Logs** — Event timeline with filtering by type
-
-#### Client Dashboard (`/client`)
-- **Overview** — Personal stats, joined groups, quick actions
-- **Groups** — Browse available groups, request to join, check approval status
-- **Training** — Local training interface with progress tracking
-- **Notifications** — Join approvals, training events, system alerts
-- **Trust Score** — View personal trust/reputation metrics
-- **Recommendations** — AI-powered model suggestions
+| Category | What's included |
+|---|---|
+| **Aggregation** | FedAvg, Trimmed Mean, Coordinate Median, Hybrid (trust-weighted + staleness decay) |
+| **Robustness** | Byzantine-tolerant trust scoring, soft quarantine, cosine-similarity anomaly detection |
+| **Privacy** | DP-SGD (client-side or server-side), gradient clipping, Gaussian noise, moments accountant |
+| **Compression** | Top-k sparsification, quantization |
+| **Models** | SimpleCNN, CIFAR10CNN, SimpleMLP + any HuggingFace model with optional LoRA/PEFT |
+| **Data splits** | IID, Dirichlet (non-IID), pathological |
+| **Auth** | JWT + bcrypt, roles: `admin` / `client` / `observer` |
+| **Dashboard** | Next.js 14 — separate Admin and Client panels, real-time WebSocket updates |
+| **Notifications** | In-app notification system for join approvals, training events |
+| **Model Recommendations** | Gemini API–powered suggestions (optional) |
 
 ---
 
@@ -136,63 +51,51 @@ The dashboard is a **Next.js** application with two distinct interfaces:
 
 ```
 ASTRA/
-├── api/                          # API layer
-│   ├── auth.py                   # JWT auth middleware & dependencies
-│   ├── auth_system.py            # User DB, join requests, API keys
-│   ├── extended_endpoints.py     # Join flow, notifications, trust, inference
-│   ├── integration.py            # Platform integration orchestrator
-│   ├── model_recommender.py      # Gemini-powered model recommendations
-│   └── notifications.py          # Notification service
+├── src/astra/              # All Python source (importable as astra.*)
+│   ├── app/                # API layer, orchestration, group lifecycle
+│   │   ├── server_api.py   # FastAPI entry point (REST + WebSocket + Socket.IO)
+│   │   ├── fl_server.py    # FLServer — wires core engine to API
+│   │   ├── group_manager.py# Manages concurrent training groups
+│   │   ├── database.py     # AstraDB — single SQLite file (astra.db)
+│   │   ├── integration.py  # FLPlatformIntegration — auth/notifs/trust/recommender
+│   │   ├── extended_endpoints.py  # Auth, join, notifications, trust REST routes
+│   │   ├── notifications.py       # In-app notification service
+│   │   ├── model_recommender.py   # Gemini-powered model suggestions
+│   │   └── routes/         # system, groups, clients, models, experiments routers
+│   │
+│   ├── core/               # FL algorithms — no web dependencies
+│   │   ├── server.py       # AsyncServer — staleness-weighted aggregation engine
+│   │   ├── trust_manager.py# TrustManager — cosine-sim scoring + quarantine
+│   │   ├── compression.py  # Top-k sparsification + quantization
+│   │   ├── data_splitter.py# IID / Dirichlet / pathological splits
+│   │   ├── inference.py    # Server-side and client-side inference
+│   │   ├── exceptions.py   # Custom FL exceptions
+│   │   ├── aggregation/    # aggregator.py, robust.py, heterogeneous.py
+│   │   ├── models/         # model_zoo.py (CNN/MLP), hf_models.py (HF + PEFT)
+│   │   ├── privacy/        # privacy.py (DP-SGD), malicious_simulator.py
+│   │   └── utils/          # metrics.py, seed.py, logging_utils.py
+│   │
+│   ├── infra/              # Transport and storage
+│   │   ├── connection_manager.py  # WebSocket broadcast / per-client send
+│   │   ├── websocket_handler.py   # WS endpoint + Socket.IO handlers
+│   │   ├── models.py       # Pydantic schemas (ClientUpdate, ExperimentConfig…)
+│   │   ├── registry.py     # ModelRegistry — HF / custom / local .pt models
+│   │   └── security/auth.py# AuthManager, TokenManager, JoinRequestManager
+│   │
+│   └── client/
+│       └── client.py       # FederatedClient CLI — trains locally, pushes updates
 │
-├── core_engine/                  # FL core
-│   ├── server.py                 # Async FL server
-│   ├── client.py                 # Local client training logic
-│   ├── aggregator.py             # Aggregation strategy factory
-│   ├── robust_aggregation.py     # Byzantine-resilient aggregators
-│   ├── trust_manager.py          # Trust scoring & quarantine
-│   ├── privacy.py                # Differential privacy
-│   ├── compression.py            # Gradient compression
-│   ├── heterogeneous_aggregation.py  # Cross-architecture aggregation
-│   ├── hf_models.py              # HuggingFace model integration
-│   ├── model_zoo.py              # Built-in model architectures
-│   ├── data_splitter.py          # Data distribution strategies
-│   ├── personalization.py        # Per-client personalization
-│   ├── inference.py              # Model inference pipeline
-│   └── tests/                    # Unit tests
+├── dashboard/              # Next.js 14 web dashboard
+│   ├── app/dashboard/      # Admin UI (groups, join requests, logs, metrics)
+│   └── app/client/         # Client UI (browse groups, training, trust, notifs)
 │
-├── networking/
-│   └── server_api.py             # FastAPI server (REST + WebSocket + groups)
-│
-├── client_app/
-│   └── client_app.py             # Python FL client application
-│
-├── dashboard/                    # Next.js web dashboard
-│   ├── app/
-│   │   ├── login/                # Authentication page
-│   │   ├── dashboard/            # Admin interface
-│   │   │   ├── page.tsx          # Admin overview
-│   │   │   ├── groups/           # Group management
-│   │   │   ├── create/           # Create new group
-│   │   │   └── logs/             # Event logs
-│   │   └── client/               # Client interface
-│   │       ├── page.tsx          # Client overview
-│   │       ├── groups/           # Browse & join groups
-│   │       ├── training/         # Training interface
-│   │       ├── notifications/    # Notifications
-│   │       ├── trust/            # Trust score
-│   │       └── recommendations/  # Model recommendations
-│   └── components/
-│       └── AuthContext.tsx        # JWT auth context provider
-│
-├── model_registry/
-│   └── registry.py               # Model registration & management
-│
-├── config.yaml                   # Default training configuration
-├── docker-compose.yml            # Multi-service deployment
-├── Dockerfile.server             # Server container
-├── Dockerfile.client             # Client container
-├── requirements.txt              # Python dependencies
-└── Makefile                      # Build shortcuts
+├── tests/                  # pytest unit tests (36 tests)
+├── config.yaml             # Default training configuration
+├── pyproject.toml          # Package config + pytest settings
+├── requirements.txt        # Python dependencies
+├── docker-compose.yml      # Multi-service deployment
+└── conftest.py             # Adds src/ to sys.path for pytest
+
 ```
 
 ---
@@ -201,150 +104,114 @@ ASTRA/
 
 ### Prerequisites
 
-- **Python 3.10+** with pip
-- **Node.js 18+** with npm
+- **Python 3.10+**
+- **Node.js 18+**
 - (Optional) Docker & Docker Compose
 
-### Local Development
+### 1 — Backend setup
 
 ```bash
-# 1. Clone the repository
+# Clone and enter the repo
 git clone https://github.com/vansh-visariya/ASTRA.git
 cd ASTRA
 
-# 2. Create a virtual environment
+# Create and activate a virtual environment
 python -m venv .venv
-source .venv/bin/activate  # Linux/Mac
-.venv\Scripts\activate     # Windows
+.venv\Scripts\activate      # Windows
+source .venv/bin/activate   # Linux / Mac
 
-# 3. Install Python dependencies
+# Install Python dependencies
 pip install -r requirements.txt
 
-# 4. Start the API Server
-python networking/server_api.py
-# Server runs at http://localhost:8000
+# Start the API server  (http://localhost:8000)
+uvicorn astra.app.server_api:app --reload
+```
 
-# 5. Start the Dashboard (new terminal)
+> **Alternative (run as script):**
+> ```bash
+> python src/astra/app/server_api.py
+> ```
+
+### 2 — Dashboard setup
+
+```bash
+# In a new terminal
 cd dashboard
 npm install
 npm run dev
-# Dashboard runs at http://localhost:3000
-
-# 6. (Optional) Run a Python client
-python client_app/client_app.py --server http://localhost:8000 --client-id client_1
+# Dashboard → http://localhost:3000
 ```
+
+### 3 — Register users
+
+Open `http://localhost:3000`, go to the login page and sign up:
+- Role **`admin`** → access the Admin dashboard
+- Role **`client`** → access the Client dashboard
 
 ### Docker Compose
 
 ```bash
-# Start all services
-docker-compose up -d
-
-# View logs
-docker-compose logs -f
-
-# Stop
-docker-compose down
+docker-compose up -d        # start all services
+docker-compose logs -f      # stream logs
+docker-compose down         # stop
 ```
-
-### Default Credentials
-
-After starting the server, register users via the dashboard login page:
-- Sign up with role **admin** to access the admin dashboard
-- Sign up with role **client** to access the client dashboard
 
 ---
 
-## Dashboard
+## Running a Client
 
-### Group Join Workflow
+```bash
+# Basic usage
+python src/astra/client/client.py \
+  --server http://localhost:8000 \
+  --client-id client_1
 
+# With a specific group and more rounds
+python src/astra/client/client.py \
+  --server http://localhost:8000 \
+  --client-id client_1 \
+  --group-id group_a
 ```
-Client                          Server                          Admin
-  │                               │                               │
-  │  1. Browse Groups             │                               │
-  │──────────────────────────────▶│                               │
-  │        Group List             │                               │
-  │◀──────────────────────────────│                               │
-  │                               │                               │
-  │  2. Request to Join           │                               │
-  │──────────────────────────────▶│  3. Notify Admin              │
-  │        "Pending"              │──────────────────────────────▶│
-  │◀──────────────────────────────│                               │
-  │                               │                               │
-  │                               │  4. Approve Request           │
-  │  5. Status → "Approved"       │◀──────────────────────────────│
-  │◀──────────────────────────────│                               │
-  │                               │                               │
-  │  6. Click "Join Group"        │                               │
-  │──────────────────────────────▶│                               │
-  │        "Joined" ✓             │  7. Client in Participants    │
-  │◀──────────────────────────────│──────────────────────────────▶│
-  │                               │                               │
-  │  8. Training Starts           │                               │
-  │◀─────────────────────────────▶│                               │
-```
+
+The client auto-registers, downloads the global model, trains locally, and pushes updates. It reconnects automatically on connection loss.
 
 ---
 
 ## API Reference
 
-### Authentication
+Interactive docs available at `http://localhost:8000/docs` (Swagger) once the server is running.
 
+### Auth
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/api/auth/signup` | Register a new user |
-| `POST` | `/api/auth/login` | Login and get JWT token |
+| `POST` | `/api/auth/signup` | Register (`role`: admin / client / observer) |
+| `POST` | `/api/auth/login` | Login → JWT token |
 
 ### Groups
-
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/api/groups` | List all training groups |
-| `POST` | `/api/groups` | Create a new group (admin) |
-| `GET` | `/api/groups/{group_id}` | Get group details |
-| `POST` | `/api/groups/{group_id}/start` | Start training (admin) |
-| `POST` | `/api/groups/{group_id}/pause` | Pause training (admin) |
-| `POST` | `/api/groups/{group_id}/resume` | Resume training (admin) |
-| `POST` | `/api/groups/{group_id}/stop` | Stop training (admin) |
+| `GET` | `/api/groups` | List all groups |
+| `POST` | `/api/groups` | Create group (admin) |
+| `GET` | `/api/groups/{id}` | Group detail |
+| `POST` | `/api/groups/{id}/start\|pause\|resume\|stop` | Lifecycle control (admin) |
 
 ### Join Requests
-
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/api/join/join-request` | Request to join a group (client) |
-| `GET` | `/api/join/join-requests` | List pending requests (admin) |
-| `POST` | `/api/join/join-requests/approve` | Approve a request (admin) |
-| `POST` | `/api/join/join-requests/reject` | Reject a request (admin) |
-| `GET` | `/api/join/my-requests/{group_id}` | Check own request status (client) |
-| `POST` | `/api/join/activate/{group_id}` | Activate membership after approval (client) |
+| `POST` | `/api/join/join-request` | Request to join (client) |
+| `GET` | `/api/join/join-requests` | List pending (admin) |
+| `POST` | `/api/join/join-requests/approve\|reject` | Approve / reject (admin) |
+| `POST` | `/api/join/activate/{group_id}` | Activate after approval (client) |
 
-### Notifications
-
+### Other
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/api/notifications` | Get user notifications |
-| `GET` | `/api/notifications/unread-count` | Get unread count |
-| `POST` | `/api/notifications/{id}/read` | Mark as read |
-
-### Models
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
+| `GET` | `/api/notifications` | Get notifications |
+| `POST` | `/api/notifications/{id}/read` | Mark read |
 | `GET` | `/api/models` | List registered models |
-| `POST` | `/api/models/register` | Register a new model |
 | `POST` | `/api/models/register/hf` | Register a HuggingFace model |
-
-### System
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/api/server/status` | Server status |
-| `GET` | `/api/system/metrics` | System-wide metrics |
-| `GET` | `/api/clients` | List all clients |
-| `GET` | `/api/clients/connected` | List connected clients |
 | `GET` | `/health` | Health check |
-| `WS` | `/ws` | WebSocket for live updates |
+| `WS` | `/ws?token=<jwt>` | WebSocket — live dashboard updates |
 
 ---
 
@@ -353,90 +220,71 @@ Client                          Server                          Admin
 ### Environment Variables
 
 ```bash
-ENV=dev                         # "dev" or "prod"
-SECRET_KEY=your-secure-key      # JWT signing secret (REQUIRED in prod)
-SERVER_PORT=8000                # API server port
+SECRET_KEY=your-secure-key            # JWT signing secret (REQUIRED in prod)
+ENV=dev                               # dev | prod  (prod enforces SECRET_KEY)
 NEXT_PUBLIC_API_URL=http://localhost:8000  # Dashboard → API URL
-GEMINI_API_KEY=your-key         # (Optional) For model recommendations
+GEMINI_API_KEY=your-key               # Optional — Gemini model recommendations
 ```
 
-### Training Configuration (`config.yaml`)
+### `config.yaml` — Key Settings
 
 ```yaml
-seed: 42
-dataset:
-  name: MNIST
-  split: dirichlet
-  dirichlet_alpha: 0.3
-
-model:
-  type: cnn
-  cnn:
-    name: simple_cnn
-
-client:
-  num_clients: 10
-  local_epochs: 2
-  batch_size: 32
-  lr: 0.01
-
 server:
-  optimizer: sgd
-  server_lr: 0.5
-  momentum: 0.9
-  aggregator_window: 5         # Updates before aggregation
+  aggregator_window: 10   # aggregate after N updates …
+  poll_timeout: 1.0       # … or after T seconds (whichever first)
+  async_lambda: 0.2       # staleness decay factor
 
 robust:
-  method: fedavg                # fedavg | trimmed_mean | krum | median
-  trim_ratio: 0.1
+  method: hybrid          # fedavg | trimmed_mean | median | hybrid
 
 privacy:
-  dp_enabled: false
-  epsilon: 1.0
-  delta: 1e-5
-  max_grad_norm: 1.0
+  dp_enabled: true
+  dp_mode: client         # client | server
+  clip_norm: 1.0
+  sigma: 1.2
+
+communication:
+  compression: topk
+  topk_ratio: 0.1
 ```
 
-### Aggregation Strategies
-
-| Strategy | Description | Best For |
-|----------|-------------|----------|
-| `fedavg` | Federated Averaging | General use, trusted clients |
-| `trimmed_mean` | Trims extreme values | Moderate Byzantine resilience |
-| `krum` | Selects most representative update | Strong Byzantine defense |
-| `median` | Coordinate-wise median | Robust to outliers |
+See `config.yaml` for the full list (dataset, model, client, trust, malicious, logging settings).
 
 ---
 
 ## Testing
 
 ```bash
-# Unit tests
-pytest core_engine/tests/ -v
+# Run all unit tests
+pytest tests/ -v
 
-# Integration test (simulates 3 local clients)
-python tests/integration_local.py
+# Expected: 36 passed
 ```
+
+Tests cover: aggregation strategies, compression, differential privacy, reproducibility, trust manager.
 
 ---
 
 ## Deployment
 
-### Services
-
 | Service | Port | Description |
 |---------|------|-------------|
-| API Server | 8000 | FastAPI REST + WebSocket + FL Engine |
-| Dashboard | 3000 | Next.js Admin + Client UI |
+| API Server | 8000 | FastAPI — REST + WebSocket + FL engine |
+| Dashboard | 3000 | Next.js — Admin + Client UI |
 
-### Production Checklist
+### Docker Compose (recommended for prod)
 
-- [ ] Set `ENV=prod` and a strong `SECRET_KEY`
-- [ ] Configure CORS origins for your domain
-- [ ] Set up HTTPS termination (nginx/traefik)
-- [ ] Use a persistent database (migrate from SQLite)
-- [ ] Set up monitoring and logging
-- [ ] Configure rate limiting
+```bash
+docker-compose up -d
+```
+
+### Production checklist
+
+- [ ] Set `ENV=prod` and a strong random `SECRET_KEY` (32+ chars)
+- [ ] Set `NEXT_PUBLIC_API_URL` to your domain
+- [ ] Configure CORS origins in `server_api.py`
+- [ ] Put HTTPS in front (nginx / Caddy / Traefik)
+- [ ] Migrate from SQLite to PostgreSQL for concurrent-write workloads
 
 ---
 
@@ -444,12 +292,12 @@ python tests/integration_local.py
 
 | Layer | Technology |
 |-------|------------|
-| Backend | Python, FastAPI, Uvicorn |
-| Frontend | Next.js 14, React, TypeScript, Tailwind CSS |
-| ML | PyTorch, HuggingFace Transformers, PEFT |
-| Database | SQLite (users, experiments, notifications) |
-| Auth | JWT (PyJWT), bcrypt |
-| Real-time | WebSocket, Socket.IO |
+| Backend | Python 3.10+, FastAPI, Uvicorn |
+| Frontend | Next.js 14, React 18, TypeScript, Tailwind CSS |
+| ML | PyTorch, HuggingFace Transformers, PEFT (LoRA) |
+| Database | SQLite with WAL mode (`astra.db`) |
+| Auth | PyJWT, bcrypt |
+| Real-time | WebSocket, Socket.IO (fastapi-socketio) |
 | Deployment | Docker, Docker Compose |
 
 ---
