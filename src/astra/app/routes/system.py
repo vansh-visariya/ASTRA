@@ -19,8 +19,12 @@ async def root():
 
 @router.get("/health")
 async def health():
-    from networking import state
-    return {"status": "healthy", "server_ready": state.fl_server is not None}
+    try:
+        fl_server = get_fl_server()
+        server_ready = fl_server is not None
+    except RuntimeError:
+        server_ready = False
+    return {"status": "healthy", "server_ready": server_ready}
 
 
 @router.get("/api/system/metrics")

@@ -36,7 +36,7 @@ import torch.nn as nn
 import websockets
 from websockets.exceptions import ConnectionClosed
 
-from astra.core.client import FLClient as LocalClient
+from astra.core.fl_client import FLClient as LocalClient
 from astra.core.data_splitter import DataSplitter
 from astra.core.models.model_zoo import create_model
 from astra.core.utils.seed import set_seed

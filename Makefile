@@ -1,56 +1,50 @@
-.PHONY: help install test lint demo clean docker-build docker-run experiments
+.PHONY: help install test lint typecheck clean run-server run-client docker-build docker-up
 
 help:
+	@echo "ASTRA — Async Scalable Training & Research Architecture"
+	@echo ""
 	@echo "Available commands:"
-	@echo "  make install       - Install dependencies"
-	@echo "  make test          - Run unit tests"
-	@echo "  make lint          - Run linting"
-	@echo "  make demo          - Run demo experiment"
-	@echo "  make clean         - Clean generated files"
-	@echo "  make docker-build  - Build Docker image"
-	@echo "  make docker-run    - Run Docker container"
-	@echo "  make experiments   - Run all experiments"
+	@echo "  make install       - Install all dependencies (core + dev)"
+	@echo "  make test          - Run unit tests with pytest"
+	@echo "  make test-cov      - Run tests with coverage report"
+	@echo "  make lint          - Run ruff linter"
+	@echo "  make typecheck     - Run mypy type checker"
+	@echo "  make clean         - Clean generated files and caches"
+	@echo "  make run-server    - Start the FL API server (dev mode)"
+	@echo "  make run-client    - Run an FL client"
+	@echo "  make docker-build  - Build all Docker images"
+	@echo "  make docker-up     - Start all services via docker-compose"
+	@echo "  make fmt           - Auto-format code with ruff"
 
 install:
-	pip install -r requirements.txt
+	pip install -e ".[dev]"
 
 test:
-	pytest federated/tests/ -v --tb=short
+	pytest tests/ -v --tb=short
+
+test-cov:
+	pytest tests/ -v --tb=short --cov=astra --cov-report=term-missing
 
 lint:
-	black --check federated/ main.py || true
-	flake8 federated/ main.py || true
+	ruff check src/ tests/
 
-demo:
-	python main.py --config config.yaml --demo --seed 42
+fmt:
+	ruff format src/ tests/
+
+typecheck:
+	mypy src/astra/
 
 clean:
-	rm -rf runs/
-	rm -rf __pycache__/
-	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
-	find . -type f -name "*.pyc" -delete
+	rm -rf __pycache__/ .pytest_cache/ .mypy_cache/ .ruff_cache/
+
+run-server:
+	uvicorn astra.app.server_api:app --reload --host 0.0.0.0 --port 8000
+
+run-client:
+	python -m astra.client.cli --server http://localhost:8000
 
 docker-build:
-	docker build -t async-fl:latest .
+	docker compose build
 
-docker-run:
-	docker run --gpus all -v $(pwd):/app async-fl:latest
-
-experiments:
-	python federated/experiments/run_experiment.py --output ./experiments_results
-
-benchmark:
-	python -c "
-import time
-import torch
-from federated.model_zoo import create_model
-
-model = create_model({'model': {'type': 'cnn', 'cnn': {'name': 'simple_cnn'}}})
-data = torch.randn(32, 1, 28, 28)
-
-start = time.time()
-for _ in range(100):
-    output = model(data)
-end = time.time()
-print(f'Time per forward pass: {(end-start)/100*1000:.2f}ms')
-"
+docker-up:
+	docker compose up -d

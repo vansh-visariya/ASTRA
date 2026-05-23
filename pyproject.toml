@@ -7,12 +7,54 @@ name = "astra"
 version = "0.1.0"
 description = "Async Scalable Training & Research Architecture — Federated Learning Platform"
 requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+    "numpy>=1.24.0",
+    "pyyaml>=6.0",
+    "scipy>=1.10.0",
+    "fastapi>=0.104.0",
+    "uvicorn>=0.24.0",
+    "websockets>=12.0",
+    "pydantic>=2.5.0",
+    "pyjwt>=2.8.0",
+    "requests>=2.31.0",
+    "fastapi-socketio",
+    "aiohttp",
+    "bcrypt>=4.1.0",
+    "python-multipart>=0.0.6",
+]
+
+[project.scripts]
+astra-server = "astra.app.server_api:run_server"
+astra-client = "astra.client.cli:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.7.0",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.pytest.ini_options]
-# Ensures src/astra/ is importable when running pytest from the repo root.
-# conftest.py handles the sys.path insertion; this just marks the testpaths.
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+select = ["E", "F", "I", "N", "W", "UP", "B", "SIM"]
+extend-exclude = ["__pycache__", ".venv", ".git", "node_modules"]
+
+[tool.ruff.isort]
+known-first-party = ["astra"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+packages = ["astra"]

@@ -24,12 +24,11 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 import uvicorn
-from aiohttp import web
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi_socketio import SocketManager
 
-from astra.app.database import init_db
+from astra.core.config import load_config
 from astra.core.server import AsyncServer
 
 import astra.app.state as state
@@ -46,22 +45,9 @@ from astra.app.routes import system, groups, clients, models, experiments
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    config = {
-        'seed': 42,
-        'dataset': {'name': 'MNIST', 'split': 'dirichlet', 'dirichlet_alpha': 0.3},
-        'model': {'type': 'cnn', 'cnn': {'name': 'simple_cnn'}},
-        'client': {'num_clients': 10, 'local_epochs': 2, 'batch_size': 32, 'lr': 0.01},
-        'server': {'optimizer': 'sgd', 'server_lr': 0.5, 'momentum': 0.9, 'async_lambda': 0.2, 'aggregator_window': 5},
-        'robust': {'method': 'fedavg', 'trim_ratio': 0.1},
-        'privacy': {'dp_enabled': False},
-        'training': {'total_steps': 1000, 'eval_interval_steps': 10},
-        'heterogeneous': {'mapping_method': 'average', 'allow_partial_updates': True, 'min_param_overlap': 0.5},
-    }
+    config = load_config()
 
-    state.fl_server = FLServer(config)
-
-    # Setup Socket.IO
-    socketio_app = web.Application()
+    state.set_fl_server(FLServer(config))
 
     # Note: time-based aggregation is handled by per-group _training_watchdog
 

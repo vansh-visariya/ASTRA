@@ -1,6 +1,6 @@
 FROM python:3.10-slim
 
-LABEL maintainer="Vansh"
+LABEL maintainer="ASTRA"
 LABEL description="Async Federated Learning Framework"
 
 WORKDIR /app
@@ -16,6 +16,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 ENV PYTHONUNBUFFERED=1
-ENV CUDA_VISIBLE_DEVICES=0
 
-CMD ["python", "main.py", "--config", "config.yaml", "--demo"]
+CMD ["python", "-m", "uvicorn", "astra.app.server_api:app", "--host", "0.0.0.0", "--port", "8000"]

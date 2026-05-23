@@ -49,4 +49,5 @@ __pycache__/
 *.swo
 
 .venv
+.commandcode
 .claude
