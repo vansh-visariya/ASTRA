@@ -165,9 +165,9 @@ class AsyncServer:
         else:
             self.running_global_estimate = 0.9 * self.running_global_estimate + 0.1 * aggregated_delta
         
-        self.aggregator_buffer.clear()
+        self._check_adaptive_lr(buffer_list)
         
-        self._check_adaptive_lr()
+        self.aggregator_buffer.clear()
     
     def _apply_update(self, delta: np.ndarray) -> None:
         """Apply aggregated delta to model parameters."""
@@ -181,20 +181,19 @@ class AsyncServer:
                 param.data.add_(torch.from_numpy(param_data).float().to(param.device))
             param_idx += param_size
     
-    def _check_adaptive_lr(self) -> None:
+    def _check_adaptive_lr(self, buffer_snapshot: List[Dict[str, Any]]) -> None:
         """Adaptively adjust learning rate based on instability."""
         if not self.config['server'].get('adaptive_lr', False):
             return
         
-        if len(self.aggregator_buffer) > 0:
-            recent_deltas = [b['delta'] for b in list(self.aggregator_buffer)[-5:]]
-            if len(recent_deltas) > 1:
-                variance = np.var([np.linalg.norm(d) for d in recent_deltas])
-                mean_norm = np.mean([np.linalg.norm(d) for d in recent_deltas])
-                
-                if mean_norm > 0 and variance / mean_norm > self.config['server'].get('instability_threshold', 0.15):
-                    self.current_lr *= self.config['server'].get('lr_decay_factor', 0.5)
-                    self.logger.warning(f"Instability detected. Reducing LR to {self.current_lr}")
+        recent_deltas = [b['delta'] for b in buffer_snapshot[-5:]]
+        if len(recent_deltas) > 1:
+            variance = np.var([np.linalg.norm(d) for d in recent_deltas])
+            mean_norm = np.mean([np.linalg.norm(d) for d in recent_deltas])
+            
+            if mean_norm > 0 and variance / mean_norm > self.config['server'].get('instability_threshold', 0.15):
+                self.current_lr *= self.config['server'].get('lr_decay_factor', 0.5)
+                self.logger.warning(f"Instability detected. Reducing LR to {self.current_lr}")
     
     def evaluate(self) -> Dict[str, float]:
         """Evaluate global model on validation set."""

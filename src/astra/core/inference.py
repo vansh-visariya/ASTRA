@@ -79,7 +79,7 @@ class ServerSideInference(InferenceMethod):
             if tensor.dim() == 3:
                 tensor = tensor.unsqueeze(0)
             
-            output = self.model(tensor)
+            output = self.base_model(tensor)
             probabilities = torch.softmax(output, dim=1)
             predictions = output.argmax(dim=1)
             confidence = probabilities.max().item()

@@ -231,11 +231,7 @@ class ModelRegistry:
         try:
             state_dict = torch.load(model_path, map_location='cpu')
             
-            # Create dummy model to count params
-            model = nn.Linear(10, 10)  # Placeholder
-            model.load_state_dict(state_dict)
-            
-            total_params = sum(p.numel() for p in model.parameters())
+            total_params = sum(p.numel() for p in state_dict.values())
             
             model_info = ModelInfo(
                 model_id=model_id,
@@ -417,3 +413,4 @@ def get_registry() -> ModelRegistry:
     if _global_registry is None:
         _global_registry = ModelRegistry()
     return _global_registry
+

@@ -14,6 +14,7 @@ class ConnectionManager:
     def __init__(self):
         self.active_connections: List[WebSocket] = []
         self.client_sockets: Dict[str, WebSocket] = {}
+        self._websocket_to_client: Dict[int, str] = {}
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
@@ -22,6 +23,10 @@ class ConnectionManager:
     def disconnect(self, websocket: WebSocket):
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
+        ws_id = id(websocket)
+        client_id = self._websocket_to_client.pop(ws_id, None)
+        if client_id and client_id in self.client_sockets:
+            del self.client_sockets[client_id]
 
     async def broadcast(self, message: Dict[str, Any]):
         """Broadcast message to all connected clients."""
@@ -41,7 +46,9 @@ class ConnectionManager:
 
     def register_client(self, client_id: str, websocket: WebSocket):
         self.client_sockets[client_id] = websocket
+        self._websocket_to_client[id(websocket)] = client_id
 
     def unregister_client(self, client_id: str):
-        if client_id in self.client_sockets:
-            del self.client_sockets[client_id]
+        ws = self.client_sockets.pop(client_id, None)
+        if ws is not None:
+            self._websocket_to_client.pop(id(ws), None)
