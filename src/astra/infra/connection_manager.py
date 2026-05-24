@@ -4,7 +4,9 @@ WebSocket connection manager for the Federated Learning server.
 Handles WebSocket connections, broadcasting, and per-client messaging.
 """
 
-from typing import Any, Dict, List
+import contextlib
+from typing import Any
+
 from fastapi import WebSocket
 
 
@@ -12,9 +14,9 @@ class ConnectionManager:
     """Manages WebSocket connections for live updates."""
 
     def __init__(self):
-        self.active_connections: List[WebSocket] = []
-        self.client_sockets: Dict[str, WebSocket] = {}
-        self._websocket_to_client: Dict[int, str] = {}
+        self.active_connections: list[WebSocket] = []
+        self.client_sockets: dict[str, WebSocket] = {}
+        self._websocket_to_client: dict[int, str] = {}
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
@@ -28,21 +30,17 @@ class ConnectionManager:
         if client_id and client_id in self.client_sockets:
             del self.client_sockets[client_id]
 
-    async def broadcast(self, message: Dict[str, Any]):
+    async def broadcast(self, message: dict[str, Any]):
         """Broadcast message to all connected clients."""
         for connection in self.active_connections:
-            try:
+            with contextlib.suppress(Exception):
                 await connection.send_json(message)
-            except Exception:
-                pass
 
-    async def send_to(self, client_id: str, message: Dict[str, Any]):
+    async def send_to(self, client_id: str, message: dict[str, Any]):
         """Send message to specific client."""
         if client_id in self.client_sockets:
-            try:
+            with contextlib.suppress(Exception):
                 await self.client_sockets[client_id].send_json(message)
-            except Exception:
-                pass
 
     def register_client(self, client_id: str, websocket: WebSocket):
         self.client_sockets[client_id] = websocket

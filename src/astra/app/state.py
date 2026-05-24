@@ -9,21 +9,22 @@ For testing, assign state.fl_server directly to a mock/test instance.
 """
 
 from __future__ import annotations
+
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from astra.app.fl_server import FLServer
 
-fl_server: "FLServer | None" = None
+fl_server: FLServer | None = None
 
 
-def set_fl_server(server: "FLServer") -> None:
+def set_fl_server(server: FLServer) -> None:
     """Called by the application lifespan to register the server instance."""
     global fl_server
     fl_server = server
 
 
-def get_fl_server() -> "FLServer":
+def get_fl_server() -> FLServer:
     """Get the initialized FLServer instance. Raises if not yet initialized."""
     if fl_server is None:
         raise RuntimeError(

@@ -21,27 +21,24 @@ if str(_src_root) not in sys.path:
     sys.path.insert(0, str(_src_root))
 
 from contextlib import asynccontextmanager
-from typing import Optional
 
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi_socketio import SocketManager
 
-from astra.core.config import load_config
-from astra.core.server import AsyncServer
-
 import astra.app.state as state
 from astra.app.fl_server import FLServer
-from astra.infra.websocket_handler import websocket_endpoint, register_socketio_handlers
 
 # Route modules
-from astra.app.routes import system, groups, clients, models, experiments
-
+from astra.app.routes import clients, experiments, groups, models, system
+from astra.core.config import load_config
+from astra.infra.websocket_handler import register_socketio_handlers, websocket_endpoint
 
 # ============================================================================
 # Lifespan
 # ============================================================================
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -72,7 +69,8 @@ def _register_extended_endpoints(app, config):
 
     try:
         from astra.app.extended_endpoints import setup_extended_api
-        platform = setup_extended_api(app, config)
+
+        setup_extended_api(app, config)
         print("[INFO] Extended API endpoints registered")
         _extended_api_registered = True
     except Exception as e:
@@ -120,6 +118,7 @@ register_socketio_handlers(socket_manager)
 # ============================================================================
 # Main
 # ============================================================================
+
 
 def run_server(host: str = "0.0.0.0", port: int = 8000):
     """Run the API server."""

@@ -66,16 +66,12 @@ class TrustManager:
             Updated trust score.
         """
         if global_vector is None:
-            self.logger.debug(
-                f"Client {client_id}: No global vector yet, using initial trust"
-            )
+            self.logger.debug(f"Client {client_id}: No global vector yet, using initial trust")
             self.trust_history[client_id].append(self.trust_scores[client_id])
             return self.trust_scores[client_id]
 
         if update_vector is None or len(update_vector) == 0:
-            self.logger.warning(
-                f"Client {client_id}: Empty update vector, applying penalty"
-            )
+            self.logger.warning(f"Client {client_id}: Empty update vector, applying penalty")
             new_trust = self.trust_scores[client_id] * self.soft_decay
             new_trust = float(np.clip(new_trust, 0.0, 1.0))
             self.trust_scores[client_id] = new_trust
@@ -91,17 +87,14 @@ class TrustManager:
 
         new_trust = float(np.clip(new_trust, 0.0, 1.0))
 
-        if self.quarantined.get(client_id, False):
-            if new_trust > self.quarantine_threshold:
-                self.quarantined[client_id] = False
-                self.logger.info(f"Client {client_id} removed from quarantine")
+        if self.quarantined.get(client_id, False) and new_trust > self.quarantine_threshold:
+            self.quarantined[client_id] = False
+            self.logger.info(f"Client {client_id} removed from quarantine")
 
         if new_trust < self.quarantine_threshold:
             if not self.quarantined.get(client_id, False):
                 self.quarantined[client_id] = True
-                self.logger.warning(
-                    f"Client {client_id} quarantined (trust={new_trust:.3f})"
-                )
+                self.logger.warning(f"Client {client_id} quarantined (trust={new_trust:.3f})")
 
             new_trust *= self.soft_decay
 

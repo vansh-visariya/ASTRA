@@ -1,0 +1,29 @@
+Metadata-Version: 2.4
+Name: astra
+Version: 0.1.0
+Summary: Async Scalable Training & Research Architecture — Federated Learning Platform
+Requires-Python: >=3.10
+License-File: LICENSE
+Requires-Dist: torch>=2.0.0
+Requires-Dist: torchvision>=0.15.0
+Requires-Dist: numpy>=1.24.0
+Requires-Dist: pyyaml>=6.0
+Requires-Dist: scipy>=1.10.0
+Requires-Dist: fastapi>=0.104.0
+Requires-Dist: uvicorn>=0.24.0
+Requires-Dist: websockets>=12.0
+Requires-Dist: pydantic>=2.5.0
+Requires-Dist: pyjwt>=2.8.0
+Requires-Dist: requests>=2.31.0
+Requires-Dist: fastapi-socketio
+Requires-Dist: aiohttp
+Requires-Dist: bcrypt>=4.1.0
+Requires-Dist: python-multipart>=0.0.6
+Requires-Dist: ruff>=0.1.0
+Provides-Extra: dev
+Requires-Dist: pytest>=7.4.0; extra == "dev"
+Requires-Dist: pytest-cov>=4.1.0; extra == "dev"
+Requires-Dist: black>=23.0.0; extra == "dev"
+Requires-Dist: ruff>=0.1.0; extra == "dev"
+Requires-Dist: mypy>=1.7.0; extra == "dev"
+Dynamic: license-file

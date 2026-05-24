@@ -19,7 +19,6 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-import torch
 from torch.utils.data import DataLoader, Subset
 from torchvision import datasets, transforms
 
@@ -81,9 +80,7 @@ class DataSplitter:
         self.train_dataset = datasets.MNIST(
             data_dir, train=True, download=True, transform=transform
         )
-        self.val_dataset = datasets.MNIST(
-            data_dir, train=False, download=True, transform=transform
-        )
+        self.val_dataset = datasets.MNIST(data_dir, train=False, download=True, transform=transform)
 
     def _load_cifar10(self) -> None:
         """Load CIFAR-10 dataset."""
@@ -144,8 +141,8 @@ class DataSplitter:
         if self.imbalance:
             imbalance_factors = np.random.uniform(0.5, 1.5, size=self.num_clients)
             client_distributions = client_distributions * imbalance_factors
-            client_distributions = (
-                client_distributions / client_distributions.sum(axis=1, keepdims=True)
+            client_distributions = client_distributions / client_distributions.sum(
+                axis=1, keepdims=True
             )
 
         self.client_data = {i: [] for i in range(self.num_clients)}
@@ -160,9 +157,7 @@ class DataSplitter:
             class_indices_list = class_indices[class_id]
             np.random.shuffle(class_indices_list)
 
-            class_counts = (client_distributions[class_id] * len(class_indices_list)).astype(
-                int
-            )
+            class_counts = (client_distributions[class_id] * len(class_indices_list)).astype(int)
 
             remaining = len(class_indices_list) - class_counts.sum()
             class_counts[np.argmax(class_counts)] += remaining
@@ -195,7 +190,7 @@ class DataSplitter:
             unique, counts = np.unique(labels, return_counts=True)
 
             total = len(labels)
-            distribution = {int(u): int(c) / total for u, c in zip(unique, counts)}
+            distribution = {int(u): int(c) / total for u, c in zip(unique, counts, strict=False)}
 
             self.class_distributions[client_id] = distribution
 

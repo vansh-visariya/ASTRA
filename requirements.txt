@@ -26,3 +26,7 @@ requests>=2.31.0
 fastapi_socketio
 aiohttp
 bcrypt>=4.1.0
+ruff>=0.10.0
+mypy 
+types-pyyaml 
+types-requests

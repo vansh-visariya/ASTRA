@@ -12,12 +12,12 @@ from typing import Any
 
 import numpy as np
 
-from astra.core.exceptions import AggregationError, ConfigurationError
 from astra.core.aggregation.robust import (
     coordinate_median,
     hybrid_aggregator,
     trimmed_mean,
 )
+from astra.core.exceptions import AggregationError, ConfigurationError
 
 __all__ = [
     "Aggregator",
@@ -89,16 +89,11 @@ class FedAvgAggregator(Aggregator):
         aggregated: np.ndarray | None = None
 
         for update in buffer:
-            delta = np.nan_to_num(
-                update["delta"], nan=0.0, posinf=1e6, neginf=-1e6
-            )
+            delta = np.nan_to_num(update["delta"], nan=0.0, posinf=1e6, neginf=-1e6)
             dataset_size = update.get("local_dataset_size", 1)
             weight = dataset_size * update.get("staleness_weight", 1.0)
 
-            if aggregated is None:
-                aggregated = weight * delta
-            else:
-                aggregated = aggregated + weight * delta
+            aggregated = weight * delta if aggregated is None else aggregated + weight * delta
 
             total_weight += weight
 
@@ -106,9 +101,7 @@ class FedAvgAggregator(Aggregator):
             aggregated = aggregated / total_weight
 
         if aggregated is not None:
-            aggregated = np.nan_to_num(
-                aggregated, nan=0.0, posinf=1e6, neginf=-1e6
-            )
+            aggregated = np.nan_to_num(aggregated, nan=0.0, posinf=1e6, neginf=-1e6)
 
         return aggregated if aggregated is not None else np.array([])
 

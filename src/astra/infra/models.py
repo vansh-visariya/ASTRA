@@ -2,13 +2,14 @@
 Pydantic request/response models for the Federated Learning API.
 """
 
-from typing import Any, Dict
+from typing import Any
+
 from pydantic import BaseModel
 
 
 class ClientRegister(BaseModel):
     client_id: str
-    capabilities: Dict[str, Any] = {}
+    capabilities: dict[str, Any] = {}
 
 
 class ClientUpdate(BaseModel):
@@ -17,14 +18,14 @@ class ClientUpdate(BaseModel):
     local_updates: str  # Base64 encoded
     update_type: str = "delta"
     local_dataset_size: int
-    meta: Dict[str, Any] = {}
+    meta: dict[str, Any] = {}
 
 
 class ExperimentConfig(BaseModel):
     experiment_id: str
-    config: Dict[str, Any]
+    config: dict[str, Any]
 
 
 class ControlCommand(BaseModel):
     command: str  # start, pause, resume, stop
-    params: Dict[str, Any] = {}
+    params: dict[str, Any] = {}

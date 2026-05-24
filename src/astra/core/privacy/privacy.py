@@ -90,9 +90,9 @@ def secure_aggregate_masking(
     rng = default_rng(seed)
 
     masks = [rng.standard_normal(update.shape) for update in updates]
-    masked_updates = [u + m for u, m in zip(updates, masks)]
+    masked_updates = [u + m for u, m in zip(updates, masks, strict=False)]
 
-    return sum(masked_updates)
+    return np.array(sum(masked_updates))
 
 
 def estimate_epsilon(

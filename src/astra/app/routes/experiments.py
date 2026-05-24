@@ -2,10 +2,10 @@
 Experiment management REST endpoints.
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 
-from astra.infra.models import ExperimentConfig, ControlCommand
 from astra.app.state import get_fl_server
+from astra.infra.models import ControlCommand, ExperimentConfig
 
 router = APIRouter()
 
