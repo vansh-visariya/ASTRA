@@ -36,7 +36,7 @@ yarn-error.log*
 # Local
 runs/
 data/
-models/
+/models/
 *.db
 __pycache__/
 *.pyc
