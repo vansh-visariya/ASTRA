@@ -405,8 +405,10 @@ def create_recommendation_router(platform: FLPlatformIntegration) -> APIRouter:
         recommendation: dict[str, Any], admin: dict = Depends(require_admin)
     ):
         """Admin approves a model recommendation."""
+        from astra.app.model_recommender import ModelRecommendation
+        rec_obj = ModelRecommendation(**recommendation)
         result = get_platform_integration().recommendation_service.approve_recommendation(
-            recommendation, admin["user_id"]
+            rec_obj, admin["user_id"]
         )
         return result
 

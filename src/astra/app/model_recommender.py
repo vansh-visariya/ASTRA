@@ -39,10 +39,10 @@ class ModelRecommendation:
     model_type: str = "cnn"  # 'cnn', 'mlp', 'transformer'
     model_size: str = "medium"  # 'small', 'medium', 'large'
     estimated_params: int = 100000
-    architecture: dict[str, Any] = None
+    architecture: dict[str, Any] | None = None
     expected_accuracy: float = 0.8
     reasoning: str = ""
-    config: dict[str, Any] = None
+    config: dict[str, Any] | None = None
     source: str = "gemini"  # 'gemini', 'builtin', 'huggingface'
     model_id: str = ""  # registry model_id if available
     model_name: str = ""  # display name

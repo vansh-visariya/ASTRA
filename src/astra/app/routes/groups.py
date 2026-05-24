@@ -23,6 +23,8 @@ async def create_group(group_data: dict):
     """Create a new training group."""
     fl_server = get_fl_server()
     group_id = group_data.get("group_id")
+    if not isinstance(group_id, str):
+        raise HTTPException(status_code=400, detail="group_id is required and must be a string")
     model_id = group_data.get("model_id", "simple_cnn_mnist")
     window_size = group_data.get("window_size", 3)
     time_limit = group_data.get("time_limit", 20.0)

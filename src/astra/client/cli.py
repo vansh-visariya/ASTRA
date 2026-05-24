@@ -88,7 +88,7 @@ class FederatedClient:
         self.client_id = client_id or f"client_{uuid.uuid4().hex[:8]}"
         self.config = config
 
-        self.ws: websockets.WebSocketClientProtocol | None = None
+        self.ws: Any = None
         self.is_connected = False
         self.is_training = False
         self.token: str | None = None
@@ -234,7 +234,7 @@ class FederatedClient:
             self.config.update(message.get("config", {}))
             self.logger.info("Config updated")
 
-        elif msg_type == "ping":
+        elif msg_type == "ping" and self.ws:
             await self.ws.send(json.dumps({"type": "pong"}))
 
     async def _download_model(self, message: dict[str, Any]):

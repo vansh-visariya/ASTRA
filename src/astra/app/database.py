@@ -15,6 +15,7 @@ import sqlite3
 import threading
 from contextlib import contextmanager
 from datetime import datetime
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -402,7 +403,11 @@ class AstraDB:
     # ========================================================================
 
     def register_fl_client(
-        self, client_id: str, experiment_id: str, user_id: int | None = None, group_id: str = None
+        self,
+        client_id: str,
+        experiment_id: str,
+        user_id: int | None = None,
+        group_id: str | None = None,
     ) -> None:
         with self.connection() as conn:
             conn.execute(
@@ -492,11 +497,11 @@ class AstraDB:
         model_type: str,
         file_path: str,
         version: int = 1,
-        client_id: str = None,
-        accuracy: float = None,
-        loss: float = None,
-        num_clients: int = None,
-        metadata: dict = None,
+        client_id: str | None = None,
+        accuracy: float | None = None,
+        loss: float | None = None,
+        num_clients: int | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> int:
         with self.connection() as conn:
             cursor = conn.execute(

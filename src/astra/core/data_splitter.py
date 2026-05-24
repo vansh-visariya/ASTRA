@@ -123,7 +123,7 @@ class DataSplitter:
                 end_idx = n_samples
 
             client_indices = indices[start_idx:end_idx]
-            self.client_data[client_id] = Subset(self.train_dataset, client_indices)
+            self.client_data[client_id] = Subset(self.train_dataset, client_indices.tolist())
 
     def _dirichlet_split(self) -> None:
         """Dirichlet non-IID split."""
@@ -145,7 +145,7 @@ class DataSplitter:
                 axis=1, keepdims=True
             )
 
-        self.client_data = {i: [] for i in range(self.num_clients)}
+        client_indices_map: dict[int, list[int]] = {i: [] for i in range(self.num_clients)}
 
         class_indices: dict[int, list[int]] = {c: [] for c in range(num_classes)}
 
@@ -165,14 +165,14 @@ class DataSplitter:
             start = 0
             for client_id in range(self.num_clients):
                 end = start + class_counts[client_id]
-                self.client_data[client_id].extend(class_indices_list[start:end])
+                client_indices_map[client_id].extend(class_indices_list[start:end])
                 start = end
 
         for client_id in range(self.num_clients):
-            np.random.shuffle(self.client_data[client_id])
+            np.random.shuffle(client_indices_map[client_id])
             self.client_data[client_id] = Subset(
                 self.train_dataset,
-                self.client_data[client_id],
+                client_indices_map[client_id],
             )
 
         self._compute_class_distributions()

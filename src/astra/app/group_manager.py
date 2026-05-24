@@ -224,7 +224,7 @@ class GroupManager:
                 self.event_logs = self.event_logs[-500:]
 
     def get_logs(
-        self, limit: int = 100, event_type: str | None = None, group_id: str = None
+        self, limit: int = 100, event_type: str | None = None, group_id: str | None = None
     ) -> list[dict]:
         """Get recent logs."""
         with self.lock:

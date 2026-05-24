@@ -168,14 +168,14 @@ def hybrid_aggregator(
 
         clipped_updates.append(clipped)
 
-    norms = np.array(norms)
-    mean_norm = np.mean(norms)
-    std_norm = np.std(norms)
+    norms_arr = np.array(norms)
+    mean_norm = np.mean(norms_arr)
+    std_norm = np.std(norms_arr)
 
     suspicious_mask = np.ones(n_clients, dtype=bool)
     if std_norm > 0:
         threshold = mean_norm + anomaly_k * std_norm
-        suspicious_mask = norms <= threshold
+        suspicious_mask = norms_arr <= threshold
 
     filtered_updates: list[np.ndarray] = [
         clipped_updates[i] for i in range(n_clients) if suspicious_mask[i]
@@ -202,8 +202,8 @@ def hybrid_aggregator(
             cos_sim = 1.0
         similarity_scores.append(max(cos_sim, 0))
 
-    similarity_scores = np.array(similarity_scores)
-    similarity_mask = similarity_scores >= sim_threshold
+    similarity_scores_arr = np.array(similarity_scores)
+    similarity_mask = similarity_scores_arr >= sim_threshold
 
     final_indices = [i for i in range(len(filtered_updates)) if similarity_mask[i]]
     final_updates = [filtered_updates[i] for i in final_indices]

@@ -513,7 +513,7 @@ class TrustScoreManager:
             )
             conn.commit()
 
-    def get_all_trust_scores(self, group_id: str | None = None) -> dict[int, float]:
+    def get_all_trust_scores(self, group_id: str | None = None) -> dict[int, dict[str, Any]]:
         """Get all trust scores."""
         with self.user_db._get_connection() as conn:
             cursor = conn.cursor()

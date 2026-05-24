@@ -119,8 +119,8 @@ class FLPlatformIntegration:
         """Register a new user."""
         user, error = self.auth_manager.signup(username, password, role, email, full_name)
 
-        if error:
-            return {"success": False, "error": error}
+        if error or user is None:
+            return {"success": False, "error": error or "Unknown error"}
 
         # Generate token
         token = self.auth_manager.token_manager.create_token(user)
@@ -140,8 +140,8 @@ class FLPlatformIntegration:
         """Authenticate user."""
         result, error = self.auth_manager.login(username, password)
 
-        if error:
-            return {"success": False, "error": error}
+        if error or result is None:
+            return {"success": False, "error": error or "Unknown error"}
 
         return {"success": True, **result}
 

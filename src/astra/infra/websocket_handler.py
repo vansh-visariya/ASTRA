@@ -64,9 +64,11 @@ async def websocket_endpoint(websocket: WebSocket):
 
                             platform = get_platform_integration()
                             user_id = payload.get("user_id")
-                            join_status = platform.get_user_join_status(user_id, group_id)
-                            if join_status and join_status.get("status") in ("approved", "joined"):
-                                has_approved_join = True
+                            if isinstance(user_id, int):
+                                join_status = platform.get_user_join_status(user_id, group_id)
+                                status_val = join_status.get("status") if join_status else None
+                                if status_val in ("approved", "joined"):
+                                    has_approved_join = True
                         except Exception:
                             pass
 

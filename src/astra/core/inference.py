@@ -10,6 +10,8 @@ Provides modular inference capabilities without exposing the full model:
 This module ensures federated learning principles are preserved.
 """
 
+from __future__ import annotations
+
 import base64
 import logging
 from abc import ABC, abstractmethod
@@ -26,7 +28,7 @@ class InferenceMethod(ABC):
     """Abstract base class for inference methods."""
 
     @abstractmethod
-    def predict(self, input_data: Any) -> dict[str, Any]:
+    def predict(self, input_data: Any) -> InferenceResult:
         """Run inference and return results."""
         pass
 
@@ -138,7 +140,7 @@ class ParameterEfficientInference(InferenceMethod):
             if tensor.dim() == 3:
                 tensor = tensor.unsqueeze(0)
 
-            output = self.model(tensor)
+            output = self.base_model(tensor)
             probabilities = torch.softmax(output, dim=1)
             predictions = output.argmax(dim=1)
             confidence = probabilities.max().item()
@@ -363,7 +365,7 @@ class ModelDistiller:
         optimizer = torch.optim.Adam(student_model.parameters(), lr=0.001)
 
         for epoch in range(epochs):
-            total_loss = 0
+            total_loss = 0.0
 
             for data, target in train_loader:
                 data, target = data.to(device), target.to(device)

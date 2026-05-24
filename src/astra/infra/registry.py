@@ -317,7 +317,8 @@ class ModelRegistry:
         if model_info.source == "huggingface":
             from astra.core.models.hf_models import load_hf_peft_model
 
-            model, _ = load_hf_peft_model(model_info.model_path, model_info.config, device=device)
+            model_path = model_info.model_path or ""
+            model, _ = load_hf_peft_model(model_path, model_info.config, device=device)
         elif model_info.source == "local":
             model = torch.load(model_info.model_path or "", map_location=device)
         else:

@@ -65,6 +65,8 @@ async def join_group_as_client(group_id: str, request: Request):
         raise HTTPException(status_code=401, detail="Token verification failed") from None
 
     user_id = payload.get("user_id")
+    if not isinstance(user_id, int):
+        raise HTTPException(status_code=401, detail="Invalid user_id in token")
     username = payload.get("sub", f"user_{user_id}")
 
     # Verify join request is approved
@@ -218,15 +220,16 @@ async def get_client_training_status(request: Request):
             already_joined = any(s["group_id"] == group_id for s in sessions)
             if not already_joined:
                 try:
-                    status = platform.get_user_join_status(user_id, group_id)
-                    if status and status.get("status") == "approved":
-                        pending_activations.append(
-                            {
-                                "group_id": group_id,
-                                "model_id": fl_server.group_manager.groups[group_id].model_id,
-                                "status": "approved_not_activated",
-                            }
-                        )
+                    if isinstance(user_id, int):
+                        status = platform.get_user_join_status(user_id, group_id)
+                        if status and status.get("status") == "approved":
+                            pending_activations.append(
+                                {
+                                    "group_id": group_id,
+                                    "model_id": fl_server.group_manager.groups[group_id].model_id,
+                                    "status": "approved_not_activated",
+                                }
+                            )
                 except Exception:
                     pass
     except Exception:

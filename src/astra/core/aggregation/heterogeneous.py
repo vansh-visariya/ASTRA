@@ -256,15 +256,15 @@ class HeterogeneousAggregator:
         if weights is None:
             weights = [1.0 / len(client_updates)] * len(client_updates)
 
-        weights = np.array(weights)
-        weights = weights / weights.sum()
+        weights_arr = np.array(weights)
+        weights_arr = weights_arr / weights_arr.sum()
 
         # Normalize all client updates to baseline structure
         normalized_updates = []
         for i, update in enumerate(client_updates):
             try:
                 normalized = self.normalize_client_update(update, baseline_param_names)
-                normalized_updates.append((normalized, weights[i]))
+                normalized_updates.append((normalized, weights_arr[i]))
             except Exception as e:
                 self.logger.warning(f"Failed to normalize client {i} update: {e}")
                 continue
@@ -297,17 +297,17 @@ class HeterogeneousAggregator:
             if not param_values:
                 continue
 
-            param_weights = np.array(param_weights)
-            param_weights = param_weights / param_weights.sum()
+            param_weights_arr = np.array(param_weights)
+            param_weights_arr = param_weights_arr / param_weights_arr.sum()
 
             if method == "fedavg":
-                aggregated[param_name] = self._weighted_average(param_values, param_weights)
+                aggregated[param_name] = self._weighted_average(param_values, param_weights_arr)
             elif method == "robust":
                 aggregated[param_name] = self._robust_aggregate(param_values)
             elif method == "hybrid":
-                aggregated[param_name] = self._hybrid_aggregate(param_values, param_weights)
+                aggregated[param_name] = self._hybrid_aggregate(param_values, param_weights_arr)
             else:
-                aggregated[param_name] = self._weighted_average(param_values, param_weights)
+                aggregated[param_name] = self._weighted_average(param_values, param_weights_arr)
 
         return aggregated
 
@@ -316,6 +316,8 @@ class HeterogeneousAggregator:
         result = None
         for value, weight in zip(values, weights, strict=False):
             result = weight * value if result is None else result + weight * value
+        if result is None:
+            raise ValueError("Cannot compute weighted average of empty list")
         return result
 
     def _robust_aggregate(self, values: list[np.ndarray]) -> np.ndarray:
