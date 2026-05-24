@@ -1,3 +1,0 @@
-[console_scripts]
-astra-client = astra.client.cli:main
-astra-server = astra.app.server_api:run_server

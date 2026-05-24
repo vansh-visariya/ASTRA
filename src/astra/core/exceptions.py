@@ -27,13 +27,13 @@ class IntegrityError(FLBaseError):
     pass
 
 
-class PrivacyBudgetExhausted(FLBaseError):
+class PrivacyBudgetExhaustedError(FLBaseError):
     """Raised when differential privacy budget is exhausted."""
 
     pass
 
 
-class ByzantineClientDetected(FLBaseError):
+class ByzantineClientDetectedError(FLBaseError):
     """Raised when a Byzantine (malicious) client is detected."""
 
     pass

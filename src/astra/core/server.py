@@ -13,7 +13,7 @@ import queue
 import threading
 import time
 from collections import deque
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 import torch
@@ -46,10 +46,10 @@ class AsyncServer:
         self.model = self.model.to(self.device)
 
         self.global_version = 0
-        self.running_global_estimate: Optional[np.ndarray] = None
+        self.running_global_estimate: np.ndarray | None = None
 
         self.aggregator_buffer: deque = deque(maxlen=config["server"]["aggregator_window"])
-        self.running_momentum: Optional[np.ndarray] = None
+        self.running_momentum: np.ndarray | None = None
 
         self.trust_manager = TrustManager(config)
 
