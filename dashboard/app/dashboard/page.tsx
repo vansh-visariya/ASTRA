@@ -55,12 +55,12 @@ export default function DashboardPage() {
   const formatLoss = (value?: number) => (value ?? 0).toFixed(4);
 
   const statCards = [
-    { label: 'Total Groups', value: metrics?.total_groups || 0, icon: Layers, accent: 'accent-indigo', iconBg: 'rgba(99,102,241,0.15)', iconColor: 'text-indigo-400' },
-    { label: 'Active Groups', value: metrics?.active_groups || 0, icon: Activity, accent: 'accent-emerald', iconBg: 'rgba(16,185,129,0.15)', iconColor: 'text-emerald-400' },
-    { label: 'Total Participants', value: metrics?.total_participants || 0, icon: Users, accent: 'accent-blue', iconBg: 'rgba(59,130,246,0.15)', iconColor: 'text-blue-400' },
-    { label: 'Active Participants', value: metrics?.active_participants || 0, icon: Zap, accent: 'accent-amber', iconBg: 'rgba(245,158,11,0.15)', iconColor: 'text-amber-400' },
-    { label: 'DP Enabled', value: metrics?.dp_enabled_groups || 0, icon: Shield, accent: 'accent-violet', iconBg: 'rgba(139,92,246,0.15)', iconColor: 'text-violet-400' },
-    { label: 'Total Rounds', value: metrics?.total_aggregations || 0, icon: TrendingUp, accent: 'accent-rose', iconBg: 'rgba(244,63,94,0.15)', iconColor: 'text-rose-400' },
+    { label: 'Total Groups', value: metrics?.total_groups || 0, icon: Layers, accent: 'accent-indigo', iconBg: 'rgba(255,255,255,0.06)', iconColor: 'text-gray-300' },
+    { label: 'Active Groups', value: metrics?.active_groups || 0, icon: Activity, accent: 'accent-emerald', iconBg: 'rgba(255,255,255,0.06)', iconColor: 'text-gray-300' },
+    { label: 'Total Participants', value: metrics?.total_participants || 0, icon: Users, accent: 'accent-blue', iconBg: 'rgba(255,255,255,0.06)', iconColor: 'text-gray-300' },
+    { label: 'Active Participants', value: metrics?.active_participants || 0, icon: Zap, accent: 'accent-amber', iconBg: 'rgba(255,255,255,0.06)', iconColor: 'text-gray-300' },
+    { label: 'DP Enabled', value: metrics?.dp_enabled_groups || 0, icon: Shield, accent: 'accent-violet', iconBg: 'rgba(255,255,255,0.06)', iconColor: 'text-gray-300' },
+    { label: 'Total Rounds', value: metrics?.total_aggregations || 0, icon: TrendingUp, accent: 'accent-rose', iconBg: 'rgba(255,255,255,0.06)', iconColor: 'text-gray-300' },
   ];
 
   const performanceCards = [
@@ -108,15 +108,15 @@ export default function DashboardPage() {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
               <div className="w-11 h-11 rounded-xl flex items-center justify-center transition-all duration-300 group-hover:scale-110"
-                style={{ background: 'linear-gradient(135deg, rgba(99,102,241,0.15), rgba(139,92,246,0.1))' }}>
-                <Layers size={20} className="text-indigo-400" />
+                style={{ background: 'rgba(255,255,255,0.06)' }}>
+                <Layers size={20} className="text-gray-300" />
               </div>
               <div>
                 <h3 className="text-white font-semibold text-sm">Manage Groups</h3>
                 <p className="text-slate-500 text-xs mt-0.5">View and control federated groups</p>
               </div>
             </div>
-            <ArrowUpRight size={16} className="text-slate-600 group-hover:text-indigo-400 transition-colors" />
+            <ArrowUpRight size={16} className="text-slate-600 group-hover:text-white transition-colors" />
           </div>
         </Link>
 
@@ -124,15 +124,15 @@ export default function DashboardPage() {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
               <div className="w-11 h-11 rounded-xl flex items-center justify-center transition-all duration-300 group-hover:scale-110"
-                style={{ background: 'linear-gradient(135deg, rgba(16,185,129,0.15), rgba(5,150,105,0.1))' }}>
-                <Plus size={20} className="text-emerald-400" />
+                style={{ background: 'rgba(255,255,255,0.06)' }}>
+                <Plus size={20} className="text-gray-300" />
               </div>
               <div>
                 <h3 className="text-white font-semibold text-sm">Create New Group</h3>
                 <p className="text-slate-500 text-xs mt-0.5">Start a new federated learning experiment</p>
               </div>
             </div>
-            <ArrowUpRight size={16} className="text-slate-600 group-hover:text-emerald-400 transition-colors" />
+            <ArrowUpRight size={16} className="text-slate-600 group-hover:text-white transition-colors" />
           </div>
         </Link>
       </div>

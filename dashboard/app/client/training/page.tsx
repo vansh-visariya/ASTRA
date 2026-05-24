@@ -105,7 +105,7 @@ export default function ClientTrainingPage() {
       case 'TRAINING': return { bg: 'rgba(16,185,129,0.1)', color: '#34d399', border: 'rgba(16,185,129,0.3)', label: 'Training' };
       case 'PAUSED': return { bg: 'rgba(245,158,11,0.1)', color: '#fbbf24', border: 'rgba(245,158,11,0.3)', label: 'Paused' };
       case 'COMPLETED': return { bg: 'rgba(59,130,246,0.1)', color: '#60a5fa', border: 'rgba(59,130,246,0.3)', label: 'Completed' };
-      default: return { bg: 'rgba(51,65,85,0.2)', color: '#94a3b8', border: 'rgba(51,65,85,0.5)', label: status || 'Idle' };
+      default: return { bg: 'rgba(255,255,255,0.03)', color: '#888888', border: 'rgba(255,255,255,0.15)', label: status || 'Idle' };
     }
   };
 
@@ -113,7 +113,7 @@ export default function ClientTrainingPage() {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="flex flex-col items-center gap-3">
-          <div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+          <div className="w-8 h-8 border-2 border-white/30 border-t-transparent rounded-full animate-spin" />
           <span className="text-slate-500 text-xs">Loading training status...</span>
         </div>
       </div>
@@ -141,9 +141,9 @@ export default function ClientTrainingPage() {
       </div>
 
       {error && (
-        <div className="glass-card p-4 animate-fade-in" style={{ borderColor: 'rgba(244,63,94,0.3)' }}>
+        <div className="glass-card p-4 animate-fade-in" style={{ borderColor: 'rgba(255,255,255,0.3)' }}>
           <div className="flex items-center gap-3">
-            <AlertCircle size={18} className="text-rose-400 shrink-0" />
+            <AlertCircle size={18} className="text-rose-300 shrink-0" />
             <p className="text-rose-300 text-sm">{error}</p>
           </div>
         </div>
@@ -164,7 +164,7 @@ export default function ClientTrainingPage() {
         <div className="stat-card accent-indigo p-5">
           <div className="flex items-center justify-between mb-3">
             <span className="text-slate-400 text-xs font-medium uppercase tracking-wider">Connected Clients</span>
-            <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: 'rgba(99,102,241,0.15)' }}>
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: 'rgba(255,255,255,0.06)' }}>
               {(status?.connected_clients?.length || 0) > 0
                 ? <Wifi className="text-indigo-400" size={17} />
                 : <WifiOff className="text-slate-500" size={17} />
@@ -260,8 +260,8 @@ export default function ClientTrainingPage() {
                   <div className="flex items-center gap-2">
                     {isConnected ? (
                       <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium text-emerald-400"
-                        style={{ background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.2)' }}>
-                        <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full pulse-dot green" /> Connected
+                        style={{ background: 'bg-white/5', border: '1px solid rgba(255,255,255,0.15)' }}>
+                        <div className="w-1.5 h-1.5 bg-white/30 rounded-full pulse-dot green" /> Connected
                       </span>
                     ) : (
                       <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium text-slate-500"
@@ -292,7 +292,7 @@ export default function ClientTrainingPage() {
                   </div>
                   <div className="rounded-xl p-3" style={{ background: 'rgba(15,23,42,0.5)' }}>
                     <p className="text-slate-500 text-[10px] font-medium uppercase tracking-wider">Trust Score</p>
-                    <p className={`text-xl font-bold mt-1 ${session.trust_score > 0.7 ? 'text-emerald-400' : session.trust_score > 0.4 ? 'text-amber-400' : 'text-rose-400'}`}>
+                    <p className={`text-xl font-bold mt-1 ${session.trust_score > 0.7 ? 'text-emerald-400' : session.trust_score > 0.4 ? 'text-amber-400' : 'text-gray-400'}`}>
                       {(session.trust_score * 100).toFixed(0)}%
                     </p>
                   </div>
@@ -364,7 +364,7 @@ export default function ClientTrainingPage() {
             <div key={item.step} className="p-3 rounded-xl" style={{ background: 'rgba(15,23,42,0.4)' }}>
               <div className="flex items-center gap-2 mb-2">
                 <span className="w-6 h-6 rounded-lg flex items-center justify-center text-[11px] font-bold text-indigo-400"
-                  style={{ background: 'rgba(99,102,241,0.15)' }}>
+                  style={{ background: 'rgba(255,255,255,0.06)' }}>
                   {item.step}
                 </span>
                 <item.icon size={14} className="text-slate-500" />

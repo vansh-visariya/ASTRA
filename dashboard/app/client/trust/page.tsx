@@ -44,7 +44,7 @@ export default function ClientTrustPage() {
 
   const getScoreColor = (score: number) => {
     if (score >= 0.8) return 'text-green-400';
-    if (score >= 0.6) return 'text-yellow-400';
+    if (score >= 0.6) return 'text-gray-300';
     if (score >= 0.4) return 'text-orange-400';
     return 'text-red-400';
   };
@@ -53,7 +53,7 @@ export default function ClientTrustPage() {
     if (score >= 0.8) return 'from-green-600 to-emerald-600';
     if (score >= 0.6) return 'from-yellow-600 to-orange-600';
     if (score >= 0.4) return 'from-orange-600 to-red-600';
-    return 'from-red-600 to-red-800';
+    return 'from-gray-900 to-gray-600';
   };
 
   const getScoreLabel = (score: number) => {
@@ -173,7 +173,7 @@ export default function ClientTrustPage() {
 
       {/* Quarantine Warning */}
       {trustData?.quarantined && (
-        <div className="bg-red-900/20 border border-red-800 rounded-xl p-6">
+        <div className="bg-white/5 border border-white/15 rounded-xl p-6">
           <div className="flex items-start gap-4">
             <AlertTriangle className="text-red-400 shrink-0" size={24} />
             <div>

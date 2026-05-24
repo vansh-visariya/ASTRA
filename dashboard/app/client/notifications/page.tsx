@@ -93,7 +93,7 @@ export default function ClientNotificationsPage() {
   const getPriorityBg = (priority: string) => {
     switch (priority) {
       case 'error':
-        return 'bg-red-900/20 border-red-800';
+        return 'bg-white/3 border-white/15';
       case 'warning':
         return 'bg-yellow-900/20 border-yellow-800';
       case 'success':
@@ -132,7 +132,7 @@ export default function ClientNotificationsPage() {
           onClick={() => setFilter('all')}
           className={`px-4 py-2 rounded-t-lg text-sm font-medium transition ${
             filter === 'all'
-              ? 'bg-emerald-600 text-white'
+              ? 'bg-white/10 text-white'
               : 'text-gray-400 hover:text-white'
           }`}
         >
@@ -142,7 +142,7 @@ export default function ClientNotificationsPage() {
           onClick={() => setFilter('unread')}
           className={`px-4 py-2 rounded-t-lg text-sm font-medium transition ${
             filter === 'unread'
-              ? 'bg-emerald-600 text-white'
+              ? 'bg-white/10 text-white'
               : 'text-gray-400 hover:text-white'
           }`}
         >
@@ -206,7 +206,7 @@ export default function ClientNotificationsPage() {
                   <div className="flex items-center gap-4 mt-3 text-xs text-gray-500">
                     <span>{new Date(notification.created_at).toLocaleString()}</span>
                     {notification.group_id && (
-                      <span className="text-emerald-400">Group: {notification.group_id}</span>
+                      <span className="text-gray-300">Group: {notification.group_id}</span>
                     )}
                     <span className="uppercase">{notification.type}</span>
                   </div>
@@ -219,3 +219,8 @@ export default function ClientNotificationsPage() {
     </div>
   );
 }
+
+
+
+
+

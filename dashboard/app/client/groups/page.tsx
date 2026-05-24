@@ -112,7 +112,7 @@ export default function ClientGroupsPage() {
     switch (status) {
       case 'pending':
         return (
-          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-yellow-500/20 text-yellow-400 text-xs">
+          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-yellow-500/20 text-gray-300 text-xs">
             <Clock size={12} /> Pending Approval
           </span>
         );
@@ -238,7 +238,7 @@ export default function ClientGroupsPage() {
                         }
                       }}
                       disabled={joining === group.group_id}
-                      className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition flex items-center gap-2"
+                      className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-white/20 transition flex items-center gap-2"
                     >
                       {joining === group.group_id ? (
                         <><Loader2 size={16} className="animate-spin" /> Joining...</>
@@ -279,3 +279,5 @@ export default function ClientGroupsPage() {
     </div>
   );
 }
+
+

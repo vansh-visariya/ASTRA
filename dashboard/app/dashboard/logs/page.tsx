@@ -52,7 +52,7 @@ export default function LogsPage() {
     switch (type) {
       case 'training_started': return 'text-emerald-400';
       case 'aggregation': return 'text-blue-400';
-      case 'client_joined': return 'text-violet-400';
+      case 'client_joined': return 'text-gray-300';
       case 'client_rejected': return 'text-rose-400';
       default: return 'text-slate-400';
     }
@@ -61,7 +61,7 @@ export default function LogsPage() {
   const getTypeDot = (type: string) => {
     switch (type) {
       case 'training_started': return 'bg-emerald-500';
-      case 'aggregation': return 'bg-blue-500';
+      case 'aggregation': return 'bg-gray-400';
       case 'client_joined': return 'bg-violet-500';
       case 'client_rejected': return 'bg-rose-500';
       default: return 'bg-slate-500';
@@ -150,3 +150,4 @@ export default function LogsPage() {
     </div>
   );
 }
+

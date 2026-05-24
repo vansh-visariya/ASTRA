@@ -64,11 +64,11 @@ export default function GroupsPage() {
 
   const getStatusStyle = (status: string) => {
     switch (status) {
-      case 'TRAINING': return { bg: 'rgba(16,185,129,0.1)', color: '#34d399', border: 'rgba(16,185,129,0.3)' };
-      case 'PAUSED': return { bg: 'rgba(245,158,11,0.1)', color: '#fbbf24', border: 'rgba(245,158,11,0.3)' };
-      case 'COMPLETED': return { bg: 'rgba(59,130,246,0.1)', color: '#60a5fa', border: 'rgba(59,130,246,0.3)' };
-      case 'FAILED': return { bg: 'rgba(244,63,94,0.1)', color: '#fb7185', border: 'rgba(244,63,94,0.3)' };
-      default: return { bg: 'rgba(51,65,85,0.2)', color: '#94a3b8', border: 'rgba(51,65,85,0.5)' };
+      case 'TRAINING': return { bg: 'rgba(255,255,255,0.08)', color: '#ffffff', border: 'rgba(255,255,255,0.3)' };
+      case 'PAUSED': return { bg: 'rgba(255,255,255,0.04)', color: '#aaaaaa', border: 'rgba(255,255,255,0.2)' };
+      case 'COMPLETED': return { bg: 'rgba(255,255,255,0.04)', color: '#cccccc', border: 'rgba(255,255,255,0.2)' };
+      case 'FAILED': return { bg: 'rgba(255,255,255,0.03)', color: '#888888', border: 'rgba(255,255,255,0.15)' };
+      default: return { bg: 'rgba(255,255,255,0.03)', color: '#888888', border: 'rgba(255,255,255,0.15)' };
     }
   };
 
@@ -136,11 +136,11 @@ export default function GroupsPage() {
                   <tr key={group.group_id} className="border-t hover:bg-white/[0.02] transition-colors" style={{ borderColor: 'rgba(51,65,85,0.3)' }}>
                     <td className="p-4">
                       <div className="flex items-center gap-2.5">
-                        <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'rgba(99,102,241,0.12)' }}>
-                          <Layers size={14} className="text-indigo-400" />
+                        <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'rgba(255,255,255,0.06)' }}>
+                          <Layers size={14} className="text-gray-300" />
                         </div>
                         <span className="text-white font-medium text-sm">{group.group_id}</span>
-                        {group.is_locked && <Lock size={12} className="text-amber-500" />}
+                        {group.is_locked && <Lock size={12} className="text-gray-400" />}
                       </div>
                     </td>
                     <td className="p-4 text-slate-300 text-sm font-mono">{group.model_id}</td>
@@ -187,13 +187,13 @@ export default function GroupsPage() {
                           <>
                             <button onClick={() => controlGroup(group.group_id, 'pause')}
                               className="p-2 rounded-lg transition-all hover:scale-105 text-white"
-                              style={{ background: 'linear-gradient(135deg, rgba(245,158,11,0.8), rgba(217,119,6,0.8))' }}
+                              style={{ background: 'rgba(255,255,255,0.1)' }}
                               title="Pause">
                               <Pause size={13} />
                             </button>
                             <button onClick={() => controlGroup(group.group_id, 'stop')}
                               className="p-2 rounded-lg transition-all hover:scale-105 text-white"
-                              style={{ background: 'linear-gradient(135deg, rgba(244,63,94,0.8), rgba(225,29,72,0.8))' }}
+                              style={{ background: 'rgba(255,255,255,0.1)' }}
                               title="Stop">
                               <Square size={13} />
                             </button>
@@ -202,7 +202,7 @@ export default function GroupsPage() {
                         {group.status === 'PAUSED' && user?.role === 'admin' && (
                           <button onClick={() => controlGroup(group.group_id, 'resume')}
                             className="p-2 rounded-lg transition-all hover:scale-105 text-white"
-                            style={{ background: 'linear-gradient(135deg, rgba(16,185,129,0.8), rgba(5,150,105,0.8))' }}
+                            style={{ background: 'rgba(255,255,255,0.1)' }}
                             title="Resume">
                             <Play size={13} />
                           </button>

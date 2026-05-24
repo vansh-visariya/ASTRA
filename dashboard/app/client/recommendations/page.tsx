@@ -98,11 +98,11 @@ export default function ModelRecommender() {
   const getSourceBadge = (source: string) => {
     switch (source) {
       case 'gemini':
-        return <span className="text-xs px-2 py-0.5 rounded bg-purple-900/50 text-purple-400">AI</span>;
+        return <span className="text-xs px-2 py-0.5 rounded bg-white/5 text-gray-300">AI</span>;
       case 'builtin':
-        return <span className="text-xs px-2 py-0.5 rounded bg-blue-900/50 text-blue-400">Built-in</span>;
+        return <span className="text-xs px-2 py-0.5 rounded bg-white/5 text-gray-300">Built-in</span>;
       case 'huggingface':
-        return <span className="text-xs px-2 py-0.5 rounded bg-yellow-900/50 text-yellow-400">HF</span>;
+        return <span className="text-xs px-2 py-0.5 rounded bg-white/5 text-gray-300">HF</span>;
       default:
         return null;
     }
@@ -143,7 +143,7 @@ export default function ModelRecommender() {
               type="button"
               onClick={() => setMetadata({ ...metadata, has_gpu: !metadata.has_gpu })}
               className={`w-full py-2 rounded-lg border transition ${
-                metadata.has_gpu ? 'bg-green-900/30 border-green-600 text-green-400' : 'bg-gray-950 border-gray-800 text-gray-400'
+                metadata.has_gpu ? 'bg-white/5 border-white/25 text-gray-300' : 'bg-gray-950 border-gray-800 text-gray-400'
               }`}
             >
               {metadata.has_gpu ? 'Yes' : 'No'}
@@ -164,7 +164,7 @@ export default function ModelRecommender() {
         <button
           onClick={fetchRecommendations}
           disabled={loading}
-          className="mt-4 px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 rounded-lg text-white flex items-center gap-2"
+          className="mt-4 px-4 py-2 bg-white/10 hover:bg-white/20 disabled:opacity-50 rounded-lg text-white flex items-center gap-2"
         >
           {loading ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
           Get Recommendations
@@ -175,7 +175,7 @@ export default function ModelRecommender() {
       {recommendations.length > 0 && (
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
           <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-            <Brain size={20} className="text-purple-400" />
+            <Brain size={20} className="text-gray-300" />
             Recommended Models
           </h2>
           
@@ -185,7 +185,7 @@ export default function ModelRecommender() {
                 key={rec.id}
                 className={`p-4 rounded-lg border ${
                   selectedRec === rec.model_id
-                    ? 'border-purple-500 bg-purple-900/20'
+                    ? 'border-white/25 bg-white/5'
                     : 'border-gray-800 bg-gray-950'
                 }`}
               >
@@ -195,11 +195,11 @@ export default function ModelRecommender() {
                 </div>
                 <p className="text-white font-medium">{rec.model_type}</p>
                 <p className="text-gray-500 text-sm">{formatParams(rec.estimated_params)} params</p>
-                <p className="text-purple-400 text-sm mt-1">Expected acc: {(rec.expected_accuracy * 100).toFixed(0)}%</p>
+                <p className="text-gray-300 text-sm mt-1">Expected acc: {(rec.expected_accuracy * 100).toFixed(0)}%</p>
                 <p className="text-gray-600 text-xs mt-2 line-clamp-2">{rec.reasoning}</p>
                 
                 {selectedRec === rec.model_id && (
-                  <div className="mt-3 flex items-center gap-1 text-green-400 text-sm">
+                  <div className="mt-3 flex items-center gap-1 text-gray-300 text-sm">
                     <Check size={14} /> Selected
                   </div>
                 )}
@@ -216,7 +216,7 @@ export default function ModelRecommender() {
         {!showHfForm ? (
           <button
             onClick={() => setShowHfForm(true)}
-            className="text-yellow-400 hover:text-yellow-300 flex items-center gap-1"
+            className="text-gray-300 hover:text-white flex items-center gap-1"
           >
             <ExternalLink size={14} />
             Add from HuggingFace
@@ -233,7 +233,7 @@ export default function ModelRecommender() {
             <button
               onClick={handleAddHuggingFace}
               disabled={addingHf || !hfUrl.trim()}
-              className="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 disabled:opacity-50 rounded-lg text-white flex items-center gap-2"
+              className="px-4 py-2 bg-white/10 hover:bg-white/20 disabled:opacity-50 rounded-lg text-white flex items-center gap-2"
             >
               {addingHf ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
               Add

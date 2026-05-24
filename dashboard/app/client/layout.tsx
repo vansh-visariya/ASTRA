@@ -79,8 +79,8 @@ export default function ClientDashboardLayout({ children }: { children: React.Re
         {/* Logo */}
         <div className="p-5 pb-4">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #10b981, #059669)' }}>
-              <Layers size={18} className="text-white" />
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: '#ffffff' }}>
+              <Layers size={18} className="text-black" />
             </div>
             <div>
               <h1 className="text-white font-bold text-[15px] tracking-tight">ASTRA</h1>
@@ -119,7 +119,7 @@ export default function ClientDashboardLayout({ children }: { children: React.Re
         <div className="p-4 mx-3 mb-3 rounded-xl" style={{ background: 'rgba(30, 41, 59, 0.4)' }}>
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-lg flex items-center justify-center text-xs font-bold text-emerald-300"
-              style={{ background: 'linear-gradient(135deg, rgba(16,185,129,0.2), rgba(5,150,105,0.15))' }}>
+              style={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.06), rgba(255,255,255,0.04))' }}>
               {initials}
             </div>
             <div className="flex-1 min-w-0">

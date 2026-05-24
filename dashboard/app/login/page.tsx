@@ -61,17 +61,17 @@ function LoginForm() {
     <div className="min-h-screen login-bg grid-bg flex items-center justify-center p-4 relative overflow-hidden">
       {/* Decorative elements */}
       <div className="absolute top-1/4 left-1/4 w-96 h-96 rounded-full opacity-30 animate-float"
-        style={{ background: 'radial-gradient(circle, rgba(99,102,241,0.08) 0%, transparent 70%)' }} />
+        style={{ background: 'radial-gradient(circle, rgba(255,255,255,0.04) 0%, transparent 70%)' }} />
       <div className="absolute bottom-1/3 right-1/4 w-80 h-80 rounded-full opacity-20 animate-float"
-        style={{ background: 'radial-gradient(circle, rgba(139,92,246,0.08) 0%, transparent 70%)', animationDelay: '2s' }} />
+        style={{ background: 'radial-gradient(circle, rgba(255,255,255,0.04) 0%, transparent 70%)', animationDelay: '2s' }} />
 
       <div className="w-full max-w-[420px] relative z-10">
         <div className="glass-card p-8 animate-fade-in">
           {/* Logo */}
           <div className="flex items-center justify-center gap-3 mb-8">
             <div className="w-12 h-12 rounded-2xl flex items-center justify-center"
-              style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)' }}>
-              <Layers size={24} className="text-white" />
+              style={{ background: '#ffffff' }}>
+              <Layers size={24} className="text-black" />
             </div>
             <div>
               <h1 className="text-2xl font-bold text-white tracking-tight">ASTRA</h1>
@@ -105,7 +105,7 @@ function LoginForm() {
 
           <form onSubmit={handleSubmit} className="space-y-4">
             {error && (
-              <div className="bg-rose-500/10 border border-rose-500/20 text-rose-400 px-4 py-3 rounded-xl text-sm animate-fade-in">
+              <div className="bg-white/5 border border-white/10 text-gray-300 px-4 py-3 rounded-xl text-sm animate-fade-in">
                 {error}
               </div>
             )}
@@ -162,12 +162,12 @@ function LoginForm() {
                       type="button"
                       onClick={() => setRole('client')}
                       className={`p-3.5 rounded-xl text-sm font-medium transition-all duration-200 ${role === 'client'
-                          ? 'text-white border-brand-500/50'
+                          ? 'text-white border-white/5'
                           : 'text-slate-400 border-slate-700/50 hover:border-slate-600'
                         }`}
                       style={{
-                        background: role === 'client' ? 'linear-gradient(135deg, rgba(99,102,241,0.15), rgba(139,92,246,0.1))' : 'rgba(15,23,42,0.6)',
-                        border: `1px solid ${role === 'client' ? 'rgba(99,102,241,0.3)' : 'rgba(51,65,85,0.5)'}`
+                        background: role === 'client' ? 'linear-gradient(135deg, rgba(255,255,255,0.06))' : 'rgba(15,23,42,0.6)',
+                        border: `1px solid ${role === 'client' ? 'rgba(255,255,255,0.3)' : 'rgba(51,65,85,0.5)'}`
                       }}
                     >
                       <div className="font-semibold">Client</div>
@@ -181,8 +181,8 @@ function LoginForm() {
                           : 'text-slate-400 hover:border-slate-600'
                         }`}
                       style={{
-                        background: role === 'admin' ? 'linear-gradient(135deg, rgba(99,102,241,0.15), rgba(139,92,246,0.1))' : 'rgba(15,23,42,0.6)',
-                        border: `1px solid ${role === 'admin' ? 'rgba(99,102,241,0.3)' : 'rgba(51,65,85,0.5)'}`
+                        background: role === 'admin' ? 'linear-gradient(135deg, rgba(255,255,255,0.06))' : 'rgba(15,23,42,0.6)',
+                        border: `1px solid ${role === 'admin' ? 'rgba(255,255,255,0.3)' : 'rgba(51,65,85,0.5)'}`
                       }}
                     >
                       <div className="font-semibold">Admin</div>
