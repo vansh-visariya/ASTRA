@@ -143,10 +143,10 @@ export default function GroupDetailPage() {
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'TRAINING': return 'bg-green-900/50 text-green-400';
-      case 'PAUSED': return 'bg-yellow-900/50 text-yellow-400';
-      case 'COMPLETED': return 'bg-blue-900/50 text-blue-400';
-      default: return 'bg-gray-700 text-gray-400';
+      case 'TRAINING': return 'bg-white/10 text-white';
+      case 'PAUSED': return 'bg-white/5 text-gray-300';
+      case 'COMPLETED': return 'bg-white/5 text-gray-300';
+      default: return 'bg-white/5 text-gray-400';
     }
   };
 
@@ -195,16 +195,16 @@ export default function GroupDetailPage() {
           <div className="flex gap-2">
             {group.is_training && (
               <>
-                <button onClick={() => controlGroup('pause')} className="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 rounded-lg text-white font-medium transition flex items-center gap-2">
+                <button onClick={() => controlGroup('pause')} className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-white font-medium transition flex items-center gap-2">
                   <Pause size={16} /> Pause
                 </button>
-                <button onClick={() => controlGroup('stop')} className="px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg text-white font-medium transition flex items-center gap-2">
+                <button onClick={() => controlGroup('stop')} className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-white font-medium transition flex items-center gap-2">
                   <Square size={16} /> Stop
                 </button>
               </>
             )}
             {group.status === 'PAUSED' && (
-              <button onClick={() => controlGroup('resume')} className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg text-white font-medium transition flex items-center gap-2">
+              <button onClick={() => controlGroup('resume')} className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-white font-medium transition flex items-center gap-2">
                 <Play size={16} /> Resume
               </button>
             )}
@@ -223,7 +223,7 @@ export default function GroupDetailPage() {
             key={tab}
             onClick={() => setActiveTab(tab)}
             className={`px-4 py-3 text-sm font-medium capitalize transition border-b-2 ${activeTab === tab
-              ? 'border-indigo-500 text-indigo-400'
+              ? 'border-white/30 text-white'
               : 'border-transparent text-gray-400 hover:text-white'
               }`}
           >
@@ -235,11 +235,11 @@ export default function GroupDetailPage() {
       {activeTab === 'overview' && (
         <div className="space-y-6">
           {!group.is_training && group.status !== 'COMPLETED' && (
-            <div className="bg-blue-900/20 border border-blue-800 rounded-lg p-4 flex items-start gap-3">
-              <Activity size={20} className="text-blue-400 mt-0.5" />
+            <div className="bg-white/5 border border-white/10 rounded-lg p-4 flex items-start gap-3">
+              <Activity size={20} className="text-slate-300 mt-0.5" />
               <div>
-                <p className="text-sm font-medium text-blue-300">Auto-Start Enabled</p>
-                <p className="text-xs text-blue-400 mt-1">
+                <p className="text-sm font-medium text-white">Auto-Start Enabled</p>
+                <p className="text-xs text-slate-400 mt-1">
                   Training will automatically start when the first client joins this group. No manual start required.
                 </p>
               </div>
@@ -249,7 +249,7 @@ export default function GroupDetailPage() {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
               <div className="flex items-center gap-3 mb-2">
-                <Users size={18} className="text-blue-400" />
+                <Users size={18} className="text-slate-300" />
                 <span className="text-gray-400 text-sm">Clients</span>
               </div>
               <p className="text-2xl font-bold text-white">{group.client_count}</p>
@@ -257,27 +257,27 @@ export default function GroupDetailPage() {
 
             <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
               <div className="flex items-center gap-3 mb-2">
-                <TrendingUp size={18} className="text-green-400" />
+                <TrendingUp size={18} className="text-slate-300" />
                 <span className="text-gray-400 text-sm">Accuracy</span>
               </div>
-              <p className="text-2xl font-bold text-green-400">
+              <p className="text-2xl font-bold text-white">
                 {((latestMetric ? latestMetric.accuracy : avgClientAccuracy) * 100).toFixed(1)}%
               </p>
             </div>
 
             <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
               <div className="flex items-center gap-3 mb-2">
-                <Activity size={18} className="text-red-400" />
+                <Activity size={18} className="text-slate-300" />
                 <span className="text-gray-400 text-sm">Loss</span>
               </div>
-              <p className="text-2xl font-bold text-red-400">
+              <p className="text-2xl font-bold text-white">
                 {(latestMetric ? latestMetric.loss : avgClientLoss).toFixed(4)}
               </p>
             </div>
 
             <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
               <div className="flex items-center gap-3 mb-2">
-                <Activity size={18} className="text-indigo-400" />
+                <Activity size={18} className="text-slate-300" />
                 <span className="text-gray-400 text-sm">Version</span>
               </div>
               <p className="text-2xl font-bold text-white">v{group.model_version}</p>
@@ -293,7 +293,7 @@ export default function GroupDetailPage() {
                   <span className="text-gray-400">Time: {group.window_status?.time_remaining?.toFixed(1) || 0}s</span>
                 </div>
                 <div className="h-3 bg-gray-800 rounded-full overflow-hidden">
-                  <div className="h-full bg-indigo-500 rounded-full" style={{ width: `${Math.min(100, progress * 100)}%` }} />
+                  <div className="h-full bg-white/30 rounded-full" style={{ width: `${Math.min(100, progress * 100)}%` }} />
                 </div>
               </div>
             </div>
@@ -312,7 +312,7 @@ export default function GroupDetailPage() {
                     <XAxis dataKey="version" stroke="#6b7280" fontSize={12} />
                     <YAxis stroke="#6b7280" fontSize={12} domain={[0, 1]} />
                     <Tooltip contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151' }} />
-                    <Area type="monotone" dataKey="accuracy" stroke="#22c55e" strokeWidth={2} fill="#22c55e" fillOpacity={0.2} />
+                    <Area type="monotone" dataKey="accuracy" stroke="#e5e7eb" strokeWidth={2} fill="#e5e7eb" fillOpacity={0.2} />
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
@@ -325,7 +325,7 @@ export default function GroupDetailPage() {
                     <XAxis dataKey="version" stroke="#6b7280" fontSize={12} />
                     <YAxis stroke="#6b7280" fontSize={12} />
                     <Tooltip contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151' }} />
-                    <Area type="monotone" dataKey="loss" stroke="#ef4444" strokeWidth={2} fill="#ef4444" fillOpacity={0.2} />
+                    <Area type="monotone" dataKey="loss" stroke="#9ca3af" strokeWidth={2} fill="#9ca3af" fillOpacity={0.2} />
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
@@ -343,8 +343,8 @@ export default function GroupDetailPage() {
 
           {/* Pending Join Requests - Show for admin */}
           {(user?.role === 'admin') && joinRequests.filter((r: any) => r.status === 'pending').length > 0 && (
-            <div className="bg-yellow-900/20 border border-yellow-800 rounded-xl p-6">
-              <h3 className="text-lg font-semibold text-yellow-400 mb-4">Pending Join Requests</h3>
+            <div className="bg-white/5 border border-white/10 rounded-xl p-6">
+              <h3 className="text-lg font-semibold text-white mb-4">Pending Join Requests</h3>
               <div className="space-y-3">
                 {joinRequests.filter((r: any) => r.status === 'pending').map((req: any) => (
                   <div key={req.id} className="flex items-center justify-between bg-gray-900 rounded-lg p-4">
@@ -353,8 +353,8 @@ export default function GroupDetailPage() {
                       <p className="text-gray-400 text-sm">{new Date(req.requested_at).toLocaleString()}</p>
                     </div>
                     <div className="flex gap-2">
-                      <button onClick={() => handleApproveRequest(req.id)} className="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg text-white text-sm">Approve</button>
-                      <button onClick={() => handleRejectRequest(req.id)} className="px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg text-white text-sm">Reject</button>
+                      <button onClick={() => handleApproveRequest(req.id)} className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-white text-sm">Approve</button>
+                      <button onClick={() => handleRejectRequest(req.id)} className="px-4 py-2 bg-white/5 hover:bg-white/15 rounded-lg text-white text-sm">Reject</button>
                     </div>
                   </div>
                 ))}
@@ -396,19 +396,19 @@ export default function GroupDetailPage() {
                     <tr key={client.client_id} className="border-t border-gray-800">
                       <td className="p-4 text-white font-mono">{client.client_id}</td>
                       <td className="p-4">
-                        <span className={`px-3 py-1 rounded-full text-xs ${client.status === 'active' ? 'bg-green-900/50 text-green-400' : 'bg-gray-700 text-gray-400'}`}>
+                        <span className={`px-3 py-1 rounded-full text-xs ${client.status === 'active' ? 'bg-white/10 text-white' : 'bg-white/5 text-gray-300'}`}>
                           {client.status}
                         </span>
                       </td>
                       <td className="p-4 text-gray-300">{client.updates_count || 0}</td>
-                      <td className="p-4 text-green-400">{formatAccuracyPercent(client.local_accuracy)}</td>
-                      <td className="p-4 text-red-400">{(client.local_loss || 0).toFixed(4)}</td>
+                      <td className="p-4 text-slate-200">{formatAccuracyPercent(client.local_accuracy)}</td>
+                      <td className="p-4 text-slate-300">{(client.local_loss || 0).toFixed(4)}</td>
                       <td className="p-4">
                         <div className="flex items-center gap-2">
-                          <div className="w-20 h-2 bg-gray-700 rounded-full">
-                            <div className="h-full bg-green-500 rounded-full" style={{ width: `${(client.trust_score || 0) * 100}%` }} />
+                          <div className="w-20 h-2 bg-white/10 rounded-full">
+                            <div className="h-full bg-white/50 rounded-full" style={{ width: `${(client.trust_score || 0) * 100}%` }} />
                           </div>
-                          <span className="text-gray-400 text-sm">{(client.trust_score || 0).toFixed(0)}%</span>
+                          <span className="text-slate-300 text-sm">{(client.trust_score || 0).toFixed(0)}%</span>
                         </div>
                       </td>
                     </tr>
@@ -457,20 +457,20 @@ export default function GroupDetailPage() {
               <div className="max-h-[500px] overflow-y-auto">
                 {logs.map((log, idx) => {
                   const typeColor: Record<string, string> = {
-                    training_started: 'text-green-400',
-                    training_started_notify: 'text-green-400',
-                    aggregation: 'text-blue-400',
-                    client_joined: 'text-purple-400',
-                    client_update: 'text-yellow-400',
-                    client_rejected: 'text-red-400',
+                    training_started: 'text-slate-300',
+                    training_started_notify: 'text-slate-300',
+                    aggregation: 'text-slate-300',
+                    client_joined: 'text-slate-300',
+                    client_update: 'text-slate-300',
+                    client_rejected: 'text-slate-300',
                   };
                   const typeBg: Record<string, string> = {
-                    training_started: 'bg-green-900/20 border-green-900/40',
-                    training_started_notify: 'bg-green-900/20 border-green-900/40',
-                    aggregation: 'bg-blue-900/20 border-blue-900/40',
-                    client_joined: 'bg-purple-900/20 border-purple-900/40',
-                    client_update: 'bg-yellow-900/20 border-yellow-900/40',
-                    client_rejected: 'bg-red-900/20 border-red-900/40',
+                    training_started: 'bg-white/5 border-white/10',
+                    training_started_notify: 'bg-white/5 border-white/10',
+                    aggregation: 'bg-white/5 border-white/10',
+                    client_joined: 'bg-white/5 border-white/10',
+                    client_update: 'bg-white/5 border-white/10',
+                    client_rejected: 'bg-white/5 border-white/10',
                   };
                   return (
                     <div key={idx} className={`p-3 border-b border-gray-800 ${typeBg[log.type] || 'bg-gray-900/20 border-gray-800'}`}>
@@ -506,7 +506,7 @@ export default function GroupDetailPage() {
             <div className="space-y-3">
               <div className="flex justify-between p-3 bg-gray-950 rounded-lg">
                 <span className="text-gray-400">Status</span>
-                <span className={group.config.dp_enabled ? 'text-green-400' : 'text-gray-500'}>
+                <span className={group.config.dp_enabled ? 'text-white' : 'text-gray-500'}>
                   {group.config.dp_enabled ? 'Enabled' : 'Disabled'}
                 </span>
               </div>
@@ -538,13 +538,13 @@ export default function GroupDetailPage() {
           <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
-                <Box size={20} className="text-indigo-400" />
+                <Box size={20} className="text-slate-300" />
                 <h3 className="text-lg font-semibold text-white">Global Model</h3>
               </div>
               <button
                 onClick={() => window.open(`${API_URL}/api/models/${group.group_id}/download`, '_blank')}
                 disabled={group.model_version === 0}
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-700 disabled:text-gray-500 rounded-lg text-white text-sm font-medium transition flex items-center gap-2"
+                className="px-4 py-2 bg-white/10 hover:bg-white/20 disabled:bg-white/5 disabled:text-gray-500 rounded-lg text-white text-sm font-medium transition flex items-center gap-2"
               >
                 <Download size={16} />
                 Download Latest (v{group.model_version})
@@ -584,8 +584,8 @@ export default function GroupDetailPage() {
                       contentStyle={{ backgroundColor: '#111827', border: '1px solid #374151', borderRadius: '8px' }}
                       labelFormatter={(v) => `Round ${v}`}
                     />
-                    <Area type="monotone" dataKey="accuracy" stroke="#818cf8" fill="#818cf844" name="Accuracy" />
-                    <Area type="monotone" dataKey="loss" stroke="#f87171" fill="#f8717144" name="Loss" />
+                    <Area type="monotone" dataKey="accuracy" stroke="#e5e7eb" fill="#e5e7eb33" name="Accuracy" />
+                    <Area type="monotone" dataKey="loss" stroke="#9ca3af" fill="#9ca3af33" name="Loss" />
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
@@ -613,12 +613,12 @@ export default function GroupDetailPage() {
                       <tr key={i} className="border-b border-gray-800/50 hover:bg-gray-800/30 transition">
                         <td className="py-3 px-4 text-white font-medium">v{metric.version}</td>
                         <td className="py-3 px-4">
-                          <span className="text-indigo-400 font-mono">
+                          <span className="text-slate-200 font-mono">
                             {formatAccuracyPercent(metric.accuracy)}
                           </span>
                         </td>
                         <td className="py-3 px-4">
-                          <span className="text-red-400 font-mono">
+                          <span className="text-slate-300 font-mono">
                             {typeof metric.loss === 'number' ? metric.loss.toFixed(4) : '—'}
                           </span>
                         </td>
@@ -629,7 +629,7 @@ export default function GroupDetailPage() {
                         <td className="py-3 px-4 text-right">
                           <button
                             onClick={() => window.open(`${API_URL}/api/models/${group.group_id}/download?version=${metric.version}`, '_blank')}
-                            className="p-1.5 hover:bg-gray-700 rounded-lg transition text-gray-400 hover:text-indigo-400"
+                            className="p-1.5 hover:bg-gray-700 rounded-lg transition text-gray-400 hover:text-white"
                             title={`Download v${metric.version}`}
                           >
                             <Download size={14} />

@@ -6,7 +6,7 @@ import Link from 'next/link';
 import {
   Layers, LogOut, Bell,
   Users, Activity, Shield,
-  Sparkles, ChevronRight, Cpu
+  ChevronRight, Cpu
 } from 'lucide-react';
 import { useAuth } from '@/components/AuthContext';
 
@@ -16,7 +16,6 @@ const clientNav = [
   { href: '/client', label: 'Dashboard', icon: Activity },
   { href: '/client/groups', label: 'Available Groups', icon: Users },
   { href: '/client/training', label: 'Training', icon: Cpu },
-  { href: '/client/recommendations', label: 'Model Advisor', icon: Sparkles },
   { href: '/client/trust', label: 'Trust Score', icon: Shield },
   { href: '/client/notifications', label: 'Notifications', icon: Bell },
 ];

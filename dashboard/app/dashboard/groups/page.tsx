@@ -96,7 +96,7 @@ export default function GroupsPage() {
             <RefreshCw size={16} />
           </button>
           {user?.role === 'admin' && (
-            <Link href="/dashboard/create" className="btn-primary px-4 py-2.5 text-white text-sm flex items-center gap-2">
+            <Link href="/dashboard/create" className="btn-primary px-4 py-2.5 text-sm flex items-center gap-2">
               <Plus size={15} /> Create Group
             </Link>
           )}
@@ -109,7 +109,7 @@ export default function GroupsPage() {
           <h3 className="text-white font-semibold mb-1">No groups yet</h3>
           <p className="text-slate-500 text-sm mb-4">Create your first federated learning group to get started.</p>
           {user?.role === 'admin' && (
-            <Link href="/dashboard/create" className="btn-primary inline-flex px-5 py-2.5 text-white text-sm items-center gap-2">
+            <Link href="/dashboard/create" className="btn-primary inline-flex px-5 py-2.5 text-sm items-center gap-2">
               <Plus size={15} /> Create Group
             </Link>
           )}

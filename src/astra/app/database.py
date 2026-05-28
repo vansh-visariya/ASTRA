@@ -160,9 +160,27 @@ class AstraDB:
                     status TEXT DEFAULT 'active',
                     trust_score REAL DEFAULT 1.0,
                     joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    last_seen TEXT
+                    last_seen TEXT,
+                    local_accuracy REAL DEFAULT 0.0,
+                    local_loss REAL DEFAULT 0.0,
+                    updates_count INTEGER DEFAULT 0,
+                    gradient_norm REAL DEFAULT 0.0,
+                    last_update TEXT
                 )
             """)
+
+            # Migrate: add missing columns to existing fl_clients table
+            for col, col_type in [
+                ("local_accuracy", "REAL DEFAULT 0.0"),
+                ("local_loss", "REAL DEFAULT 0.0"),
+                ("updates_count", "INTEGER DEFAULT 0"),
+                ("gradient_norm", "REAL DEFAULT 0.0"),
+                ("last_update", "TEXT"),
+            ]:
+                with contextlib.suppress(sqlite3.OperationalError):
+                    c.execute(
+                        f"ALTER TABLE fl_clients ADD COLUMN {col} {col_type}"
+                    )
 
             # --- Notifications ---
             c.execute("""
@@ -424,6 +442,50 @@ class AstraDB:
                 "UPDATE fl_clients SET trust_score = ?,"
                 " status = ?, last_seen = ? WHERE client_id = ?",
                 (trust_score, status, datetime.now().isoformat(), client_id),
+            )
+            conn.commit()
+
+    def update_fl_client_metrics(
+        self,
+        client_id: str,
+        local_accuracy: float | None = None,
+        local_loss: float | None = None,
+        updates_count: int | None = None,
+        gradient_norm: float | None = None,
+        status: str | None = None,
+    ) -> None:
+        with self.connection() as conn:
+            cursor = conn.cursor()
+            now = datetime.now().isoformat()
+            updates: list[str] = []
+            values: list[Any] = []
+
+            if local_accuracy is not None:
+                updates.append("local_accuracy = ?")
+                values.append(local_accuracy)
+            if local_loss is not None:
+                updates.append("local_loss = ?")
+                values.append(local_loss)
+            if updates_count is not None:
+                updates.append("updates_count = ?")
+                values.append(updates_count)
+            if gradient_norm is not None:
+                updates.append("gradient_norm = ?")
+                values.append(gradient_norm)
+            if status is not None:
+                updates.append("status = ?")
+                values.append(status)
+
+            updates.append("last_update = ?")
+            values.append(now)
+            updates.append("last_seen = ?")
+            values.append(now)
+
+            values.append(client_id)
+
+            cursor.execute(
+                f"UPDATE fl_clients SET {', '.join(updates)} WHERE client_id = ?",
+                values,
             )
             conn.commit()
 

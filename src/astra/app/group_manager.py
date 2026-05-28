@@ -100,7 +100,10 @@ class GroupManager:
                         with db.connection() as conn:
                             client_rows = conn.execute(
                                 "SELECT client_id, user_id,"
-                                " trust_score, status, joined_at"
+                                " trust_score, status, joined_at,"
+                                " local_accuracy, local_loss,"
+                                " updates_count, gradient_norm,"
+                                " last_update"
                                 " FROM fl_clients"
                                 " WHERE group_id = ?",
                                 (gid,),
@@ -112,14 +115,14 @@ class GroupManager:
                                     "device": "cpu",
                                     "data_metadata": {},
                                     "connection": "none",
-                                    "last_update": None,
-                                    "updates_count": 0,
-                                    "local_accuracy": 0,
-                                    "local_loss": 0,
+                                    "last_update": cr["last_update"],
+                                    "updates_count": cr["updates_count"] or 0,
+                                    "local_accuracy": cr["local_accuracy"] or 0,
+                                    "local_loss": cr["local_loss"] or 0,
                                     "trust_score": cr["trust_score"] or 1.0,
                                     "status": "offline",
                                     "joined_at": cr["joined_at"],
-                                    "gradient_norm": 0,
+                                    "gradient_norm": cr["gradient_norm"] or 0,
                                 }
                                 self.client_to_group[cid] = gid
                     except Exception as e:
@@ -806,6 +809,21 @@ class GroupManager:
 
         normalized = self.normalize_update(update)
         triggered = group.add_update(client_id, normalized)
+
+        # Persist client metrics to database
+        try:
+            db = get_db()
+            client_info = group.clients.get(client_id, {})
+            db.update_fl_client_metrics(
+                client_id=client_id,
+                local_accuracy=client_info.get("local_accuracy", 0),
+                local_loss=client_info.get("local_loss", 0),
+                updates_count=client_info.get("updates_count", 0),
+                gradient_norm=client_info.get("gradient_norm", 0),
+                status="active",
+            )
+        except Exception as e:
+            self.logger.warning(f"Could not persist metrics for client {client_id}: {e}")
 
         result = {
             "triggered": triggered,

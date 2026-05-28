@@ -83,7 +83,7 @@ export default function ClientTrainingPage() {
   }, [token]);
 
   const copyCommand = (groupId: string, joinToken?: string) => {
-    const cmd = `python client_app/client_app.py --server ${API_URL} --client-id ${user?.username || 'client'}_${groupId} --group-id ${groupId} --username ${user?.username || 'client'} --password YOUR_PASSWORD${joinToken ? ` --join-token ${joinToken}` : ''}`;
+    const cmd = `python src/astra/client/cli.py --server ${API_URL} --client-id ${user?.username || 'client'}_${groupId} --group-id ${groupId} --username ${user?.username || 'client'} --password YOUR_PASSWORD${joinToken ? ` --join-token ${joinToken}` : ''}`;
     navigator.clipboard.writeText(cmd);
     setCopiedCmd(true);
     setTimeout(() => setCopiedCmd(false), 2000);

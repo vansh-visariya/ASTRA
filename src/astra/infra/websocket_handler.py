@@ -237,6 +237,19 @@ async def websocket_endpoint(websocket: WebSocket):
                             f" loss={metrics.get('train_loss', 0):.4f}"
                         )
 
+                        # Persist to database
+                        try:
+                            from astra.app.database import get_db
+                            db = get_db()
+                            db.update_fl_client_metrics(
+                                client_id=client_id,
+                                local_accuracy=metrics.get("train_accuracy", 0),
+                                local_loss=metrics.get("train_loss", 0),
+                                status="active",
+                            )
+                        except Exception as e:
+                            logger.warning(f"Could not persist metrics for {client_id}: {e}")
+
                     fl_server.group_manager.log_event(
                         "client_metrics",
                         f"Client {client_id} metrics",

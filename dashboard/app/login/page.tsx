@@ -85,7 +85,7 @@ function LoginForm() {
               type="button"
               onClick={() => setMode('login')}
               className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${mode === 'login'
-                  ? 'btn-primary text-white'
+                  ? 'btn-primary'
                   : 'text-slate-400 hover:text-white'
                 }`}
             >
@@ -95,7 +95,7 @@ function LoginForm() {
               type="button"
               onClick={() => setMode('signup')}
               className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${mode === 'signup'
-                  ? 'btn-primary text-white'
+                  ? 'btn-primary'
                   : 'text-slate-400 hover:text-white'
                 }`}
             >
@@ -212,10 +212,10 @@ function LoginForm() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full btn-primary text-white py-3 flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full btn-primary py-3 flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading ? (
-                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                <div className="w-5 h-5 border-2 border-black border-t-transparent rounded-full animate-spin" />
               ) : mode === 'login' ? (
                 'Sign In'
               ) : (
