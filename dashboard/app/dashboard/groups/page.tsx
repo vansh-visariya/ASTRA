@@ -12,7 +12,7 @@ import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useAuth } from '@/components/AuthContext';
-import { controlGroup } from '@/lib/api/endpoints';
+import { controlGroup, deleteGroup } from '@/lib/api/endpoints';
 import type { Group } from '@/lib/api/types';
 
 export default function GroupsPage() {
@@ -27,6 +27,15 @@ export default function GroupsPage() {
   const handleControl = async (groupId: string, action: 'start' | 'pause' | 'resume' | 'stop') => {
     try {
       await controlGroup(groupId, action);
+      refetch();
+    } catch {
+      // snackbar would go here
+    }
+  };
+
+  const handleDelete = async (groupId: string) => {
+    try {
+      await deleteGroup(groupId);
       refetch();
     } catch {
       // snackbar would go here
@@ -70,7 +79,7 @@ export default function GroupsPage() {
         />
       ) : (
         <div className="glass-card overflow-hidden animate-fade-in">
-          <GroupTable groups={groups} onAction={handleControl} onDetail={(id) => router.push(`/dashboard/groups/${id}`)} />
+          <GroupTable groups={groups} onAction={handleControl} onDelete={handleDelete} onDetail={(id) => router.push(`/dashboard/groups/${id}`)} />
         </div>
       )}
     </div>

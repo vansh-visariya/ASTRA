@@ -53,9 +53,19 @@ export default function GroupDetailPage() {
   if (loading) return <LoadingSpinner message="Loading group..." />;
   if (!group) return <ErrorState message="Group not found" onRetry={refetch} />;
 
-  const clients: Client[] = [];
-  const accuracy = 0;
-  const loss = 0;
+  const clients: Client[] = Object.entries(group.clients || {}).map(([client_id, info]) => ({
+    client_id,
+    group_id: group.group_id,
+    status: info.status || 'unknown',
+    last_update: (info.last_update as number) || 0,
+    update_count: info.update_count || 0,
+    local_accuracy: info.local_accuracy || 0,
+    local_loss: info.local_loss || 0,
+    trust_score: info.trust_score || 0,
+    joined_at: info.joined_at || '',
+  }));
+  const accuracy = group.latest_accuracy || 0;
+  const loss = group.latest_loss || 0;
 
   return (
     <div className="space-y-6">
@@ -126,7 +136,7 @@ export default function GroupDetailPage() {
                 <span className="text-slate-400 text-xs font-medium uppercase tracking-wider">Clients</span>
                 <Users size={17} className="text-gray-300" />
               </div>
-              <p className="text-2xl font-bold text-white">{Object.keys(group.clients || {}).length}</p>
+              <p className="text-2xl font-bold text-white">{group.client_count ?? Object.keys(group.clients || {}).length}</p>
             </div>
             <div className="stat-card accent-success p-5">
               <div className="flex items-center justify-between mb-4">
@@ -154,10 +164,10 @@ export default function GroupDetailPage() {
           <div className="glass-card p-5">
             <h3 className="text-sm font-semibold text-white mb-4">Async Window</h3>
             <MetricBar
-              value={0}
+              value={group.window_status?.pending_updates ?? 0}
               max={group.window_size}
               colorMode="static"
-              label={`Window: 0 / ${group.window_size} updates (${group.time_limit}s timeout)`}
+              label={`Window: ${group.window_status?.pending_updates ?? 0} / ${group.window_size} updates (${group.time_limit}s timeout)`}
             />
           </div>
         </div>
@@ -326,7 +336,7 @@ export default function GroupDetailPage() {
               </div>
               <div className="p-4 rounded-xl" style={{ background: 'rgba(30,41,59,0.4)' }}>
                 <p className="text-slate-500 text-xs">Rounds</p>
-                <p className="text-white font-medium mt-1">{(group as any)?.completed_rounds || 0}</p>
+                <p className="text-white font-medium mt-1">{group.completed_rounds || 0}</p>
               </div>
             </div>
           </div>

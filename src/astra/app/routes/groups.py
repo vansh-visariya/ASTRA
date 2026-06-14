@@ -110,6 +110,16 @@ async def stop_group_training(group_id: str):
     return {"status": "stopped", "group_id": group_id}
 
 
+@router.delete("/api/groups/{group_id}")
+async def delete_group(group_id: str):
+    """Delete a training group and all associated data."""
+    fl_server = get_fl_server()
+    success = fl_server.group_manager.delete_group(group_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Group not found or could not be deleted")
+    return {"status": "deleted", "group_id": group_id}
+
+
 @router.get("/api/groups/{group_id}/window-status")
 async def get_group_window_status(group_id: str):
     """Get async window status for a group."""

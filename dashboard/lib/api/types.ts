@@ -17,15 +17,26 @@ export interface Group {
   model_id: string;
   status: string;
   is_training: boolean;
+  is_locked?: boolean;
   clients: Record<string, ClientMeta>;
   window_size: number;
   time_limit: number;
   join_token: string;
   model_version?: number;
-  aggregator?: string;
+  completed_rounds?: number;
+  latest_accuracy?: number;
+  latest_loss?: number;
+  client_count?: number;
+  active_clients?: string[];
   config?: Record<string, unknown>;
+  window_status?: {
+    pending_updates: number;
+    window_size: number;
+    time_elapsed: number;
+    time_remaining: number;
+    waiting: boolean;
+  };
   created_at?: string;
-  participant_count?: number;
 }
 
 export interface ClientMeta {

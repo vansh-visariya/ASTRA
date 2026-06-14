@@ -163,6 +163,8 @@ class TrainingGroup:
             "completed_rounds": self.completed_rounds,
             "max_rounds": self.max_rounds,
             "join_token": self.join_token if include_secret else "***HIDDEN***",
+            "window_size": self.window_config.window_size,
+            "time_limit": self.window_config.time_limit,
             "config": {
                 "local_epochs": self.config.get("local_epochs", 2),
                 "batch_size": self.config.get("batch_size", 32),
@@ -178,6 +180,20 @@ class TrainingGroup:
             "window_status": self.get_window_status(),
             "client_count": len(self.clients),
             "active_clients": self.get_active_clients(),
+            "clients": {
+                cid: {
+                    "status": info.get("status", "unknown"),
+                    "last_update": info.get("last_update"),
+                    "update_count": info.get("updates_count", 0),
+                    "local_accuracy": info.get("local_accuracy", 0.0),
+                    "local_loss": info.get("local_loss", 0.0),
+                    "trust_score": info.get("trust_score", 1.0),
+                    "joined_at": info.get("joined_at"),
+                }
+                for cid, info in self.clients.items()
+            },
             "pending_updates": len(self.pending_updates),
             "metrics_history": self.metrics_history[-10:],  # Last 10 entries
+            "latest_accuracy": self.metrics_history[-1].get("accuracy", 0) if self.metrics_history else 0,
+            "latest_loss": self.metrics_history[-1].get("loss", 0) if self.metrics_history else 0,
         }

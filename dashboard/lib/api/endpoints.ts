@@ -27,6 +27,9 @@ export const createGroup = (body: Record<string, unknown>) =>
 export const controlGroup = (id: string, action: 'start' | 'pause' | 'resume' | 'stop') =>
   api.post<{ status: string }>(`/api/groups/${id}/${action}`);
 
+export const deleteGroup = (id: string) =>
+  api.del<{ status: string }>(`/api/groups/${id}`);
+
 export const getWindowStatus = (id: string) =>
   api.get<WindowStatus>(`/api/groups/${id}/window-status`);
 

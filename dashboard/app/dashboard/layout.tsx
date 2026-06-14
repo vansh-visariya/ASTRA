@@ -117,7 +117,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button className="relative p-2 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg transition">
+            <Link href="/dashboard/notifications" className="relative p-2 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg transition">
               <Bell size={17} />
               {unreadCount > 0 && (
                 <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] flex items-center justify-center text-white text-[10px] font-bold rounded-full px-1"
@@ -125,7 +125,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   {unreadCount > 99 ? '99+' : unreadCount}
                 </span>
               )}
-            </button>
+            </Link>
           </div>
         </header>
 

@@ -1,15 +1,16 @@
 import React from 'react';
 import { StatusBadge } from '@/components/ui/StatusBadge';
-import { Layers } from 'lucide-react';
+import { Layers, Trash2 } from 'lucide-react';
 import type { Group } from '@/lib/api/types';
 
 interface GroupTableProps {
   groups: Group[];
   onAction: (groupId: string, action: 'start' | 'pause' | 'resume' | 'stop') => void;
+  onDelete: (groupId: string) => void;
   onDetail: (groupId: string) => void;
 }
 
-export function GroupTable({ groups, onAction, onDetail }: GroupTableProps) {
+export function GroupTable({ groups, onAction, onDelete, onDetail }: GroupTableProps) {
   if (groups.length === 0) return null;
 
   return (
@@ -43,7 +44,7 @@ export function GroupTable({ groups, onAction, onDetail }: GroupTableProps) {
                 <StatusBadge status={group.is_training ? 'training' : group.status.toLowerCase()} />
               </td>
               <td className="py-3 px-4 text-slate-400">
-                {Object.keys(group.clients || {}).length}
+                {group.client_count ?? Object.keys(group.clients || {}).length}
               </td>
               <td className="py-3 px-4 text-slate-500 text-xs">
                 W{group.window_size}/T{group.time_limit}s
@@ -87,6 +88,13 @@ export function GroupTable({ groups, onAction, onDetail }: GroupTableProps) {
                       Stop
                     </button>
                   )}
+                  <button
+                    onClick={() => onDelete(group.group_id)}
+                    className="btn-destructive text-xs !px-3 !py-1 bg-red-900/30 hover:bg-red-900/50 text-red-400 border border-red-500/20"
+                    title="Delete group"
+                  >
+                    <Trash2 size={13} />
+                  </button>
                 </div>
               </td>
             </tr>
