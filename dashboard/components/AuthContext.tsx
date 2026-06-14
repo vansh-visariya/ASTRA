@@ -2,8 +2,8 @@
 
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+import { setToken as setApiToken } from '@/lib/api/client';
+import { login as apiLogin } from '@/lib/api/endpoints';
 
 interface User {
   id?: number;
@@ -34,24 +34,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (savedToken && savedUser) {
       setToken(savedToken);
       setUser(JSON.parse(savedUser));
+      setApiToken(savedToken);
     }
     setIsLoading(false);
   }, []);
 
   const login = async (username: string, password: string) => {
-    const res = await fetch(`${API_URL}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
-    });
-    
-    if (!res.ok) {
-      throw new Error('Invalid credentials');
-    }
-    
-    const data = await res.json();
+    const data = await apiLogin(username, password);
+
     setToken(data.token);
     setUser(data.user);
+    setApiToken(data.token);
     localStorage.setItem('token', data.token);
     localStorage.setItem('user', JSON.stringify(data.user));
   };
@@ -59,6 +52,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = () => {
     setUser(null);
     setToken(null);
+    setApiToken(null);
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     router.push('/login');

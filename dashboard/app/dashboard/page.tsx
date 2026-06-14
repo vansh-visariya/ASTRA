@@ -1,48 +1,19 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useAuth } from '@/components/AuthContext';
-import { Layers, Users, Activity, Shield, Zap, TrendingUp, Plus, ArrowUpRight } from 'lucide-react';
+import { Layers, Users, Activity, Zap, Shield, TrendingUp, Plus, ArrowUpRight } from 'lucide-react';
 import Link from 'next/link';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-
-interface SystemMetrics {
-  total_groups: number;
-  active_groups: number;
-  total_participants: number;
-  active_participants: number;
-  dp_enabled_groups: number;
-  total_aggregations: number;
-  latest_group_id?: string | null;
-  latest_accuracy?: number;
-  latest_loss?: number;
-  latest_version?: number;
-  latest_timestamp?: number;
-}
+import { useMemo } from 'react';
+import { useWS } from '@/components/WebSocketProvider';
+import { useMetrics } from '@/hooks';
+import { StatCard } from '@/components/ui/StatCard';
+import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
+import { ErrorState } from '@/components/ui/ErrorState';
+import { useAuth } from '@/components/AuthContext';
 
 export default function DashboardPage() {
-  const { token, user } = useAuth();
-  const [metrics, setMetrics] = useState<SystemMetrics | null>(null);
-
-  useEffect(() => {
-    const fetchMetrics = async () => {
-      try {
-        const res = await fetch(`${API_URL}/api/system/metrics`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setMetrics(data);
-        }
-      } catch (e) {
-        console.error('Failed to fetch metrics:', e);
-      }
-    };
-    fetchMetrics();
-    const interval = setInterval(fetchMetrics, 3000);
-    return () => clearInterval(interval);
-  }, [token]);
+  const { user } = useAuth();
+  const { isConnected } = useWS();
+  const { data: metrics, loading, error, refetch } = useMetrics(!isConnected);
 
   const getGreeting = () => {
     const hour = new Date().getHours();
@@ -54,55 +25,51 @@ export default function DashboardPage() {
   const formatPercent = (value?: number) => `${((value || 0) * 100).toFixed(1)}%`;
   const formatLoss = (value?: number) => (value ?? 0).toFixed(4);
 
-  const statCards = [
-    { label: 'Total Groups', value: metrics?.total_groups || 0, icon: Layers, accent: 'accent-indigo', iconBg: 'rgba(255,255,255,0.06)', iconColor: 'text-gray-300' },
-    { label: 'Active Groups', value: metrics?.active_groups || 0, icon: Activity, accent: 'accent-emerald', iconBg: 'rgba(255,255,255,0.06)', iconColor: 'text-gray-300' },
-    { label: 'Total Participants', value: metrics?.total_participants || 0, icon: Users, accent: 'accent-blue', iconBg: 'rgba(255,255,255,0.06)', iconColor: 'text-gray-300' },
-    { label: 'Active Participants', value: metrics?.active_participants || 0, icon: Zap, accent: 'accent-amber', iconBg: 'rgba(255,255,255,0.06)', iconColor: 'text-gray-300' },
-    { label: 'DP Enabled', value: metrics?.dp_enabled_groups || 0, icon: Shield, accent: 'accent-violet', iconBg: 'rgba(255,255,255,0.06)', iconColor: 'text-gray-300' },
-    { label: 'Total Rounds', value: metrics?.total_aggregations || 0, icon: TrendingUp, accent: 'accent-rose', iconBg: 'rgba(255,255,255,0.06)', iconColor: 'text-gray-300' },
-  ];
+  const statCards = useMemo(() => [
+    { label: 'Total Groups', value: metrics?.total_groups || 0, icon: Layers, accent: 'info' as const },
+    { label: 'Active Groups', value: metrics?.active_groups || 0, icon: Activity, accent: 'success' as const },
+    { label: 'Total Participants', value: metrics?.total_participants || 0, icon: Users, accent: 'violet' as const },
+    { label: 'Active Participants', value: metrics?.active_participants || 0, icon: Zap, accent: 'amber' as const },
+    { label: 'DP Enabled', value: metrics?.dp_enabled_groups || 0, icon: Shield, accent: 'warning' as const },
+    { label: 'Total Rounds', value: metrics?.total_aggregations || 0, icon: TrendingUp, accent: 'muted' as const },
+  ], [metrics]);
 
-  const performanceCards = [
-    { label: 'Latest Accuracy', value: formatPercent(metrics?.latest_accuracy), sub: metrics?.latest_group_id ? `Group: ${metrics.latest_group_id}` : 'No data', color: 'emerald' },
-    { label: 'Latest Loss', value: formatLoss(metrics?.latest_loss), sub: `Round v${metrics?.latest_version || 0}`, color: 'blue' },
-  ];
+  if (loading) return <LoadingSpinner message="Loading dashboard..." />;
+  if (error) return <ErrorState message={error} onRetry={refetch} />;
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="animate-fade-in">
         <h1 className="text-2xl font-bold text-white">{getGreeting()}, {user?.name || 'Admin'}</h1>
         <p className="text-slate-400 text-sm mt-1">Here's your federated learning overview</p>
       </div>
 
-      {/* Stat Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {statCards.map((stat, idx) => (
-          <div key={idx} className={`stat-card ${stat.accent} p-5 animate-fade-in`} style={{ animationDelay: `${idx * 0.05}s`, opacity: 0 }}>
-            <div className="flex items-center justify-between mb-4">
-              <span className="text-slate-400 text-xs font-medium uppercase tracking-wider">{stat.label}</span>
-              <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: stat.iconBg }}>
-                <stat.icon size={17} className={stat.iconColor} />
-              </div>
-            </div>
-            <p className="text-3xl font-bold text-white tracking-tight">{stat.value}</p>
-          </div>
+          <StatCard
+            key={stat.label}
+            label={stat.label}
+            value={stat.value}
+            icon={stat.icon}
+            accent={stat.accent}
+            delay={idx * 0.05}
+          />
         ))}
       </div>
 
-      {/* Performance Row */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {performanceCards.map((card, idx) => (
-          <div key={idx} className="stat-card accent-emerald p-5 animate-fade-in" style={{ animationDelay: `${0.35 + idx * 0.05}s`, opacity: 0 }}>
-            <span className="text-slate-400 text-xs font-medium uppercase tracking-wider">{card.label}</span>
-            <p className="text-3xl font-bold text-white tracking-tight mt-3">{card.value}</p>
-            <p className="text-slate-500 text-xs mt-2">{card.sub}</p>
-          </div>
-        ))}
+        <div className="stat-card accent-success p-5 animate-fade-in" style={{ animationDelay: '0.35s', opacity: 0 }}>
+          <span className="text-slate-400 text-xs font-medium uppercase tracking-wider">Latest Accuracy</span>
+          <p className="text-3xl font-bold text-white tracking-tight mt-3">{formatPercent(metrics?.latest_accuracy)}</p>
+          <p className="text-slate-500 text-xs mt-2">{metrics?.latest_group_id ? `Group: ${metrics.latest_group_id}` : 'No data'}</p>
+        </div>
+        <div className="stat-card accent-info p-5 animate-fade-in" style={{ animationDelay: '0.4s', opacity: 0 }}>
+          <span className="text-slate-400 text-xs font-medium uppercase tracking-wider">Latest Loss</span>
+          <p className="text-3xl font-bold text-white tracking-tight mt-3">{formatLoss(metrics?.latest_loss)}</p>
+          <p className="text-slate-500 text-xs mt-2">Round v{metrics?.latest_version || 0}</p>
+        </div>
       </div>
 
-      {/* Quick Actions */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-fade-in" style={{ animationDelay: '0.45s', opacity: 0 }}>
         <Link href="/dashboard/groups" className="glass-card p-5 group cursor-pointer">
           <div className="flex items-center justify-between">
@@ -119,7 +86,6 @@ export default function DashboardPage() {
             <ArrowUpRight size={16} className="text-slate-600 group-hover:text-white transition-colors" />
           </div>
         </Link>
-
         <Link href="/dashboard/create" className="glass-card p-5 group cursor-pointer">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">

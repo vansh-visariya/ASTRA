@@ -1,6 +1,7 @@
 import './globals.css'
 import type { Metadata } from 'next'
 import { AuthProvider } from '@/components/AuthContext'
+import { WebSocketProvider } from '@/components/WebSocketProvider'
 
 export const metadata: Metadata = {
   title: 'ASTRA — Federated AI Platform',
@@ -16,7 +17,9 @@ export default function RootLayout({
     <html lang="en">
       <body className="min-h-screen">
         <AuthProvider>
-          {children}
+          <WebSocketProvider>
+            {children}
+          </WebSocketProvider>
         </AuthProvider>
       </body>
     </html>

@@ -34,11 +34,15 @@ class GroupManager:
         self.logger = logging.getLogger(__name__)
         self.connection_manager = connection_manager
         self.training_tasks: dict[str, asyncio.Task] = {}
+        self.server_model: Any = None
 
-        # Event logs
         self.event_logs: list[dict] = []
 
         self._load_groups_from_db()
+
+        self._load_logs_from_db()
+
+        self.logger.info("GroupManager init: %s groups loaded from DB", len(self.groups))
 
     # ------------------------------------------------------------------
     # Broadcasting
@@ -200,6 +204,18 @@ class GroupManager:
                 )
                 self.groups["default"] = group
 
+    def _load_logs_from_db(self) -> None:
+        """Load persisted event logs from database on startup."""
+        try:
+            db = get_db()
+            # Load last 500 logs (same limit as in-memory ring buffer)
+            db_logs = db.get_logs(limit=500)
+            with self.lock:
+                self.event_logs = db_logs
+            self.logger.info(f"Loaded {len(self.event_logs)} event logs from database")
+        except Exception as e:
+            self.logger.warning(f"Could not load event logs from DB: {e}")
+
     # ------------------------------------------------------------------
     # Event logging
     # ------------------------------------------------------------------
@@ -211,25 +227,47 @@ class GroupManager:
         group_id: str | None = None,
         details: dict | None = None,
     ):
-        """Add an event to the log."""
+        """Add an event to the log (in-memory + persisted to DB)."""
+        timestamp = time.time()
+        entry = {
+            "timestamp": timestamp,
+            "type": event_type,
+            "message": message,
+            "group_id": group_id,
+            "details": details or {},
+        }
         with self.lock:
-            self.event_logs.append(
-                {
-                    "timestamp": time.time(),
-                    "type": event_type,
-                    "message": message,
-                    "group_id": group_id,
-                    "details": details or {},
-                }
-            )
-            # Keep last 500 events
+            self.event_logs.append(entry)
+            # Keep last 500 events in memory
             if len(self.event_logs) > 500:
                 self.event_logs = self.event_logs[-500:]
+
+        # Persist to database
+        try:
+            db = get_db()
+            db.log_event(
+                event_type=event_type,
+                message=message,
+                timestamp=timestamp,
+                group_id=group_id,
+                details=details,
+            )
+        except Exception as e:
+            self.logger.warning(f"Could not persist event log to DB: {e}")
 
     def get_logs(
         self, limit: int = 100, event_type: str | None = None, group_id: str | None = None
     ) -> list[dict]:
-        """Get recent logs."""
+        """Get recent logs from DB (primary) with in-memory fallback."""
+        try:
+            db = get_db()
+            logs = db.get_logs(limit=limit, event_type=event_type, group_id=group_id)
+            if logs:
+                return logs
+        except Exception as e:
+            self.logger.warning(f"Could not read event logs from DB: {e}")
+
+        # Fallback to in-memory list
         with self.lock:
             logs = list(self.event_logs)
             if event_type:
@@ -247,14 +285,19 @@ class GroupManager:
         if local_updates is None:
             return np.array([], dtype=np.float32)
         if isinstance(local_updates, bytes):
-            return np.frombuffer(local_updates, dtype=np.float32)
+            result = np.frombuffer(local_updates, dtype=np.float32)
+            self.logger.debug("Decoded bytes update: %s elements", len(result))
+            return result
         if isinstance(local_updates, str):
             try:
                 import base64
 
                 decoded = base64.b64decode(local_updates)
-                return np.frombuffer(decoded, dtype=np.float32)
-            except Exception:
+                result = np.frombuffer(decoded, dtype=np.float32)
+                self.logger.debug("Decoded base64 update: %s elements", len(result))
+                return result
+            except Exception as e:
+                self.logger.error("Failed to decode base64 update: %s", e, exc_info=True)
                 return np.array([], dtype=np.float32)
         if isinstance(local_updates, np.ndarray):
             return local_updates.astype(np.float32)
@@ -262,11 +305,8 @@ class GroupManager:
 
     def normalize_update(self, update: dict) -> dict:
         """Ensure updates have fields expected by aggregators."""
-        logger = logging.getLogger(__name__)
-        logger.debug(f"NORMALIZE: Input meta={update.get('meta', {}).get('train_accuracy', 0)}")
         if "delta" not in update:
             update["delta"] = self._decode_local_updates(update.get("local_updates"))
-        # Validate: reject NaN/Inf updates that would poison the global model
         delta = update.get("delta")
         if (
             delta is not None
@@ -274,12 +314,12 @@ class GroupManager:
             and len(delta) > 0
             and (np.any(np.isnan(delta)) or np.any(np.isinf(delta)))
         ):
-            logger.warning("Rejecting update with NaN/Inf values")
+            client_id = update.get("client_id", "unknown")
+            self.logger.warning("Client %s: rejecting NaN/Inf update", client_id)
             update["delta"] = np.zeros_like(delta)
         update.setdefault("dataset_size", update.get("local_dataset_size", 1))
         update.setdefault("staleness_weight", 1.0)
         update.setdefault("trust", 1.0)
-        logger.debug(f"NORMALIZE: Output meta={update.get('meta', {}).get('train_accuracy', 0)}")
         return update
 
     # ------------------------------------------------------------------
@@ -509,29 +549,49 @@ class GroupManager:
         """Aggregate updates in a group's buffer."""
         with self.lock:
             if group_id not in self.groups:
+                self.logger.warning("aggregate_group: unknown group %s", group_id)
                 return None
 
             group = self.groups[group_id]
 
             if len(group.pending_updates) == 0:
+                self.logger.debug("aggregate_group: %s has no pending updates", group_id)
                 return None
 
-            # Get all updates
+            self.logger.info(
+                "aggregate_group: %s aggregating %s updates (round %s)",
+                group_id,
+                len(group.pending_updates),
+                group.completed_rounds + 1,
+            )
+
             updates = [self.normalize_update(u["update"]) for u in group.pending_updates]
             client_ids = [u["client_id"] for u in group.pending_updates]
 
-            # Calculate global metrics from client updates
             accuracies = [u.get("meta", {}).get("train_accuracy", 0) for u in updates]
             losses = [u.get("meta", {}).get("train_loss", 0) for u in updates]
 
             global_accuracy = sum(accuracies) / len(accuracies) if accuracies else 0
             global_loss = sum(losses) / len(losses) if losses else 0
 
-            # Aggregate model weights
             if group.aggregator:
                 aggregated = group.aggregator.aggregate(updates)
             else:
                 aggregated = np.mean([u.get("delta", np.array([])) for u in updates], axis=0)
+
+            self.logger.info(
+                "aggregate_group: %s result — acc=%.4f, loss=%.4f, clients=%s",
+                group_id,
+                global_accuracy,
+                global_loss,
+                client_ids,
+            )
+
+            # Apply aggregated delta to the live server model (LoRA params only in PEFT mode)
+            if self.server_model is not None and len(aggregated) > 0:
+                from astra.core.models.model_zoo import apply_peft_delta
+
+                apply_peft_delta(self.server_model, aggregated)
 
             # Update version
             group.model_version += 1
@@ -650,7 +710,7 @@ class GroupManager:
         loss: float,
         num_clients: int,
     ):
-        """Save global model weights to disk and record in DB."""
+        """Save global model weights and adapter checkpoints to disk."""
         try:
             import torch
 
@@ -671,7 +731,6 @@ class GroupManager:
                 file_path,
             )
 
-            # Also save as latest
             latest_path = os.path.join(save_dir, "model_latest.pt")
             torch.save(
                 {
@@ -686,7 +745,28 @@ class GroupManager:
                 latest_path,
             )
 
-            # Record in database
+            if self.server_model is not None and self.config.get("peft", {}).get("enabled", False):
+                from astra.core.models.hf_models import (
+                    get_base_model_state_dict,
+                    get_lora_state_dict,
+                )
+
+                base_path = os.path.join(save_dir, "base.pt")
+                if not os.path.exists(base_path):
+                    base_state = get_base_model_state_dict(self.server_model)
+                    torch.save({"base_state_dict": base_state}, base_path)
+                    self.logger.info(f"Saved base model → {base_path}")
+
+                adapter_state = get_lora_state_dict(self.server_model)
+                adapter_path = os.path.join(save_dir, f"adapter_v{model_version}.pt")
+                torch.save({"lora_state_dict": adapter_state}, adapter_path)
+
+                adapter_latest = os.path.join(save_dir, "adapter_latest.pt")
+                torch.save({"lora_state_dict": adapter_state}, adapter_latest)
+                self.logger.info(
+                    f"Saved adapter v{model_version} ({len(adapter_state)} params)"
+                )
+
             db = get_db()
             db.save_model_record(
                 group_id=group_id,

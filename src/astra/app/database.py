@@ -13,6 +13,7 @@ import os
 import shutil
 import sqlite3
 import threading
+import time
 from contextlib import contextmanager
 from datetime import datetime
 from typing import Any
@@ -36,6 +37,7 @@ class AstraDB:
         self._init_schema()
         self._migrate_legacy_dbs()
         self._ensure_default_admin()
+        logger.info("AstraDB init: path=%s WAL=on", os.path.abspath(db_path))
 
     @contextmanager
     def connection(self):
@@ -243,6 +245,29 @@ class AstraDB:
                 ON trained_models(group_id, model_type, version)
             """)
 
+            # --- Event Logs (persistent server event log) ---
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS event_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp REAL NOT NULL,
+                    event_type TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    group_id TEXT,
+                    details_json TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            c.execute("""
+                CREATE INDEX IF NOT EXISTS idx_event_logs_group
+                ON event_logs(group_id, timestamp)
+            """)
+
+            c.execute("""
+                CREATE INDEX IF NOT EXISTS idx_event_logs_type
+                ON event_logs(event_type, timestamp)
+            """)
+
             conn.commit()
             logger.info("[DB] Schema initialized in %s", self.db_path)
 
@@ -416,9 +441,81 @@ class AstraDB:
                 for row in cursor.fetchall()
             ]
 
-    # ========================================================================
+    # ====================================================================================
+    # Event Logs
+    # ====================================================================================
+
+    def log_event(
+        self,
+        event_type: str,
+        message: str,
+        timestamp: float | None = None,
+        group_id: str | None = None,
+        details: dict | None = None,
+    ) -> None:
+        with self.connection() as conn:
+            conn.execute(
+                "INSERT INTO event_logs"
+                " (timestamp, event_type, message, group_id, details_json)"
+                " VALUES (?, ?, ?, ?, ?)",
+                (
+                    timestamp or time.time(),
+                    event_type,
+                    message,
+                    group_id,
+                    json.dumps(details) if details else None,
+                ),
+            )
+            conn.commit()
+
+    def get_logs(
+        self, limit: int = 100, event_type: str | None = None, group_id: str | None = None
+    ) -> list[dict]:
+        query = (
+            "SELECT id, timestamp, event_type, message, group_id, details_json, created_at "
+            "FROM event_logs WHERE 1=1"
+        )
+        params: list[Any] = []
+
+        if event_type:
+            query += " AND event_type = ?"
+            params.append(event_type)
+        if group_id:
+            query += " AND group_id = ?"
+            params.append(group_id)
+
+        query += " ORDER BY timestamp DESC LIMIT ?"
+        params.append(limit)
+
+        with self.connection() as conn:
+            cursor = conn.execute(query, params)
+            rows = cursor.fetchall()
+
+        # Return most recent first (DB returns DESC, reverse to get ASC for UI)
+        result = []
+        for row in rows:
+            result.append({
+                "timestamp": row["timestamp"],
+                "type": row["event_type"],
+                "message": row["message"],
+                "group_id": row["group_id"],
+                "details": json.loads(row["details_json"]) if row["details_json"] else {},
+            })
+        return result[::-1]
+
+    def cleanup_old_logs(self, days: int = 30) -> int:
+        """Delete event logs older than specified days. Returns count deleted."""
+        with self.connection() as conn:
+            cursor = conn.execute(
+                "DELETE FROM event_logs WHERE created_at < datetime('now', '-' || ? || ' days')",
+                (days,),
+            )
+            conn.commit()
+            return cursor.rowcount
+
+    # ====================================================================================
     # FL Client methods (replaces ExperimentDB client methods)
-    # ========================================================================
+    # ====================================================================================
 
     def register_fl_client(
         self,

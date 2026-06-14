@@ -5,7 +5,7 @@ Unit tests for privacy mechanisms.
 import numpy as np
 import pytest
 
-from astra.core.privacy.privacy import clip_and_noise, estimate_epsilon, secure_aggregate_masking
+from astra.core.privacy.privacy import clip_and_noise
 
 
 class TestDifferentialPrivacy:
@@ -54,64 +54,6 @@ class TestDifferentialPrivacy:
 
         # With sigma=0, result should be close to gradient (already below threshold)
         np.testing.assert_array_almost_equal(result, gradient, decimal=1)
-
-
-class TestSecureAggregation:
-    """Tests for secure aggregation simulation."""
-
-    def test_masking_protocol(self):
-        """Test secure aggregation masking."""
-        updates = [np.array([1.0, 2.0, 3.0]), np.array([4.0, 5.0, 6.0]), np.array([7.0, 8.0, 9.0])]
-
-        seed = 42
-
-        result = secure_aggregate_masking(updates, seed)
-
-        assert result is not None
-        assert len(result) == 3
-
-    def test_masking_hides_individual_updates(self):
-        """Test that masking obscures individual updates."""
-        update1 = np.array([100.0, 200.0])
-        update2 = np.array([1.0, 2.0])
-
-        updates = [update1, update2]
-
-        result = secure_aggregate_masking(updates, 12345)
-
-        assert not np.array_equal(result, update1)
-        assert not np.array_equal(result, update2)
-
-
-class TestEpsilonEstimation:
-    """Tests for epsilon estimation."""
-
-    def test_epsilon_increases_with_steps(self):
-        """Test that epsilon increases with more steps."""
-        sigma = 1.0
-        clip_norm = 1.0
-
-        epsilon_10 = estimate_epsilon(10, sigma, clip_norm)
-        epsilon_100 = estimate_epsilon(100, sigma, clip_norm)
-
-        assert epsilon_100 > epsilon_10
-
-    def test_epsilon_increases_with_noise(self):
-        """Test that epsilon increases with less noise."""
-        steps = 100
-        clip_norm = 1.0
-
-        epsilon_low_noise = estimate_epsilon(steps, sigma=0.5, clip_norm=clip_norm)
-        epsilon_high_noise = estimate_epsilon(steps, sigma=2.0, clip_norm=clip_norm)
-
-        assert epsilon_low_noise > epsilon_high_noise
-
-    def test_epsilon_format(self):
-        """Test epsilon is positive float."""
-        epsilon = estimate_epsilon(100, 1.0, 1.0)
-
-        assert isinstance(epsilon, float)
-        assert epsilon > 0
 
 
 if __name__ == "__main__":

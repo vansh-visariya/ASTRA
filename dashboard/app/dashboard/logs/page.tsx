@@ -1,74 +1,44 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useAuth } from '@/components/AuthContext';
+import { useState } from 'react';
 import { Clock, RefreshCw } from 'lucide-react';
+import { useWS } from '@/components/WebSocketProvider';
+import { useLogs } from '@/hooks';
+import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
+import { ErrorState } from '@/components/ui/ErrorState';
+import { EmptyState } from '@/components/ui/EmptyState';
+import type { LogEntry } from '@/lib/api/types';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const EVENT_TYPES = ['training_started', 'aggregation', 'client_joined', 'client_rejected'];
 
-interface Log {
-  timestamp: number;
-  type: string;
-  message: string;
-  group_id: string | null;
-  details: Record<string, any>;
-}
+const TYPE_DOT_COLOR: Record<string, string> = {
+  training_started: 'var(--color-success)',
+  aggregation: 'var(--color-info)',
+  client_joined: 'var(--color-accent-violet)',
+  client_rejected: 'var(--color-error)',
+};
+
+const TYPE_LABEL_COLOR: Record<string, string> = {
+  training_started: 'var(--color-success)',
+  aggregation: 'var(--color-info)',
+  client_joined: '#d1d5db',
+  client_rejected: 'var(--color-error)',
+};
 
 export default function LogsPage() {
-  const { token } = useAuth();
-  const [logs, setLogs] = useState<Log[]>([]);
-  const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string | null>(null);
+  const { isConnected } = useWS();
+  const { data, loading, error, refetch } = useLogs(!isConnected, undefined, filter || undefined);
 
-  const fetchLogs = async () => {
-    try {
-      const url = filter
-        ? `${API_URL}/api/logs?event_type=${filter}`
-        : `${API_URL}/api/logs`;
-      const res = await fetch(url, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setLogs(data.logs || []);
-      }
-    } catch (e) {
-      console.error('Failed to fetch logs:', e);
-    }
-    setLoading(false);
+  const logs: LogEntry[] = (data as any)?.logs || [];
+
+  const formatTime = (timestamp: number | string) => {
+    const ts = typeof timestamp === 'string' ? Date.parse(timestamp) / 1000 : timestamp;
+    return new Date(ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   };
 
-  useEffect(() => {
-    fetchLogs();
-    const interval = setInterval(fetchLogs, 2000);
-    return () => clearInterval(interval);
-  }, [token, filter]);
-
-  const formatTime = (timestamp: number) => {
-    return new Date(timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  };
-
-  const getTypeColor = (type: string) => {
-    switch (type) {
-      case 'training_started': return 'text-emerald-400';
-      case 'aggregation': return 'text-blue-400';
-      case 'client_joined': return 'text-gray-300';
-      case 'client_rejected': return 'text-rose-400';
-      default: return 'text-slate-400';
-    }
-  };
-
-  const getTypeDot = (type: string) => {
-    switch (type) {
-      case 'training_started': return 'bg-emerald-500';
-      case 'aggregation': return 'bg-gray-400';
-      case 'client_joined': return 'bg-violet-500';
-      case 'client_rejected': return 'bg-rose-500';
-      default: return 'bg-slate-500';
-    }
-  };
-
-  const eventTypes = ['training_started', 'aggregation', 'client_joined', 'client_rejected'];
+  if (loading && !logs.length) return <LoadingSpinner message="Loading logs..." />;
+  if (error) return <ErrorState message={error} onRetry={refetch} />;
 
   return (
     <div className="space-y-6">
@@ -84,30 +54,18 @@ export default function LogsPage() {
             className="input-field !w-auto !py-2 text-sm"
           >
             <option value="">All Events</option>
-            {eventTypes.map(type => (
+            {EVENT_TYPES.map((type) => (
               <option key={type} value={type}>{type.replace(/_/g, ' ')}</option>
             ))}
           </select>
-          <button
-            onClick={fetchLogs}
-            className="p-2.5 rounded-xl text-slate-400 hover:text-white transition-all"
-            style={{ background: 'rgba(30, 41, 59, 0.5)', border: '1px solid rgba(51, 65, 85, 0.5)' }}
-          >
-            <RefreshCw size={16} />
+          <button onClick={refetch} className="btn-secondary !px-3 !py-2">
+            <RefreshCw size={14} />
           </button>
         </div>
       </div>
 
-      {loading ? (
-        <div className="flex items-center justify-center h-64">
-          <div className="w-8 h-8 border-2 border-brand-500 border-t-transparent rounded-full animate-spin" />
-        </div>
-      ) : logs.length === 0 ? (
-        <div className="glass-card p-12 text-center animate-fade-in">
-          <Clock size={40} className="mx-auto text-slate-700 mb-3" />
-          <h3 className="text-white font-semibold mb-1">No logs yet</h3>
-          <p className="text-slate-500 text-sm">Events will appear here when training starts</p>
-        </div>
+      {logs.length === 0 ? (
+        <EmptyState icon={Clock} title="No logs yet" message="Events will appear here when training starts" />
       ) : (
         <div className="glass-card overflow-hidden animate-fade-in">
           <div className="max-h-[650px] overflow-y-auto">
@@ -119,12 +77,18 @@ export default function LogsPage() {
               >
                 <div className="flex items-start gap-4">
                   <div className="text-slate-600 text-xs font-mono min-w-[72px] mt-0.5">
-                    {formatTime(log.timestamp)}
+                    {formatTime(log.timestamp as unknown as number)}
                   </div>
-                  <div className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${getTypeDot(log.type)}`} />
+                  <div
+                    className="w-2 h-2 rounded-full mt-1.5 shrink-0"
+                    style={{ background: TYPE_DOT_COLOR[log.type] || 'var(--color-muted)' }}
+                  />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-0.5">
-                      <span className={`text-[11px] font-semibold uppercase tracking-wider ${getTypeColor(log.type)}`}>
+                      <span
+                        className="text-[11px] font-semibold uppercase tracking-wider"
+                        style={{ color: TYPE_LABEL_COLOR[log.type] || 'var(--color-muted)' }}
+                      >
                         {log.type.replace(/_/g, ' ')}
                       </span>
                       {log.group_id && (
@@ -150,4 +114,3 @@ export default function LogsPage() {
     </div>
   );
 }
-

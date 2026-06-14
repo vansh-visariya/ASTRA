@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -8,8 +8,8 @@ import {
   Bell, ScrollText, ChevronRight
 } from 'lucide-react';
 import { useAuth } from '@/components/AuthContext';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+import { useUnreadCount } from '@/hooks/useNotifications';
+import { useWS } from '@/components/WebSocketProvider';
 
 const adminNav = [
   { href: '/dashboard', label: 'Overview', icon: LayoutDashboard },
@@ -22,31 +22,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const { user, token, logout, isLoading } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
-  const [unreadCount, setUnreadCount] = useState(0);
+  const { isConnected } = useWS();
+  const { data: unreadData } = useUnreadCount(!isConnected);
+
+  const unreadCount = unreadData?.count || 0;
 
   useEffect(() => {
     if (!isLoading && !token) {
       router.push('/login');
     }
   }, [token, isLoading, router]);
-
-  useEffect(() => {
-    if (!token) return;
-    const fetchUnread = async () => {
-      try {
-        const res = await fetch(`${API_URL}/api/notifications/unread-count`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setUnreadCount(data.count || 0);
-        }
-      } catch { }
-    };
-    fetchUnread();
-    const interval = setInterval(fetchUnread, 30000);
-    return () => clearInterval(interval);
-  }, [token]);
 
   if (isLoading) {
     return (
@@ -65,9 +50,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="min-h-screen flex" style={{ background: 'var(--bg-primary)' }}>
-      {/* Sidebar */}
       <aside className="w-[260px] glass-sidebar flex flex-col shrink-0">
-        {/* Logo */}
         <div className="p-5 pb-4">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: '#ffffff' }}>
@@ -80,7 +63,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </div>
         </div>
 
-        {/* Nav */}
         <nav className="flex-1 px-3 space-y-0.5">
           <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest px-4 mb-2">Navigation</p>
           {adminNav.map((item) => {
@@ -100,7 +82,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           })}
         </nav>
 
-        {/* User section */}
         <div className="p-4 mx-3 mb-3 rounded-xl" style={{ background: 'rgba(30, 41, 59, 0.4)' }}>
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-lg flex items-center justify-center text-xs font-bold text-gray-300"
@@ -122,21 +103,25 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </div>
       </aside>
 
-      {/* Main */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Header */}
         <header className="h-14 glass-header flex items-center justify-between px-6 shrink-0">
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2">
-              <div className="w-2 h-2 bg-white/40 rounded-full pulse-dot green" />
-              <span className="text-slate-500 text-xs font-medium">System Online</span>
+              <div
+                className="w-2 h-2 rounded-full pulse-dot green"
+                style={{ background: isConnected ? 'var(--color-success)' : 'var(--color-muted)' }}
+              />
+              <span className="text-slate-500 text-xs font-medium">
+                {isConnected ? 'Live' : 'Polling'}
+              </span>
             </div>
           </div>
           <div className="flex items-center gap-2">
             <button className="relative p-2 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg transition">
               <Bell size={17} />
               {unreadCount > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] flex items-center justify-center bg-white/10 text-white text-[10px] font-bold rounded-full px-1">
+                <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] flex items-center justify-center text-white text-[10px] font-bold rounded-full px-1"
+                  style={{ background: 'var(--color-error)' }}>
                   {unreadCount > 99 ? '99+' : unreadCount}
                 </span>
               )}
@@ -144,7 +129,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </div>
         </header>
 
-        {/* Content */}
         <main className="flex-1 p-6 overflow-auto">
           {children}
         </main>

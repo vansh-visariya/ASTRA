@@ -45,22 +45,35 @@ class FLServer:
 
     def _setup_server(self):
         """Initialize the FL server."""
-        from astra.core.models.model_zoo import create_model
+        is_peft = self.config.get("peft", {}).get("enabled", False)
 
-        # Create model
-        model = create_model(self.config)
+        if is_peft:
+            from astra.core.models.hf_models import (
+                load_hf_peft_model,
+            )
 
-        # Create aggregator
+            hf_config = self.config.get("model", {}).get("hf", {})
+            model_name = hf_config.get(
+                "hf_model_name", "openai/clip-vit-base-patch32"
+            )
+            peft_config = self.config.get("peft", {})
+            model, _ = load_hf_peft_model(model_name, peft_config, device="cpu")
+            model = model.to("cpu")
+        else:
+            from astra.core.models.model_zoo import create_model as _create_model
+
+            model = _create_model(self.config)
+
         aggregator = create_aggregator(self.config)
 
-        # Create data splitter (for validation)
         data_splitter = DataSplitter(self.config)
         _, val_loader = data_splitter.create_data_loaders()
 
-        # Create async server
         self.server = AsyncServer(
             model=model, aggregator=aggregator, config=self.config, val_loader=val_loader
         )
+
+        self.group_manager.server_model = self.server.model
 
         self.logger.info("FL Server initialized")
 

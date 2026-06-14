@@ -6,6 +6,7 @@ Provides CNN models for MNIST/CIFAR and utilities for model creation.
 
 from typing import Any
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F  # noqa: N812
@@ -126,24 +127,39 @@ def create_model(config: dict[str, Any]) -> nn.Module:
         raise ValueError(f"Unknown model type: {model_type}")
 
 
-def get_model_num_params(model: nn.Module) -> int:
-    """Get total number of parameters in model."""
-    return sum(p.numel() for p in model.parameters())
+def _is_lora_param(name: str) -> bool:
+    """Check if a parameter name belongs to a LoRA/adapter module."""
+    return "lora" in name.lower() or "adapter" in name.lower()
 
 
-def get_model_size_mb(model: nn.Module) -> float:
-    """Get model size in megabytes."""
-    param_size = sum(p.numel() * p.element_size() for p in model.parameters())
-    buffer_size = sum(b.numel() * b.element_size() for b in model.buffers())
+def flatten_peft_params(model: nn.Module) -> np.ndarray:
+    """Flatten only LoRA/adapter parameters to a flat numpy array.
 
-    return (param_size + buffer_size) / (1024 ** 2)
+    Parameters are processed in sorted name order for deterministic ordering
+    across all clients and the server.
+    """
+    import numpy as np
+
+    peft_params = sorted(
+        [(name, param) for name, param in model.named_parameters() if _is_lora_param(name)],
+        key=lambda x: x[0],
+    )
+    if not peft_params:
+        return np.array([], dtype=np.float32)
+    return np.concatenate(
+        [param.data.cpu().numpy().flatten().astype(np.float32) for _, param in peft_params]
+    )
 
 
-def flatten_model_params(model: nn.Module) -> torch.Tensor:
-    """Flatten all model parameters to a single tensor."""
-    return torch.cat([p.data.flatten() for p in model.parameters()])
-
-
-def load_model_weights(model: nn.Module, state_dict: dict[str, Any]) -> None:
-    """Load weights into model."""
-    model.load_state_dict(state_dict)
+def apply_peft_delta(model: nn.Module, flat_delta: np.ndarray) -> None:
+    """Apply a flat LoRA delta to the model's LoRA parameters in-place."""
+    offset = 0
+    for _name, param in sorted(
+        [(n, p) for n, p in model.named_parameters() if _is_lora_param(n)],
+        key=lambda x: x[0],
+    ):
+        size = param.numel()
+        if offset + size <= len(flat_delta):
+            delta_slice = flat_delta[offset : offset + size].reshape(param.shape)
+            param.data.add_(torch.from_numpy(delta_slice).float().to(param.device))
+        offset += size

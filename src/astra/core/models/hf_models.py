@@ -14,7 +14,6 @@ References:
 import logging
 from typing import Any
 
-import numpy as np
 import torch
 import torch.nn as nn
 from transformers import AutoModel, CLIPProcessor, CLIPVisionModel
@@ -116,58 +115,31 @@ def apply_peft(
         return model
 
 
-def extract_peft_params(model: nn.Module) -> dict[str, np.ndarray]:
-    """
-    Extract only PEFT (LoRA) parameters.
-
-    Args:
-        model: Model with PEFT.
-
-    Returns:
-        Dictionary of parameter name -> numpy array.
-    """
-    peft_params = {}
-
-    for name, param in model.named_parameters():
-        if 'lora' in name.lower() or 'adapter' in name.lower():
-            peft_params[name] = param.data.cpu().numpy().copy()
-
-    if not peft_params:
-        for param in model.parameters():
-            peft_params[f"param_{len(peft_params)}"] = param.data.cpu().numpy().copy()
-
-    return peft_params
+def get_lora_state_dict(model: nn.Module) -> dict[str, torch.Tensor]:
+    """Extract only LoRA adapter weights as a state_dict."""
+    return {
+        name: param.data.cpu().clone()
+        for name, param in model.named_parameters()
+        if 'lora' in name.lower() or 'adapter' in name.lower()
+    }
 
 
-def apply_peft_update(
-    model: nn.Module,
-    param_dict: dict[str, np.ndarray]
-) -> None:
-    """
-    Apply PEFT parameter update to model.
-
-    Args:
-        model: Model to update.
-        param_dict: Parameter dictionary.
-    """
-    state_dict = model.state_dict()
-
-    for name, values in param_dict.items():
-        if name in state_dict:
-            state_dict[name] = torch.from_numpy(values)
-
-    model.load_state_dict(state_dict)
+def load_lora_state_dict(model: nn.Module, lora_state: dict[str, torch.Tensor]) -> None:
+    """Load LoRA adapter weights into model (in-place)."""
+    for name, tensor in lora_state.items():
+        for target_name, param in model.named_parameters():
+            if target_name == name:
+                param.data.copy_(tensor.to(param.device))
+                break
 
 
-def get_peft_param_size(model: nn.Module) -> int:
-    """Get total size of PEFT parameters in bytes."""
-    total = 0
-
-    for name, param in model.named_parameters():
-        if 'lora' in name.lower() or 'adapter' in name.lower():
-            total += param.numel() * param.element_size()
-
-    return total
+def get_base_model_state_dict(model: nn.Module) -> dict[str, torch.Tensor]:
+    """Extract non-LoRA (backbone) weights as a state_dict."""
+    return {
+        name: param.data.cpu().clone()
+        for name, param in model.named_parameters()
+        if 'lora' not in name.lower() and 'adapter' not in name.lower()
+    }
 
 
 def freeze_backbone(model: nn.Module) -> None:
@@ -177,18 +149,3 @@ def freeze_backbone(model: nn.Module) -> None:
             param.requires_grad = False
         else:
             param.requires_grad = True
-
-
-def get_trainable_params(model: nn.Module) -> int:
-    """Get number of trainable parameters."""
-    return sum(p.numel() for p in model.parameters() if p.requires_grad)
-
-
-def compute_communication_bytes(model: nn.Module) -> int:
-    """
-    Compute communication cost for sending PEFT parameters.
-
-    Returns:
-        Number of bytes to transmit.
-    """
-    return get_peft_param_size(model)

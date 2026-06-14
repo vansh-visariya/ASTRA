@@ -238,10 +238,44 @@ class FederatedClient:
             await self.ws.send(json.dumps({"type": "pong"}))
 
     async def _download_model(self, message: dict[str, Any]):
-        """Download and apply global model update."""
-        self.logger.info(f"Downloading global model version {message.get('version')}")
-        # In full implementation, would download actual model weights
-        self.current_global_version = message.get("version", 0)
+        """Download and apply global model update (adapter weights in PEFT mode)."""
+        version = message.get("version", 0)
+        self.logger.info(f"Downloading global model version {version}")
+        self.current_global_version = version
+
+        is_peft = self.config.get("peft", {}).get("enabled", False)
+        if not (is_peft and self.local_client):
+            return
+
+        try:
+            import io
+
+            import aiohttp
+
+            group_id = getattr(self, "group_id", "group_a")
+            url = f"{self.server_url}/api/models/{group_id}/adapter"
+            headers = {}
+            if self.token:
+                headers["Authorization"] = f"Bearer {self.token}"
+            async with aiohttp.ClientSession(headers=headers) as session:  # noqa: SIM117
+                async with session.get(url) as resp:
+                    if resp.status == 200:
+                        raw = await resp.read()
+                        checkpoint = torch.load(
+                            io.BytesIO(raw), map_location="cpu", weights_only=False
+                        )
+                        adapter = checkpoint.get("lora_state_dict", checkpoint)
+                        if adapter:
+                            self.local_client.load_adapter_weights(adapter)
+                            self.logger.info(
+                                f"Loaded adapter weights (v{version}, {len(adapter)} params)"
+                            )
+                    else:
+                        self.logger.warning(
+                            f"Failed to download adapter: HTTP {resp.status}"
+                        )
+        except Exception as e:
+            self.logger.warning(f"Could not download adapter weights: {e}")
 
     async def _run_training(self):
         """Run local training and send update to server."""
@@ -321,25 +355,7 @@ class FederatedClient:
 
         metrics_delivered = await _ensure_metrics_delivered()
 
-        # Encode update for transmission
-        encoded_full = base64.b64encode(update["local_updates"]).decode("utf-8")
-        # HF model deltas can be extremely large. If we try to send them over WebSocket,
-        # the server will typically close the connection and nothing gets persisted.
-        # In that case, send a meta-only update (empty local_updates) so the dashboard
-        # still reflects loss/accuracy.
-        max_update_chars = int(
-            self.config.get("communication", {}).get("max_ws_update_chars", 8_000_000)
-        )
-        encoded = encoded_full
-        if len(encoded_full) > max_update_chars:
-            self.logger.warning(
-                "Update payload too large for WebSocket"
-                " (%s chars > %s). Sending meta-only update"
-                " (empty local_updates).",
-                len(encoded_full),
-                max_update_chars,
-            )
-            encoded = ""
+        encoded = base64.b64encode(update["local_updates"]).decode("utf-8")
 
         # Send update to server
         self.logger.info(
@@ -406,7 +422,7 @@ class FederatedClient:
             headers = {}
             if self.token:
                 headers["Authorization"] = f"Bearer {self.token}"
-            async with aiohttp.ClientSession(headers=headers) as session:
+            async with aiohttp.ClientSession(headers=headers) as session:  # noqa: SIM117
                 async with session.get(url) as resp:
                     if resp.status != 200:
                         self.logger.warning("Failed to fetch group config: %s", resp.status)
@@ -489,37 +505,95 @@ class FederatedClient:
             self.config.setdefault("dataset", {})
             self.config["dataset"].setdefault("image_size", 224)
             self.config["dataset"].setdefault("channels", 3)
-            self.config["dataset"].setdefault("num_classes", 10)  # Ensure num_classes is set
+            self.config["dataset"].setdefault("num_classes", 10)
             self.config["dataset"].setdefault("normalize_mean", (0.48145466, 0.4578275, 0.40821073))
             self.config["dataset"].setdefault("normalize_std", (0.26862954, 0.26130258, 0.27577711))
 
+        if model_info.get("is_peft"):
+            self.config.setdefault("peft", {})
+            self.config["peft"]["enabled"] = True
+            self.config["peft"]["method"] = model_info.get("peft_method", "lora")
+            peft_cfg = model_config
+            self.config["peft"]["lora_rank"] = peft_cfg.get("lora_rank", 8)
+            self.config["peft"]["lora_alpha"] = peft_cfg.get("lora_alpha", 16)
+            self.config["peft"]["target_modules"] = peft_cfg.get(
+                "target_modules", ["q_proj", "v_proj"]
+            )
+
+    async def _ensure_base_model(self, model_info: dict[str, Any] | None):
+        """Download and cache the base model once (non-LoRA backbone)."""
+        if not model_info or not model_info.get("is_peft"):
+            return
+        group_id = getattr(self, "group_id", "group_a")
+        cache_dir = os.path.join("models", "client", self.client_id)
+        os.makedirs(cache_dir, exist_ok=True)
+        base_path = os.path.join(cache_dir, "base_model.pt")
+
+        if os.path.exists(base_path):
+            self.logger.info(f"Base model already cached at {base_path}")
+            return
+
+        try:
+            import aiohttp
+
+            url = f"{self.server_url}/api/models/{group_id}/base"
+            headers = {}
+            if self.token:
+                headers["Authorization"] = f"Bearer {self.token}"
+            self.logger.info(f"Downloading base model from {url} ...")
+            async with aiohttp.ClientSession(headers=headers) as session:  # noqa: SIM117
+                async with session.get(url) as resp:
+                    if resp.status == 200:
+                        raw = await resp.read()
+                        with open(base_path, "wb") as f:
+                            f.write(raw)
+                        self.logger.info(
+                            f"Base model saved to {base_path} ({len(raw)} bytes)"
+                        )
+                    else:
+                        self.logger.warning(
+                            f"Failed to download base model: HTTP {resp.status}"
+                        )
+        except Exception as e:
+            self.logger.warning(f"Could not download base model: {e}")
+
     def _initialize_local_client(self):
         """Initialize local FL client."""
-        # Setup data
         data_splitter = DataSplitter(self.config)
         train_data = data_splitter.get_client_data(
             hash(self.client_id) % self.config.get("client", {}).get("num_clients", 10)
         )
 
-        # Create model
         def model_factory():
             model_info = self.group_model_info or {}
             source = model_info.get("source")
             if source == "huggingface":
-                from astra.core.models.hf_models import load_hf_peft_model
+                from astra.core.models.hf_models import (
+                    freeze_backbone,
+                    load_hf_peft_model,
+                )
 
                 model_name = model_info.get("model_path") or model_info.get("architecture")
                 model_cfg = model_info.get("config") or {}
+
+                use_peft = self.config.get("peft", {}).get("enabled", False)
+                if use_peft and "enabled" not in model_cfg:
+                    model_cfg = {**model_cfg, **self.config.get("peft", {})}
+
                 model, _ = load_hf_peft_model(model_name, model_cfg, device="cpu")
                 model_type = (model_info.get("model_type") or "").lower()
                 if model_type in ("vision", "multimodal"):
                     num_classes = self.config.get("dataset", {}).get("num_classes", 10)
-                    return HFVisionClassifier(model, num_classes=num_classes)
+                    wrapped = HFVisionClassifier(model, num_classes=num_classes)
+                    if use_peft:
+                        freeze_backbone(wrapped.base_model)
+                    return wrapped
+                if use_peft:
+                    freeze_backbone(model)
                 return model
 
             return create_model(self.config)
 
-        # Create client
         self.local_client = LocalClient(
             client_id=self.client_id,
             train_data=train_data,
@@ -534,8 +608,6 @@ class FederatedClient:
         if not self.local_client or not self.local_client.model:
             return
         try:
-            import torch
-
             group_id = getattr(self, "group_id", "default")
             save_dir = os.path.join("models", "client", self.client_id)
             os.makedirs(save_dir, exist_ok=True)
@@ -552,7 +624,6 @@ class FederatedClient:
                 file_path,
             )
 
-            # Also save as latest
             latest_path = os.path.join(save_dir, "model_latest.pt")
             torch.save(
                 {
@@ -565,13 +636,20 @@ class FederatedClient:
                 latest_path,
             )
 
+            if self.local_client.is_peft:
+                adapter_path = os.path.join(
+                    save_dir, f"adapter_v{self.current_global_version}.pt"
+                )
+                adapter_state = self.local_client.get_adapter_state()
+                torch.save({"lora_state_dict": adapter_state}, adapter_path)
+                self.logger.info(f"Adapter saved → {adapter_path}")
+
             self.logger.info(f"Local model saved → {file_path}")
         except Exception as e:
             self.logger.warning(f"Could not save local model: {e}")
 
     async def run(self):
-        """Main client: connect → train once → send update → exit."""
-        # Connect to server
+        """Main client: connect → sync config → download base → train → exit."""
         connected = await self.connect()
         if not connected:
             self.logger.error("Failed to connect to server")
@@ -579,7 +657,9 @@ class FederatedClient:
 
         await self._sync_group_config()
 
-        # Train once and send update to server
+        if self.group_model_info:
+            await self._ensure_base_model(self.group_model_info)
+
         self.logger.info("Starting single training run...")
         await self._run_training()
 

@@ -19,6 +19,12 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, Subset
 
 from astra.core.compression import topk_sparsify
+from astra.core.models.hf_models import (  # noqa: F401
+    freeze_backbone,
+    get_lora_state_dict,
+    load_lora_state_dict,
+)
+from astra.core.models.model_zoo import flatten_peft_params
 from astra.core.privacy.malicious_simulator import MaliciousSimulator
 from astra.core.privacy.privacy import clip_and_noise
 
@@ -37,19 +43,31 @@ class FLClient:
         self.train_data = train_data
         self.model_factory = model_factory
         self.config = config
+        self.logger = logging.getLogger(__name__)
 
         self.model = model_factory()
 
-        # Use GPU if available
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = self.model.to(self.device)
+
+        self.is_peft = config.get("peft", {}).get("enabled", False)
+        if self.is_peft:
+            freeze_backbone(self.model)
+            self.logger.debug("Client %s: backbone frozen (PEFT mode)", self.client_id)
 
         self.client_version = 0
 
         self.malicious_simulator = MaliciousSimulator(config)
         self.is_malicious = self._check_if_malicious()
 
-        self.logger = logging.getLogger(__name__)
+        self.logger.info(
+            "FLClient %s init: device=%s, peft=%s, malicious=%s, params=%s",
+            self.client_id,
+            self.device,
+            self.is_peft,
+            self.is_malicious,
+            sum(p.numel() for p in self.model.parameters() if p.requires_grad),
+        )
 
         self._init_optimizer()
         self._init_data_loader()
@@ -65,7 +83,7 @@ class FLClient:
         return client_hash % threshold == 0
 
     def _init_optimizer(self):
-        """Initialize client optimizer."""
+        """Initialize client optimizer (only trainable params)."""
         self.optimizer = optim.SGD(
             self.model.parameters(),
             lr=self.config["client"]["lr"],
@@ -89,6 +107,9 @@ class FLClient:
         """
         Run local training on client data.
 
+        In PEFT mode, only LoRA adapter parameters are trained and
+        transmitted. In non-PEFT mode, full model weights are used.
+
         Returns:
             Dictionary containing client update for server.
         """
@@ -107,7 +128,6 @@ class FLClient:
             epoch_correct = 0
             epoch_samples = 0
             for _batch_idx, (data, target) in enumerate(self.train_loader):
-                # Move to GPU
                 data, target = data.to(self.device), target.to(self.device)
 
                 self.optimizer.zero_grad()
@@ -138,26 +158,56 @@ class FLClient:
                 }
             )
             self.logger.info(
-                f"Client {self.client_id} epoch {epoch + 1}/{local_epochs}: "
-                f"loss={epoch_loss_avg:.4f}, acc={epoch_accuracy:.4f}"
+                "Client %s epoch %s/%s: loss=%.4f, acc=%.4f",
+                self.client_id,
+                epoch + 1,
+                local_epochs,
+                epoch_loss_avg,
+                epoch_accuracy,
             )
 
         final_weights = self._get_weights()
         weight_delta = self._compute_weight_delta(initial_weights, final_weights)
 
+        self.logger.debug(
+            "Client %s delta: shape=%s, norm=%.4f, min=%.4f, max=%.4f",
+            self.client_id,
+            weight_delta.shape,
+            float(np.linalg.norm(weight_delta)),
+            float(np.min(weight_delta)),
+            float(np.max(weight_delta)),
+        )
+
         if self.is_malicious:
             weight_delta = self.malicious_simulator.inject_attack(weight_delta, self.client_id)
+            self.logger.warning("Client %s: malicious attack injected", self.client_id)
 
         if self.config["privacy"]["dp_enabled"] and self.config["privacy"]["dp_mode"] == "client":
             weight_delta = clip_and_noise(
                 weight_delta, self.config["privacy"]["clip_norm"], self.config["privacy"]["sigma"]
             )
+            self.logger.debug("Client %s: DP applied (client-side)", self.client_id)
 
         if self.config["communication"]["compression"] == "topk":
             k_ratio = self.config["communication"].get("topk_ratio", 0.1)
-            weight_delta, _ = topk_sparsify(weight_delta, k_ratio)
+            weight_delta, compress_meta = topk_sparsify(weight_delta, k_ratio)
+            self.logger.debug(
+                "Client %s: top-k compression (ratio=%.2f, %s->%s elements)",
+                self.client_id,
+                k_ratio,
+                compress_meta.get("original_size"),
+                compress_meta.get("compressed_size"),
+            )
 
         self.client_version += 1
+        self.logger.info(
+            "Client %s: update v%s ready — %.1f KB, loss=%.4f, acc=%.4f",
+            self.client_id,
+            self.client_version,
+            weight_delta.nbytes / 1024,
+            total_loss / max(total_samples, 1),
+            total_correct / max(total_samples, 1) if total_samples > 0 else 0.0,
+        )
 
         train_loss = total_loss / total_samples if total_samples > 0 else 0.0
         train_accuracy = total_correct / total_samples if total_samples > 0 else 0.0
@@ -180,11 +230,27 @@ class FLClient:
         return update
 
     def _get_weights(self) -> np.ndarray:
-        """Get model weights as flattened numpy array."""
+        """Get model weights as flattened numpy array.
+
+        In PEFT mode, only LoRA/adapter params are returned.
+        Falls back to all params if no PEFT params are found.
+        """
+        if self.is_peft:
+            peft_flat = flatten_peft_params(self.model)
+            if len(peft_flat) > 0:
+                return peft_flat
         weights = []
         for param in self.model.parameters():
             weights.append(param.data.cpu().numpy().flatten())
         return np.concatenate(weights)
+
+    def get_adapter_state(self) -> dict[str, torch.Tensor]:
+        """Get current LoRA adapter weights as named tensors (PEFT mode only)."""
+        return get_lora_state_dict(self.model)
+
+    def load_adapter_weights(self, adapter_state: dict[str, torch.Tensor]) -> None:
+        """Load LoRA adapter weights from server (PEFT mode only)."""
+        load_lora_state_dict(self.model, adapter_state)
 
     def _compute_weight_delta(self, initial: np.ndarray, final: np.ndarray) -> np.ndarray:
         """Compute weight delta (final - initial)."""
@@ -198,6 +264,8 @@ class FLClient:
     def reset_model(self) -> None:
         """Reset model to initial state."""
         self.model = self.model_factory()
+        if self.is_peft:
+            freeze_backbone(self.model)
         self._init_optimizer()
 
     def get_client_stats(self) -> dict[str, Any]:

@@ -101,17 +101,6 @@ def compute_trust_weights(trust_scores: list[float], trust_power: float) -> np.n
     return weights
 
 
-def compute_staleness_weights(staleness_values: list[float], async_lambda: float) -> np.ndarray:
-    """Compute staleness-based weights using exponential decay."""
-    if not staleness_values:
-        return np.array([])
-
-    weights = np.exp(-async_lambda * np.array(staleness_values))
-    weights = weights / np.sum(weights)
-
-    return weights
-
-
 def hybrid_aggregator(
     updates: list[np.ndarray],
     trust_scores: list[float],

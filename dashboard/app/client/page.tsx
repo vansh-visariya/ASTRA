@@ -1,81 +1,32 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useAuth } from '@/components/AuthContext';
 import Link from 'next/link';
 import {
   Users, Shield, Activity,
-  TrendingUp, CheckCircle, AlertCircle, Bell,
-  ArrowUpRight, Cpu
+  TrendingUp, CheckCircle,
+  ArrowUpRight, Cpu, Bell, AlertCircle
 } from 'lucide-react';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-
-interface DashboardStats {
-  groupsAvailable: number;
-  groupsJoined: number;
-  trustScore: number;
-  roundsCompleted: number;
-}
-
-interface Notification {
-  id: number;
-  type: string;
-  priority: string;
-  title: string;
-  message: string;
-  created_at: string;
-  read: boolean;
-}
+import { useWS } from '@/components/WebSocketProvider';
+import { useGroups, useTrustScores, useNotifications } from '@/hooks';
+import { StatCard } from '@/components/ui/StatCard';
+import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
+import { ErrorState } from '@/components/ui/ErrorState';
+import { useAuth } from '@/components/AuthContext';
+import type { Notification, TrustData, ApiListResponse } from '@/lib/api/types';
 
 export default function ClientDashboard() {
-  const { token, user } = useAuth();
-  const [stats, setStats] = useState<DashboardStats>({
-    groupsAvailable: 0,
-    groupsJoined: 0,
-    trustScore: 1.0,
-    roundsCompleted: 0
-  });
-  const [recentNotifications, setRecentNotifications] = useState<Notification[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { user } = useAuth();
+  const { isConnected } = useWS();
+  const { data: groupsData, loading: groupsLoading, error: groupsError, refetch: refetchGroups } = useGroups(!isConnected);
+  const { data: trustData, loading: trustLoading } = useTrustScores(!isConnected, user?.id);
+  const { data: notifData } = useNotifications(!isConnected, { limit: 5 });
 
-  useEffect(() => {
-    const fetchData = async () => {
-      if (!token) return;
+  const groups = (groupsData as any)?.groups || [];
+  const trustScore = (trustData as TrustData | null)?.score ?? 1.0;
+  const recentNotifications: Notification[] = (notifData as any)?.notifications || [];
 
-      try {
-        const groupsRes = await fetch(`${API_URL}/api/groups`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        const groupsData = await groupsRes.json();
-
-        const trustRes = await fetch(`${API_URL}/api/trust/scores/${user?.id}`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        const trustData = await trustRes.json();
-
-        const notifRes = await fetch(`${API_URL}/api/notifications?limit=5`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        const notifData = await notifRes.json();
-
-        setStats({
-          groupsAvailable: groupsData.count || 0,
-          groupsJoined: 0,
-          trustScore: trustData.score || 1.0,
-          roundsCompleted: 0
-        });
-
-        setRecentNotifications(notifData.notifications || []);
-      } catch (e) {
-        console.error('Failed to fetch data:', e);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchData();
-  }, [token, user]);
+  const loading = groupsLoading || trustLoading;
+  const error = groupsError;
 
   const getGreeting = () => {
     const hour = new Date().getHours();
@@ -84,87 +35,23 @@ export default function ClientDashboard() {
     return 'Good evening';
   };
 
-  const getPriorityColor = (priority: string) => {
-    switch (priority) {
-      case 'error': return 'text-gray-400';
-      case 'warning': return 'text-gray-400';
-      case 'success': return 'text-gray-300';
-      default: return 'text-gray-300';
-    }
-  };
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-8 h-8 border-2 border-white/30 border-t-transparent rounded-full animate-spin" />
-          <span className="text-slate-500 text-xs">Loading dashboard...</span>
-        </div>
-      </div>
-    );
-  }
-
-  const trustPercent = (stats.trustScore * 100).toFixed(0);
+  if (loading && !groups.length) return <LoadingSpinner message="Loading dashboard..." />;
+  if (error) return <ErrorState message={error} onRetry={refetchGroups} />;
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="animate-fade-in">
         <h1 className="text-2xl font-bold text-white">{getGreeting()}, {user?.name || 'Client'}</h1>
         <p className="text-slate-400 text-sm mt-1">Here's your federated learning overview</p>
       </div>
 
-      {/* Stat Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="stat-card accent-indigo p-5 animate-fade-in" style={{ animationDelay: '0.05s', opacity: 0 }}>
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-slate-400 text-xs font-medium uppercase tracking-wider">Available Groups</span>
-            <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: 'rgba(255,255,255,0.06)' }}>
-              <Users className="text-gray-300" size={17} />
-            </div>
-          </div>
-          <p className="text-3xl font-bold text-white tracking-tight">{stats.groupsAvailable}</p>
-        </div>
-
-        <div className="stat-card accent-emerald p-5 animate-fade-in" style={{ animationDelay: '0.1s', opacity: 0 }}>
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-slate-400 text-xs font-medium uppercase tracking-wider">Groups Joined</span>
-            <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: 'rgba(255,255,255,0.06)' }}>
-              <CheckCircle className="text-gray-300" size={17} />
-            </div>
-          </div>
-          <p className="text-3xl font-bold text-white tracking-tight">{stats.groupsJoined}</p>
-        </div>
-
-        <div className="stat-card accent-violet p-5 animate-fade-in" style={{ animationDelay: '0.15s', opacity: 0 }}>
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-slate-400 text-xs font-medium uppercase tracking-wider">Trust Score</span>
-            <div className="w-9 h-9 rounded-xl flex items-center justify-center"
-              style={{ background: 'rgba(255,255,255,0.06)' }}>
-              <Shield className="text-gray-300" size={17} />
-            </div>
-          </div>
-          <p className="text-3xl font-bold text-white tracking-tight">{trustPercent}%</p>
-          <div className="mt-3 h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(30,41,59,0.6)' }}>
-            <div
-              className="h-full rounded-full transition-all duration-700 ease-out bg-gray-400"
-              style={{ width: `${stats.trustScore * 100}%` }}
-            />
-          </div>
-        </div>
-
-        <div className="stat-card accent-blue p-5 animate-fade-in" style={{ animationDelay: '0.2s', opacity: 0 }}>
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-slate-400 text-xs font-medium uppercase tracking-wider">Rounds Done</span>
-            <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: 'rgba(255,255,255,0.06)' }}>
-              <TrendingUp className="text-gray-300" size={17} />
-            </div>
-          </div>
-          <p className="text-3xl font-bold text-white tracking-tight">{stats.roundsCompleted}</p>
-        </div>
+        <StatCard label="Available Groups" value={groups.length} icon={Users} accent="info" delay={0.05} />
+        <StatCard label="Groups Joined" value={0} icon={CheckCircle} accent="success" delay={0.1} />
+        <StatCard label="Trust Score" value={`${(trustScore * 100).toFixed(0)}%`} icon={Shield} accent="violet" delay={0.15} />
+        <StatCard label="Rounds Done" value={0} icon={TrendingUp} accent="blue" delay={0.2} />
       </div>
 
-      {/* Quick Actions */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-fade-in" style={{ animationDelay: '0.25s', opacity: 0 }}>
         <Link href="/client/groups" className="glass-card p-5 group cursor-pointer">
           <div className="flex items-center justify-between">
@@ -181,7 +68,6 @@ export default function ClientDashboard() {
             <ArrowUpRight size={16} className="text-slate-600 group-hover:text-white transition-colors" />
           </div>
         </Link>
-
         <Link href="/client/training" className="glass-card p-5 group cursor-pointer">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
@@ -199,7 +85,6 @@ export default function ClientDashboard() {
         </Link>
       </div>
 
-      {/* Recent Notifications */}
       <div className="glass-card p-5 animate-fade-in" style={{ animationDelay: '0.35s', opacity: 0 }}>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-sm font-semibold text-white uppercase tracking-wider">Recent Notifications</h2>
@@ -213,14 +98,13 @@ export default function ClientDashboard() {
             {recentNotifications.slice(0, 5).map((notif) => (
               <div
                 key={notif.id}
-                className={`flex items-start gap-3 p-3 rounded-xl transition-colors ${notif.read ? 'opacity-60' : ''
-                  }`}
+                className={`flex items-start gap-3 p-3 rounded-xl transition-colors ${notif.read ? 'opacity-60' : ''}`}
                 style={{ background: notif.read ? 'transparent' : 'rgba(30, 41, 59, 0.3)' }}
               >
                 {notif.priority === 'error' || notif.priority === 'warning' ? (
-                  <AlertCircle className="text-gray-400 shrink-0 mt-0.5" size={16} />
+                  <AlertCircle className="text-slate-400 shrink-0 mt-0.5" size={16} />
                 ) : (
-                  <Activity className={getPriorityColor(notif.priority) + ' shrink-0 mt-0.5'} size={16} />
+                  <Activity className="text-gray-300 shrink-0 mt-0.5" size={16} />
                 )}
                 <div className="flex-1 min-w-0">
                   <p className="text-white text-sm font-medium">{notif.title}</p>

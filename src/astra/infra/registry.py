@@ -124,14 +124,14 @@ class ModelRegistry:
         self.logger.info(f"Registered {len(self.models)} builtin models")
 
     def register_hf_model(
-        self, model_name: str, use_peft: bool = False, peft_config: dict | None = None
+        self, model_name: str, use_peft: bool = True, peft_config: dict | None = None
     ) -> ModelInfo:
         """
         Register a HuggingFace model.
 
         Args:
             model_name: HF model name (e.g., "openai/clip-vit-base-patch32")
-            use_peft: Whether to apply PEFT (LoRA)
+            use_peft: Whether to apply PEFT (LoRA) — defaults to True
             peft_config: PEFT configuration if use_peft=True
 
         Returns:

@@ -139,6 +139,79 @@ async def download_model(group_id: str, version: int | None = None):
     return FileResponse(file_path, media_type="application/octet-stream", filename=filename)
 
 
+@router.get("/api/models/{group_id}/base")
+async def download_base_model(group_id: str):
+    """Download the frozen base model (non-LoRA backbone) for a group.
+
+    Clients download this once and cache it locally. Only the LoRA adapter
+    weights change across rounds.
+    """
+    fl_server = get_fl_server()
+    if group_id not in fl_server.group_manager.groups:
+        raise HTTPException(status_code=404, detail="Group not found")
+
+    save_dir = os.path.join("models", "global", group_id)
+    base_path = os.path.join(save_dir, "base.pt")
+
+    if not os.path.exists(base_path):
+        raise HTTPException(
+            status_code=404,
+            detail="Base model not found. Server must be started with PEFT enabled.",
+        )
+
+    return FileResponse(
+        base_path,
+        media_type="application/octet-stream",
+        filename=f"{group_id}_base.pt",
+    )
+
+
+@router.get("/api/models/{group_id}/adapter")
+async def download_latest_adapter(group_id: str):
+    """Download the latest LoRA adapter weights for a group."""
+    fl_server = get_fl_server()
+    if group_id not in fl_server.group_manager.groups:
+        raise HTTPException(status_code=404, detail="Group not found")
+
+    save_dir = os.path.join("models", "global", group_id)
+    adapter_path = os.path.join(save_dir, "adapter_latest.pt")
+
+    if not os.path.exists(adapter_path):
+        raise HTTPException(
+            status_code=404,
+            detail="No adapter weights available. No training has completed yet.",
+        )
+
+    return FileResponse(
+        adapter_path,
+        media_type="application/octet-stream",
+        filename=f"{group_id}_adapter_latest.pt",
+    )
+
+
+@router.get("/api/models/{group_id}/adapter/{version}")
+async def download_adapter_version(group_id: str, version: int):
+    """Download a specific version of LoRA adapter weights."""
+    fl_server = get_fl_server()
+    if group_id not in fl_server.group_manager.groups:
+        raise HTTPException(status_code=404, detail="Group not found")
+
+    save_dir = os.path.join("models", "global", group_id)
+    adapter_path = os.path.join(save_dir, f"adapter_v{version}.pt")
+
+    if not os.path.exists(adapter_path):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Adapter version {version} not found.",
+        )
+
+    return FileResponse(
+        adapter_path,
+        media_type="application/octet-stream",
+        filename=f"{group_id}_adapter_v{version}.pt",
+    )
+
+
 @router.get("/api/models/{group_id}/history")
 async def get_model_history(group_id: str):
     """Get the full training history for a group.

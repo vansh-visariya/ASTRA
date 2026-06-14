@@ -40,10 +40,25 @@ class AsyncServer:
         self.aggregator = aggregator
         self.config = config
         self.val_loader = val_loader
+        self.logger = logging.getLogger(__name__)
 
-        # Use GPU if available
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = self.model.to(self.device)
+
+        self.is_peft = config.get("peft", {}).get("enabled", False)
+        if self.is_peft:
+            from astra.core.models.hf_models import freeze_backbone as _freeze
+
+            _freeze(self.model)
+            self.logger.info("PEFT mode enabled — backbone frozen, only LoRA params trainable")
+
+        self.logger.info(
+            "AsyncServer init: device=%s, peft=%s, window=%s, aggregator=%s",
+            self.device,
+            self.is_peft,
+            config["server"]["aggregator_window"],
+            aggregator.__class__.__name__,
+        )
 
         self.global_version = 0
         self.running_global_estimate: np.ndarray | None = None
@@ -59,8 +74,6 @@ class AsyncServer:
 
         self.current_lr = config["server"]["server_lr"]
 
-        self.logger = logging.getLogger(__name__)
-
         self._init_optimizer()
 
     def _init_optimizer(self):
@@ -75,48 +88,71 @@ class AsyncServer:
             self.optimizer = torch.optim.Adam(
                 self.model.parameters(), lr=self.config["server"]["server_lr"]
             )
+        self.logger.debug(
+            "Server optimizer init: %s, lr=%s",
+            self.optimizer.__class__.__name__,
+            self.current_lr,
+        )
 
     def start(self) -> None:
         """Start the server (simplified for demo)."""
         self.running = True
-        self.logger.info("Async server started (simple mode)")
+        self.logger.info("AsyncServer started (v%s)", self.global_version)
 
     def stop(self) -> None:
         """Stop the server."""
         self.running = False
-        self.logger.info("Async server stopped")
+        self.logger.info("AsyncServer stopped at v%s", self.global_version)
 
     def handle_update(self, client_update: dict[str, Any]) -> None:
         """Process a single client update immediately."""
-        with self.lock:
-            staleness = self.global_version - client_update.get("client_version", 0)
-            staleness_weight = np.exp(-self.config["server"]["async_lambda"] * staleness)
+        client_id = client_update.get("client_id", "unknown")
+        staleness = self.global_version - client_update.get("client_version", 0)
+        staleness_weight = np.exp(-self.config["server"]["async_lambda"] * staleness)
 
+        self.logger.debug(
+            "Received update: client=%s, staleness=%s, staleness_weight=%.4f, dataset_size=%s",
+            client_id,
+            staleness,
+            staleness_weight,
+            client_update.get("local_dataset_size", 1),
+        )
+
+        with self.lock:
             update_vector = self._decode_update(client_update.get("local_updates"))
 
-            if (
-                self.config["privacy"]["dp_enabled"]
-                and self.config["privacy"]["dp_mode"] == "server"
-            ):
+            dp_enabled = self.config["privacy"]["dp_enabled"]
+            dp_server = self.config["privacy"]["dp_mode"] == "server"
+            if dp_enabled and dp_server:
                 update_vector = clip_and_noise(
                     update_vector,
                     self.config["privacy"]["clip_norm"],
                     self.config["privacy"]["sigma"],
                 )
+                self.logger.debug("Server-side DP applied: clip=%.2f sigma=%.2f",
+                                  self.config["privacy"]["clip_norm"],
+                                  self.config["privacy"]["sigma"])
 
             trust_score = self.trust_manager.update_trust(
-                client_update["client_id"], update_vector, self.running_global_estimate
+                client_id, update_vector, self.running_global_estimate
             )
 
             self.aggregator_buffer.append(
                 {
-                    "client_id": client_update["client_id"],
+                    "client_id": client_id,
                     "delta": update_vector,
                     "staleness_weight": staleness_weight,
                     "trust": trust_score,
                     "timestamp": client_update.get("timestamp", time.time()),
                     "local_dataset_size": client_update.get("local_dataset_size", 1),
                 }
+            )
+
+            self.logger.debug(
+                "Buffer: %s/%s — trust=%.3f",
+                len(self.aggregator_buffer),
+                self.aggregator_buffer.maxlen,
+                trust_score,
             )
 
             self._maybe_aggregate()
@@ -146,8 +182,17 @@ class AsyncServer:
     def _perform_aggregation(self) -> None:
         """Execute robust aggregation and update global model."""
         buffer_list = list(self.aggregator_buffer)
+        self.logger.info(
+            "Aggregating %s updates (v%s -> v%s) with %s",
+            len(buffer_list),
+            self.global_version,
+            self.global_version + 1,
+            self.aggregator.__class__.__name__,
+        )
 
         aggregated_delta = self.aggregator.aggregate(buffer_list)
+        self.logger.debug("Aggregated delta shape=%s norm=%.4f", aggregated_delta.shape,
+                          float(np.linalg.norm(aggregated_delta)))
 
         if self.running_momentum is None:
             self.running_momentum = aggregated_delta
@@ -158,6 +203,8 @@ class AsyncServer:
         self._apply_update(self.running_momentum)
 
         self.global_version += 1
+        self.logger.info("Global model updated to v%s (mode=%s)", self.global_version,
+                         "peft" if self.is_peft else "full")
 
         if self.running_global_estimate is None:
             self.running_global_estimate = aggregated_delta
@@ -171,7 +218,16 @@ class AsyncServer:
         self.aggregator_buffer.clear()
 
     def _apply_update(self, delta: np.ndarray) -> None:
-        """Apply aggregated delta to model parameters."""
+        """Apply aggregated delta to model parameters.
+
+        In PEFT mode, only LoRA/adapter parameters are updated.
+        """
+        if self.is_peft:
+            from astra.core.models.model_zoo import apply_peft_delta as _apply
+
+            _apply(self.model, delta)
+            return
+
         param_idx = 0
         for param in self.model.parameters():
             param_shape = param.shape

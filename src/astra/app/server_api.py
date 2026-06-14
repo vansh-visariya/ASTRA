@@ -44,9 +44,9 @@ from astra.infra.websocket_handler import register_socketio_handlers, websocket_
 async def lifespan(app: FastAPI):
     config = load_config()
 
-    state.set_fl_server(FLServer(config))
-
-    # Note: time-based aggregation is handled by per-group _training_watchdog
+    fl_server = FLServer(config)
+    fl_server.group_manager.server_model = fl_server.server.model if fl_server.server else None
+    state.set_fl_server(fl_server)
 
     yield
 

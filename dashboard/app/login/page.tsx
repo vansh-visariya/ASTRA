@@ -4,8 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Layers, Lock, User, Mail, UserPlus } from 'lucide-react';
 import { useAuth } from '@/components/AuthContext';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+import { signup } from '@/lib/api/endpoints';
 
 type AuthMode = 'login' | 'signup';
 
@@ -32,27 +31,20 @@ function LoginForm() {
         const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
         router.push(storedUser.role === 'admin' ? '/dashboard' : '/client');
       } else {
-        const response = await fetch(`${API_URL}/api/auth/signup`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            username,
-            password,
-            role,
-            email: email || null,
-            full_name: fullName || null
-          })
+        await signup({
+          username,
+          password,
+          role,
+          email: email || undefined,
+          name: fullName || username,
         });
-
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.detail || 'Signup failed');
 
         await login(username, password);
         const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
         router.push(storedUser.role === 'admin' ? '/dashboard' : '/client');
       }
-    } catch (err: any) {
-      setError(err.message || 'An error occurred');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An error occurred');
     }
     setLoading(false);
   };
@@ -105,7 +97,7 @@ function LoginForm() {
 
           <form onSubmit={handleSubmit} className="space-y-4">
             {error && (
-              <div className="bg-white/5 border border-white/10 text-gray-300 px-4 py-3 rounded-xl text-sm animate-fade-in">
+              <div className="flex items-center gap-2 px-4 py-3 rounded-xl text-sm animate-fade-in" style={{ background: 'var(--color-error-bg)', color: 'var(--color-error)', border: '1px solid var(--color-error-border)' }}>
                 {error}
               </div>
             )}
