@@ -9,11 +9,19 @@ from typing import Any
 import requests
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
 from astra.app.database import get_db
 from astra.app.state import get_fl_server
 
 router = APIRouter()
+
+
+class RegisterArchitectureBody(BaseModel):
+    model_id: str
+    architecture_path: str
+    model_type: str = "vision"
+    config: dict | None = None
 
 
 @router.post("/api/models/register")
@@ -96,53 +104,42 @@ async def register_hf_model(model_name: str, use_peft: bool = False, peft_method
 
 
 @router.post("/api/models/register/architecture")
-async def register_architecture(
-    model_id: str,
-    architecture_path: str,
-    model_type: str = "vision",
-    config: dict | None = None,
-):
+async def register_architecture(body: RegisterArchitectureBody):
     """Register an arbitrary PyTorch model architecture by import path.
 
     Accepts a dotted Python path like ``torchvision.models.resnet18``
     and registers it as a callable factory in the model registry.
-
-    Args:
-        model_id: Unique identifier for this model
-        architecture_path: Dotted import path (e.g., ``torchvision.models.resnet18``)
-        model_type: Model category (vision, text, multimodal)
-        config: Optional kwargs dict to pass to the factory function
     """
     fl_server = get_fl_server()
 
     try:
-        module_path, attr_name = architecture_path.rsplit(".", 1)
+        module_path, attr_name = body.architecture_path.rsplit(".", 1)
         module = importlib.import_module(module_path)
         factory_fn = getattr(module, attr_name)
     except (ImportError, AttributeError) as e:
         raise HTTPException(
             status_code=400,
-            detail=f"Could not import '{architecture_path}': {e}",
+            detail=f"Could not import '{body.architecture_path}': {e}",
         ) from e
 
     if not callable(factory_fn):
         raise HTTPException(
             status_code=400,
-            detail=f"'{architecture_path}' is not callable",
+            detail=f"'{body.architecture_path}' is not callable",
         )
 
-    kwargs = config or {}
+    kwargs = body.config or {}
     try:
         model = factory_fn(**kwargs) if kwargs else factory_fn()
     except TypeError as e:
         raise HTTPException(
             status_code=400,
-            detail=f"Failed to instantiate '{architecture_path}' with kwargs {kwargs}: {e}",
+            detail=f"Failed to instantiate '{body.architecture_path}' with kwargs {kwargs}: {e}",
         ) from e
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to instantiate '{architecture_path}': {e}",
+            detail=f"Failed to instantiate '{body.architecture_path}': {e}",
         ) from e
 
     total_params = sum(p.numel() for p in model.parameters())
@@ -151,18 +148,18 @@ async def register_architecture(
     from astra.infra.registry import ModelInfo
 
     model_info = ModelInfo(
-        model_id=model_id,
-        model_type=model_type,
+        model_id=body.model_id,
+        model_type=body.model_type,
         architecture=attr_name,
         total_params=total_params,
         trainable_params=trainable_params,
         is_peft=False,
         source="external",
-        config={"architecture_path": architecture_path, "kwargs": kwargs},
+        config={"architecture_path": body.architecture_path, "kwargs": kwargs},
     )
 
-    fl_server.model_registry.register_factory(model_id, factory_fn, model_info)
-    fl_server.model_registry.model_instances[model_id] = model
+    fl_server.model_registry.register_factory(body.model_id, factory_fn, model_info)
+    fl_server.model_registry.model_instances[body.model_id] = model
 
     return {
         "status": "registered",

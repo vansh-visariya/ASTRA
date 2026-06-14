@@ -7,7 +7,7 @@ import { Layers, ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 import { useWS } from '@/components/WebSocketProvider';
 import { useModels } from '@/hooks';
-import { createGroup, registerHfModel, registerCustomModel } from '@/lib/api/endpoints';
+import { createGroup, registerHfModel, registerCustomModel, registerArchitecture } from '@/lib/api/endpoints';
 import { ModelSelector } from '@/components/create/ModelSelector';
 import { TrainingConfig } from '@/components/create/TrainingConfig';
 import { WindowConfig } from '@/components/create/WindowConfig';
@@ -22,7 +22,7 @@ export default function CreateGroupPage() {
 
   const models: Model[] = (modelsData as any)?.models || [];
 
-  const [modelChoice, setModelChoice] = useState<'registry' | 'huggingface' | 'custom'>('registry');
+  const [modelChoice, setModelChoice] = useState<'registry' | 'huggingface' | 'custom' | 'external'>('registry');
   const [selectedModelId, setSelectedModelId] = useState('simple_cnn_mnist');
   const [submitting, setSubmitting] = useState(false);
   const [localEpochs, setLocalEpochs] = useState(2);
@@ -43,6 +43,18 @@ export default function CreateGroupPage() {
 
   const handleRegisterCustom = async (modelId: string, architecture: string, dataset: string) => {
     await registerCustomModel({ model_id: modelId, model_type: 'vision', architecture, dataset });
+    setSelectedModelId(modelId);
+    setModelChoice('registry');
+    refetchModels();
+  };
+
+  const handleRegisterExternal = async (modelId: string, architecturePath: string, config?: Record<string, unknown>) => {
+    await registerArchitecture({
+      model_id: modelId,
+      architecture_path: architecturePath,
+      model_type: 'vision',
+      config,
+    });
     setSelectedModelId(modelId);
     setModelChoice('registry');
     refetchModels();
@@ -132,6 +144,7 @@ export default function CreateGroupPage() {
           onChoiceChange={setModelChoice}
           onRegisterHf={handleRegisterHf}
           onRegisterCustom={handleRegisterCustom}
+          onRegisterExternal={handleRegisterExternal}
         />
 
         <TrainingConfig

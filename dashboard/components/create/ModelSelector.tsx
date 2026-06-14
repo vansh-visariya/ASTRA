@@ -1,17 +1,18 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Search, Plus, Cpu, Database } from 'lucide-react';
+import { Search, Plus, Cpu, Database, Box } from 'lucide-react';
 import type { Model } from '@/lib/api/types';
 
 interface ModelSelectorProps {
   models: Model[];
-  modelChoice: 'registry' | 'huggingface' | 'custom';
+  modelChoice: 'registry' | 'huggingface' | 'custom' | 'external';
   selectedModelId: string;
   onSelectModel: (id: string) => void;
-  onChoiceChange: (choice: 'registry' | 'huggingface' | 'custom') => void;
+  onChoiceChange: (choice: 'registry' | 'huggingface' | 'custom' | 'external') => void;
   onRegisterHf: (modelName: string, peftRank?: number) => Promise<void>;
   onRegisterCustom: (modelId: string, architecture: string, dataset: string) => Promise<void>;
+  onRegisterExternal: (modelId: string, architecturePath: string, config?: Record<string, unknown>) => Promise<void>;
   loading?: boolean;
 }
 
@@ -23,6 +24,7 @@ export function ModelSelector({
   onChoiceChange,
   onRegisterHf,
   onRegisterCustom,
+  onRegisterExternal,
   loading,
 }: ModelSelectorProps) {
   const [hfSearch, setHfSearch] = useState('');
@@ -33,6 +35,10 @@ export function ModelSelector({
   const [customId, setCustomId] = useState('');
   const [architecture, setArchitecture] = useState('CNN');
   const [dataset, setDataset] = useState('MNIST');
+
+  const [extId, setExtId] = useState('');
+  const [extPath, setExtPath] = useState('');
+  const [extModelType, setExtModelType] = useState('vision');
 
   const handleHfSearch = async () => {
     if (!hfSearch.trim()) return;
@@ -52,7 +58,7 @@ export function ModelSelector({
       <h3 className="text-sm font-semibold text-white uppercase tracking-wider">Model Configuration</h3>
 
       <div className="flex gap-2 mb-4">
-        {(['registry', 'huggingface', 'custom'] as const).map((choice) => (
+        {(['registry', 'huggingface', 'custom', 'external'] as const).map((choice) => (
           <button
             key={choice}
             onClick={() => onChoiceChange(choice)}
@@ -65,6 +71,7 @@ export function ModelSelector({
             {choice === 'registry' && 'Registry'}
             {choice === 'huggingface' && 'HuggingFace'}
             {choice === 'custom' && 'Custom'}
+            {choice === 'external' && 'External'}
           </button>
         ))}
       </div>
@@ -157,6 +164,49 @@ export function ModelSelector({
           >
             <Database size={16} />
             Register Custom Model
+          </button>
+        </div>
+      )}
+
+      {modelChoice === 'external' && (
+        <div className="space-y-3">
+          <div className="p-3 rounded-xl" style={{ background: 'rgba(30,41,59,0.4)' }}>
+            <p className="text-slate-400 text-xs">Register any PyTorch model by its Python import path. Examples:</p>
+            <ul className="text-slate-500 text-[11px] mt-1.5 space-y-0.5 font-mono">
+              <li>torchvision.models.resnet18</li>
+              <li>torchvision.models.efficientnet_b0</li>
+              <li>torchvision.models.vit_b_16</li>
+              <li>transformers.AutoModelForImageClassification</li>
+            </ul>
+          </div>
+          <input
+            value={extId}
+            onChange={(e) => setExtId(e.target.value)}
+            placeholder="Model ID (e.g., resnet18_v1)"
+            className="input-field"
+          />
+          <input
+            value={extPath}
+            onChange={(e) => setExtPath(e.target.value)}
+            placeholder="Python import path (e.g., torchvision.models.resnet18)"
+            className="input-field font-mono text-xs"
+          />
+          <select
+            value={extModelType}
+            onChange={(e) => setExtModelType(e.target.value)}
+            className="input-field"
+          >
+            <option value="vision">Vision</option>
+            <option value="text">Text</option>
+            <option value="multimodal">Multimodal</option>
+          </select>
+          <button
+            onClick={() => onRegisterExternal(extId, extPath, {})}
+            disabled={!extId.trim() || !extPath.trim()}
+            className="btn-primary w-full inline-flex items-center justify-center gap-2 !py-3"
+          >
+            <Box size={16} />
+            Register External Model
           </button>
         </div>
       )}
