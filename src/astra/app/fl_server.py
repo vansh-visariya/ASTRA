@@ -59,10 +59,17 @@ class FLServer:
             peft_config = self.config.get("peft", {})
             model, _ = load_hf_peft_model(model_name, peft_config, device="cpu")
             model = model.to("cpu")
-        else:
-            from astra.core.models.model_zoo import create_model as _create_model
 
-            model = _create_model(self.config)
+            model_id = f"hf_{model_name.replace('/', '_')}_peft"
+            if model_id not in self.model_registry.model_instances:
+                self.model_registry.model_instances[model_id] = model
+        else:
+            model_id = self.config.get("model", {}).get("model_id", "simple_cnn_mnist")
+            try:
+                model = self.model_registry.build_model(model_id)
+            except ValueError:
+                from astra.core.models.model_zoo import create_model as _create_model
+                model = _create_model(self.config)
 
         aggregator = create_aggregator(self.config)
 

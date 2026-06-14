@@ -24,7 +24,7 @@ from astra.core.models.hf_models import (  # noqa: F401
     get_lora_state_dict,
     load_lora_state_dict,
 )
-from astra.core.models.model_zoo import flatten_peft_params
+from astra.core.models.model_zoo import flatten_all_params, flatten_peft_params
 from astra.core.privacy.malicious_simulator import MaliciousSimulator
 from astra.core.privacy.privacy import clip_and_noise
 
@@ -233,16 +233,13 @@ class FLClient:
         """Get model weights as flattened numpy array.
 
         In PEFT mode, only LoRA/adapter params are returned.
-        Falls back to all params if no PEFT params are found.
+        Falls back to all params in sorted-name order if no PEFT params are found.
         """
         if self.is_peft:
             peft_flat = flatten_peft_params(self.model)
             if len(peft_flat) > 0:
                 return peft_flat
-        weights = []
-        for param in self.model.parameters():
-            weights.append(param.data.cpu().numpy().flatten())
-        return np.concatenate(weights)
+        return flatten_all_params(self.model)
 
     def get_adapter_state(self) -> dict[str, torch.Tensor]:
         """Get current LoRA adapter weights as named tensors (PEFT mode only)."""

@@ -592,7 +592,17 @@ class FederatedClient:
                     freeze_backbone(model)
                 return model
 
-            return create_model(self.config)
+            from astra.infra.registry import get_registry
+
+            model_id = (model_info.get("model_id")
+                        if isinstance(model_info, dict) else None)
+            if not model_id:
+                model_id = self.config.get("model", {}).get("model_id", "simple_cnn_mnist")
+
+            try:
+                return get_registry().build_model(model_id)
+            except ValueError:
+                return create_model(self.config)
 
         self.local_client = LocalClient(
             client_id=self.client_id,

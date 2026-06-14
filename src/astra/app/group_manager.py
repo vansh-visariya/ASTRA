@@ -587,11 +587,14 @@ class GroupManager:
                 client_ids,
             )
 
-            # Apply aggregated delta to the live server model (LoRA params only in PEFT mode)
+            # Apply aggregated delta to the live server model
             if self.server_model is not None and len(aggregated) > 0:
-                from astra.core.models.model_zoo import apply_peft_delta
-
-                apply_peft_delta(self.server_model, aggregated)
+                is_peft = self.config.get("peft", {}).get("enabled", False)
+                if is_peft:
+                    from astra.core.models.model_zoo import apply_peft_delta as _apply
+                else:
+                    from astra.core.models.model_zoo import apply_flat_delta as _apply
+                _apply(self.server_model, aggregated)
 
             # Update version
             group.model_version += 1

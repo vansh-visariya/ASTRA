@@ -12,6 +12,7 @@ References:
 
 import json
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -82,6 +83,7 @@ class ModelRegistry:
 
         self.models: dict[str, ModelInfo] = {}
         self.model_instances: dict[str, nn.Module] = {}
+        self.model_factories: dict[str, Callable[[], nn.Module]] = {}
 
         self.logger = logging.getLogger(__name__)
 
@@ -95,33 +97,84 @@ class ModelRegistry:
         model = SimpleCNN(num_classes=10)
         param_count = sum(p.numel() for p in model.parameters())
 
-        self.models["simple_cnn_mnist"] = ModelInfo(
-            model_id="simple_cnn_mnist",
-            model_type="vision",
-            architecture="SimpleCNN",
-            total_params=param_count,
-            trainable_params=param_count,
-            is_peft=False,
-            source="builtin",
-            config={"dataset": "MNIST", "num_classes": 10},
+        self.register_factory(
+            "simple_cnn_mnist",
+            factory=lambda: SimpleCNN(num_classes=10),
+            model_info=ModelInfo(
+                model_id="simple_cnn_mnist",
+                model_type="vision",
+                architecture="SimpleCNN",
+                total_params=param_count,
+                trainable_params=param_count,
+                is_peft=False,
+                source="builtin",
+                config={"dataset": "MNIST", "num_classes": 10},
+            ),
         )
 
         # CIFAR10 CNN
         model_cifar = CIFAR10CNN(num_classes=10)
-        param_count = sum(p.numel() for p in model_cifar.parameters())
+        param_count_cifar = sum(p.numel() for p in model_cifar.parameters())
 
-        self.models["simple_cnn_cifar10"] = ModelInfo(
-            model_id="simple_cnn_cifar10",
-            model_type="vision",
-            architecture="CIFAR10CNN",
-            total_params=param_count,
-            trainable_params=param_count,
-            is_peft=False,
-            source="builtin",
-            config={"dataset": "CIFAR10", "num_classes": 10},
+        self.register_factory(
+            "simple_cnn_cifar10",
+            factory=lambda: CIFAR10CNN(num_classes=10),
+            model_info=ModelInfo(
+                model_id="simple_cnn_cifar10",
+                model_type="vision",
+                architecture="CIFAR10CNN",
+                total_params=param_count_cifar,
+                trainable_params=param_count_cifar,
+                is_peft=False,
+                source="builtin",
+                config={"dataset": "CIFAR10", "num_classes": 10},
+            ),
         )
 
         self.logger.info(f"Registered {len(self.models)} builtin models")
+
+    def register_factory(
+        self, model_id: str, factory: Callable[[], nn.Module], model_info: ModelInfo
+    ) -> None:
+        """Register a model with its factory function.
+
+        Args:
+            model_id: Unique model identifier
+            factory: Callable that returns a new model instance
+            model_info: Model metadata
+        """
+        self.models[model_id] = model_info
+        self.model_factories[model_id] = factory
+        self.logger.info(
+            "Registered factory for '%s' (%s, %s params)",
+            model_id,
+            model_info.architecture,
+            model_info.total_params,
+        )
+
+    def build_model(self, model_id: str, device: str = "cpu") -> nn.Module:
+        """Instantiate a model from the registry by its ID.
+
+        Args:
+            model_id: Model identifier
+            device: Target device (cpu/cuda)
+
+        Returns:
+            Instantiated model on the specified device.
+        """
+        if model_id in self.model_instances:
+            return self.model_instances[model_id].to(device)
+
+        if model_id in self.model_factories:
+            model = self.model_factories[model_id]()
+            model = model.to(device)
+            self.model_instances[model_id] = model
+            return model
+
+        raise ValueError(
+            f"No factory registered for model '{model_id}'. "
+            f"Available: {list(self.model_factories.keys())}"
+        )
 
     def register_hf_model(
         self, model_name: str, use_peft: bool = True, peft_config: dict | None = None
@@ -197,6 +250,9 @@ class ModelRegistry:
 
             self.models[model_id] = model_info
             self.model_instances[model_id] = model
+            self.model_factories[model_id] = lambda m=model_name, c=peft_cfg: load_hf_peft_model(
+                m, c, device="cpu"
+            )[0]
 
             self.logger.info(f"Registered HF model: {model_id} ({total_params:,} params)")
 
@@ -253,11 +309,11 @@ class ModelRegistry:
         self, model_id: str, architecture: str, model_type: str, config: dict[str, Any]
     ) -> ModelInfo:
         """
-        Register a custom CNN/MLP architecture.
+        Register a custom architecture.
 
         Args:
             model_id: Unique identifier
-            architecture: Architecture type (cnn, mlp, vit)
+            architecture: Architecture type (cnn, mlp, or custom class name)
             model_type: vision, text, multimodal
             config: Model configuration
 
@@ -266,10 +322,12 @@ class ModelRegistry:
         """
         from astra.core.models.model_zoo import create_model
 
-        config["model"]["type"] = architecture
+        config_copy = {**config}
+        config_copy.setdefault("model", {})
+        config_copy["model"]["type"] = architecture
 
         try:
-            model = create_model(config)
+            model = create_model(config_copy)
 
             total_params = sum(p.numel() for p in model.parameters())
             trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -282,10 +340,14 @@ class ModelRegistry:
                 trainable_params=trainable_params,
                 is_peft=False,
                 source="custom",
-                config=config,
+                config=config_copy,
             )
 
-            self.models[model_id] = model_info
+            self.register_factory(
+                model_id,
+                factory=lambda cfg=config_copy: create_model(cfg),
+                model_info=model_info,
+            )
             self.model_instances[model_id] = model
 
             return model_info
@@ -305,6 +367,11 @@ class ModelRegistry:
         Returns:
             Model instance
         """
+        try:
+            return self.build_model(model_id, device=device)
+        except ValueError:
+            pass
+
         if model_id in self.model_instances:
             model = self.model_instances[model_id]
             return model.to(device)

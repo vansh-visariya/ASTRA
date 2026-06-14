@@ -48,6 +48,13 @@ export const registerHfModel = (body: Record<string, unknown>) =>
 export const registerCustomModel = (body: Record<string, unknown>) =>
   api.post<{ model_id: string }>('/api/models/register', body);
 
+export const registerArchitecture = (body: {
+  model_id: string;
+  architecture_path: string;
+  model_type?: string;
+  config?: Record<string, unknown>;
+}) => api.post<{ status: string }>('/api/models/register/architecture', body);
+
 export const downloadModel = (groupId: string) =>
   api.get<Blob>(`/api/models/${groupId}/download`);
 

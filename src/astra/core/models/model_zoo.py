@@ -97,34 +97,40 @@ def create_model(config: dict[str, Any]) -> nn.Module:
     """
     Create model based on configuration.
 
+    Uses the global ModelRegistry for instantiation, which supports any
+    registered model (builtins, HuggingFace, custom architectures).
+
     Args:
         config: Model configuration.
 
     Returns:
         Instantiated model.
     """
-    model_config = config.get('model', {})
-    model_type = model_config.get('type', 'cnn')
+    from astra.infra.registry import get_registry
 
-    if model_type == 'cnn':
-        cnn_config = model_config.get('cnn', {})
-        cnn_config.get('name', 'simple_cnn')
+    model_config = config.get("model", {})
+    model_id = model_config.get("model_id", "simple_cnn_mnist")
 
-        dataset_cfg = config.get('dataset', {})
-        if isinstance(dataset_cfg, str):
-            dataset_cfg = {'name': dataset_cfg}
-        dataset = dataset_cfg.get('name', 'MNIST')
+    registry = get_registry()
 
-        if dataset == 'CIFAR10':
-            return CIFAR10CNN(num_classes=10)
-        else:
-            return SimpleCNN(num_classes=10)
+    try:
+        return registry.build_model(model_id)
+    except ValueError:
+        pass
 
-    elif model_type == 'mlp':
+    model_type = model_config.get("type", "cnn")
+    dataset_cfg = config.get("dataset", {})
+    if isinstance(dataset_cfg, str):
+        dataset_cfg = {"name": dataset_cfg}
+    dataset = dataset_cfg.get("name", "MNIST")
+
+    if model_type == "mlp":
         return SimpleMLP()
 
-    else:
-        raise ValueError(f"Unknown model type: {model_type}")
+    if dataset == "CIFAR10":
+        return CIFAR10CNN(num_classes=10)
+
+    return SimpleCNN(num_classes=10)
 
 
 def _is_lora_param(name: str) -> bool:
@@ -156,6 +162,41 @@ def apply_peft_delta(model: nn.Module, flat_delta: np.ndarray) -> None:
     offset = 0
     for _name, param in sorted(
         [(n, p) for n, p in model.named_parameters() if _is_lora_param(n)],
+        key=lambda x: x[0],
+    ):
+        size = param.numel()
+        if offset + size <= len(flat_delta):
+            delta_slice = flat_delta[offset : offset + size].reshape(param.shape)
+            param.data.add_(torch.from_numpy(delta_slice).float().to(param.device))
+        offset += size
+
+
+def flatten_all_params(model: nn.Module) -> np.ndarray:
+    """Flatten ALL model parameters in deterministic sorted-name order.
+
+    Parameters are processed in sorted name order for deterministic
+    ordering across all clients and the server.
+    """
+    params = sorted(
+        [(name, param) for name, param in model.named_parameters()],
+        key=lambda x: x[0],
+    )
+    if not params:
+        return np.array([], dtype=np.float32)
+    return np.concatenate(
+        [param.data.cpu().numpy().flatten().astype(np.float32) for _, param in params]
+    )
+
+
+def apply_flat_delta(model: nn.Module, flat_delta: np.ndarray) -> None:
+    """Apply a flat delta to ALL model parameters in sorted-name order.
+
+    Uses the same sorted-name ordering as flatten_all_params() for
+    deterministic mapping between client and server.
+    """
+    offset = 0
+    for _name, param in sorted(
+        [(n, p) for n, p in model.named_parameters()],
         key=lambda x: x[0],
     ):
         size = param.numel()

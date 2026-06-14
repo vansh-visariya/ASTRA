@@ -12,8 +12,10 @@ from astra.core.models.model_zoo import (  # noqa: F401
     CIFAR10CNN,
     SimpleCNN,
     SimpleMLP,
+    apply_flat_delta,
     apply_peft_delta,
     create_model,
+    flatten_all_params,
     flatten_peft_params,
 )
 
@@ -30,4 +32,6 @@ __all__ = [
     "load_lora_state_dict",
     "flatten_peft_params",
     "apply_peft_delta",
+    "flatten_all_params",
+    "apply_flat_delta",
 ]

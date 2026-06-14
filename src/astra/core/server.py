@@ -221,6 +221,7 @@ class AsyncServer:
         """Apply aggregated delta to model parameters.
 
         In PEFT mode, only LoRA/adapter parameters are updated.
+        In non-PEFT mode, all parameters are updated in sorted-name order.
         """
         if self.is_peft:
             from astra.core.models.model_zoo import apply_peft_delta as _apply
@@ -228,15 +229,9 @@ class AsyncServer:
             _apply(self.model, delta)
             return
 
-        param_idx = 0
-        for param in self.model.parameters():
-            param_shape = param.shape
-            param_size = np.prod(param_shape)
+        from astra.core.models.model_zoo import apply_flat_delta as _apply
 
-            if param_idx + param_size <= len(delta):
-                param_data = delta[param_idx : param_idx + param_size].reshape(param_shape)
-                param.data.add_(torch.from_numpy(param_data).float().to(param.device))
-            param_idx += param_size
+        _apply(self.model, delta)
 
     def _check_adaptive_lr(self, buffer_snapshot: list[dict[str, Any]]) -> None:
         """Adaptively adjust learning rate based on instability."""
