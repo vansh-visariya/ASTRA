@@ -55,6 +55,15 @@ class FLClient:
             freeze_backbone(self.model)
             self.logger.debug("Client %s: backbone frozen (PEFT mode)", self.client_id)
 
+        trainable_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+        if trainable_params == 0:
+            raise RuntimeError(
+                f"Model has 0 trainable parameters. "
+                f"PEFT is {'enabled' if self.is_peft else 'disabled'}. "
+                "If using a non-PEFT model, disable PEFT in config: peft.enabled=false. "
+                "If this is a registrable model, register it first via the dashboard External tab."
+            )
+
         self.client_version = 0
 
         self.malicious_simulator = MaliciousSimulator(config)

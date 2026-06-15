@@ -51,8 +51,6 @@ class JoinGroupRequest(BaseModel):
 
 class ApproveJoinRequest(BaseModel):
     request_id: int
-    group_id: str
-    join_token: str
 
 
 class RejectJoinRequest(BaseModel):
@@ -231,7 +229,6 @@ def create_group_join_router(platform: FLPlatformIntegration) -> APIRouter:
     @router.post("/join-requests/approve")
     async def approve_join_request(request: ApproveJoinRequest, authorization: str = Header(None)):
         """Approve a join request and deliver token (admin only)."""
-        # Verify admin role
         from fastapi import HTTPException
 
         if not authorization:
@@ -247,8 +244,6 @@ def create_group_join_router(platform: FLPlatformIntegration) -> APIRouter:
         result = platform.approve_join_request(
             token=token,
             request_id=request.request_id,
-            group_id=request.group_id,
-            join_token=request.join_token,
         )
 
         if not result.get("success"):

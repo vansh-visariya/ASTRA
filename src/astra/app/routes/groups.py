@@ -2,18 +2,39 @@
 Group management REST endpoints.
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 
+from astra.app.integration import get_platform_integration
 from astra.app.state import get_fl_server
 
 router = APIRouter()
 
 
+def _get_optional_user(authorization: str = Header(None)):
+    """Get current user if token present, otherwise return None. Does NOT fail for missing token."""
+    if not authorization:
+        return None
+    token = authorization.replace("Bearer ", "")
+    platform = get_platform_integration()
+    return platform.verify_token(token)
+
+
+def _get_any_user(authorization: str = Header(None)):
+    """Require valid JWT token (any role)."""
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Authorization required")
+    token = authorization.replace("Bearer ", "")
+    platform = get_platform_integration()
+    payload = platform.verify_token(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    return payload
+
+
 @router.get("/api/groups")
-async def list_groups():
-    """List all training groups with their async window status."""
+async def list_groups(current_user=Depends(_get_any_user)):
+    """List all training groups with their async window status (authenticated users only)."""
     fl_server = get_fl_server()
-    # Do NOT expose raw join tokens in the general listing.
     groups = fl_server.group_manager.get_all_groups(include_secret=False)
     return {"groups": groups, "count": len(groups)}
 

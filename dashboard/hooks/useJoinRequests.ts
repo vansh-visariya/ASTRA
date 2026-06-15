@@ -14,13 +14,13 @@ import { usePolling } from './usePolling';
 export function useJoinRequests(wsConnected: boolean, groupId?: string) {
   const fetcher = useCallback(() => getJoinRequests(groupId), [groupId]);
   const apiResult = useApi<ApiListResponse<JoinRequest>>(fetcher);
-  const pollingResult = usePolling(fetcher, 2000, !wsConnected);
+  const pollingResult = usePolling(fetcher, 2000, !wsConnected && !!groupId);
 
   const result = wsConnected ? apiResult : pollingResult;
 
   return {
-    data: result.data,
-    loading: result.loading,
+    data: !groupId ? null : result.data,
+    loading: !groupId ? false : result.loading,
     error: result.error,
     refetch: apiResult.refetch,
     requestJoin,

@@ -268,6 +268,22 @@ class AstraDB:
                 ON event_logs(event_type, timestamp)
             """)
 
+            # --- Model Registry (persist external model registrations across restarts) ---
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS model_registry (
+                    model_id TEXT PRIMARY KEY,
+                    model_type TEXT NOT NULL,
+                    architecture TEXT NOT NULL,
+                    architecture_path TEXT,
+                    total_params INTEGER,
+                    trainable_params INTEGER,
+                    is_peft INTEGER DEFAULT 0,
+                    source TEXT DEFAULT 'external',
+                    config_json TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
             conn.commit()
             logger.info("[DB] Schema initialized in %s", self.db_path)
 
@@ -638,6 +654,49 @@ class AstraDB:
     def get_all_groups(self) -> list[dict]:
         with self.connection() as conn:
             rows = conn.execute("SELECT * FROM groups ORDER BY created_at DESC").fetchall()
+            return [dict(r) for r in rows]
+
+    # ========================================================================
+    # Model Registry persistence
+    # ========================================================================
+
+    def save_model_registration(
+        self,
+        model_id: str,
+        model_type: str,
+        architecture: str,
+        architecture_path: str | None = None,
+        total_params: int = 0,
+        trainable_params: int = 0,
+        is_peft: bool = False,
+        source: str = "external",
+        config: dict[str, Any] | None = None,
+    ):
+        with self.connection() as conn:
+            conn.execute(
+                """INSERT OR REPLACE INTO model_registry
+                   (model_id, model_type, architecture, architecture_path,
+                    total_params, trainable_params, is_peft, source, config_json)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    model_id,
+                    model_type,
+                    architecture,
+                    architecture_path,
+                    total_params,
+                    trainable_params,
+                    1 if is_peft else 0,
+                    source,
+                    json.dumps(config or {}),
+                ),
+            )
+            conn.commit()
+
+    def load_model_registrations(self) -> list[dict]:
+        with self.connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM model_registry ORDER BY created_at DESC"
+            ).fetchall()
             return [dict(r) for r in rows]
 
     def delete_group(self, group_id: str) -> bool:

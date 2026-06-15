@@ -21,7 +21,6 @@ if str(_src_root) not in sys.path:
 import argparse
 import asyncio
 import base64
-import contextlib
 import json
 import logging
 import os
@@ -162,16 +161,6 @@ class FederatedClient:
             await self.ws.close()
         self.is_connected = False
 
-    async def listen(self):
-        """Listen for server commands."""
-        try:
-            async for message in self.ws:
-                data = json.loads(message)
-                await self._handle_message(data)
-        except ConnectionClosed:
-            self.logger.warning("Connection closed by server")
-            self.is_connected = False
-
     async def _handle_message(self, message: dict[str, Any]):
         """Handle incoming WebSocket messages."""
         msg_type = message.get("type")
@@ -238,15 +227,20 @@ class FederatedClient:
             await self.ws.send(json.dumps({"type": "pong"}))
 
     async def _download_model(self, message: dict[str, Any]):
-        """Download and apply global model update (adapter weights in PEFT mode)."""
+        """Download and apply global model update."""
         version = message.get("version", 0)
         self.logger.info(f"Downloading global model version {version}")
         self.current_global_version = version
 
         is_peft = self.config.get("peft", {}).get("enabled", False)
-        if not (is_peft and self.local_client):
-            return
 
+        if is_peft and self.local_client:
+            await self._download_peft_adapter(version)
+        elif not is_peft and self.local_client:
+            await self._download_full_model(version)
+
+    async def _download_peft_adapter(self, version: int):
+        """Download LoRA/PEFT adapter weights from server."""
         try:
             import io
 
@@ -277,6 +271,38 @@ class FederatedClient:
         except Exception as e:
             self.logger.warning(f"Could not download adapter weights: {e}")
 
+    async def _download_full_model(self, version: int):
+        """Download full model weights and reload client."""
+        try:
+            import io
+
+            import aiohttp
+
+            group_id = getattr(self, "group_id", "group_a")
+            url = f"{self.server_url}/api/models/{group_id}/download"
+            headers = {}
+            if self.token:
+                headers["Authorization"] = f"Bearer {self.token}"
+            async with aiohttp.ClientSession(headers=headers) as session:  # noqa: SIM117
+                async with session.get(url) as resp:
+                    if resp.status == 200:
+                        raw = await resp.read()
+                        checkpoint = torch.load(
+                            io.BytesIO(raw), map_location="cpu", weights_only=False
+                        )
+                        state_dict = checkpoint.get("state_dict", checkpoint)
+                        if state_dict and self.local_client:
+                            self.local_client.model.load_state_dict(state_dict, strict=False)
+                            self.logger.info(
+                                f"Loaded full model weights (v{version})"
+                            )
+                    else:
+                        self.logger.warning(
+                            f"Failed to download model: HTTP {resp.status}"
+                        )
+        except Exception as e:
+            self.logger.warning(f"Could not download full model: {e}")
+
     async def _run_training(self):
         """Run local training and send update to server."""
         if not self.local_client:
@@ -285,7 +311,6 @@ class FederatedClient:
         self.is_training = True
         self.logger.info("Starting local training...")
 
-        # Train locally
         update = self.local_client.local_train()
         meta = update.get("meta", {})
         epoch_metrics = meta.get("epoch_metrics", [])
@@ -306,19 +331,9 @@ class FederatedClient:
             train_acc,
             meta.get("local_steps", 0),
         )
-        self.logger.info(
-            f"Meta dict for sending: train_loss={train_loss}, train_accuracy={train_acc}"
-        )
 
-        async def _send_metrics_once() -> bool:
-            if not self.ws:
-                return False
-            self.logger.info(
-                "Sending metrics message: client_id=%s, group_id=%s, meta_keys=%s",
-                self.client_id,
-                getattr(self, "group_id", None),
-                list(meta.keys()),
-            )
+        # Send metrics (fire-and-forget, ack handled by listen loop)
+        if self.ws:
             try:
                 await self.ws.send(
                     json.dumps(
@@ -330,36 +345,16 @@ class FederatedClient:
                         }
                     )
                 )
-                # Wait for metrics acknowledgment with short timeout
-                response = await asyncio.wait_for(self.ws.recv(), timeout=2.0)
-                ack = json.loads(response)
-                if ack.get("status") == "accepted":
-                    self.logger.info("Metrics acknowledged by server")
-                    return True
-            except asyncio.TimeoutError:
-                self.logger.debug("No metrics acknowledgment within timeout")
             except Exception as e:
-                self.logger.debug("Metrics message send failed: %s", e)
-            return False
+                self.logger.warning(f"Failed to send metrics: {e}")
 
-        async def _ensure_metrics_delivered() -> bool:
-            # Best effort on current connection
-            if await _send_metrics_once():
-                return True
-            # If WS dropped during long HF training, reconnect and retry once.
-            with contextlib.suppress(Exception):
-                await self.disconnect()
-            if not await self.connect():
-                return False
-            return await _send_metrics_once()
-
-        metrics_delivered = await _ensure_metrics_delivered()
-
+        # Encode and send update delta
         encoded = base64.b64encode(update["local_updates"]).decode("utf-8")
-
-        # Send update to server
         self.logger.info(
-            "Sending update message: client_id=%s, meta=%s", self.client_id, update.get("meta", {})
+            "Sending update: client_id=%s, version=%s, size=%d bytes",
+            self.client_id,
+            self.current_global_version,
+            len(encoded),
         )
         try:
             await self.ws.send(
@@ -378,39 +373,12 @@ class FederatedClient:
                 )
             )
         except Exception as e:
-            self.logger.warning("Failed to send update (connection may have closed): %s", e)
-            # Attempt to reconnect and retry
-            try:
-                await self.disconnect()
-                if not await self.connect():
-                    self.logger.error("Failed to reconnect after update send failure")
-                    raise RuntimeError("Failed to reconnect to server") from e
-                # If metrics weren't delivered previously, retry them on the fresh connection.
-                if not metrics_delivered:
-                    metrics_delivered = await _send_metrics_once()
-                # Retry update send
-                await self.ws.send(
-                    json.dumps(
-                        {
-                            "type": "update",
-                            "update": {
-                                "client_id": self.client_id,
-                                "client_version": self.current_global_version,
-                                "local_updates": encoded,
-                                "update_type": "delta",
-                                "local_dataset_size": update["local_dataset_size"],
-                                "meta": update["meta"],
-                            },
-                        }
-                    )
-                )
-                self.logger.info("Update sent successfully after reconnect")
-            except Exception as retry_e:
-                self.logger.error("Failed to send update even after reconnect: %s", retry_e)
-                raise
+            self.logger.error(f"Failed to send update: {e}")
+            raise
 
+        self._save_local_model()
         self.is_training = False
-        self.logger.info("Update sent to server")
+        self.logger.info("Update sent to server, listening for next round...")
 
     async def _sync_group_config(self):
         """Sync training config and model info from server before training."""
@@ -462,8 +430,11 @@ class FederatedClient:
                             self._apply_model_info(self.group_model_info)
                         else:
                             self.logger.warning(
-                                "Failed to fetch model info for %s: %s", model_id, model_resp.status
+                                "Failed to fetch model info for %s: %s - clearing model-specific config",
+                                model_id, model_resp.status,
                             )
+                            self.group_model_info = None
+                            self._apply_model_info(None)
 
                     if model_changed:
                         self.local_client = None
@@ -482,6 +453,9 @@ class FederatedClient:
     def _apply_model_info(self, model_info: dict[str, Any] | None):
         """Apply model info to local config for model initialization."""
         if not model_info:
+            # No model info from server: disable PEFT (model isn't a HuggingFace model)
+            self.config.setdefault("peft", {})
+            self.config["peft"]["enabled"] = False
             return
 
         model_config = model_info.get("config") or {}
@@ -659,7 +633,7 @@ class FederatedClient:
             self.logger.warning(f"Could not save local model: {e}")
 
     async def run(self):
-        """Main client: connect → sync config → download base → train → exit."""
+        """Main client: connect → sync → train → listen for server commands → repeat."""
         connected = await self.connect()
         if not connected:
             self.logger.error("Failed to connect to server")
@@ -670,15 +644,15 @@ class FederatedClient:
         if self.group_model_info:
             await self._ensure_base_model(self.group_model_info)
 
-        self.logger.info("Starting single training run...")
+        self.logger.info("Client ready. Running first training round...")
         await self._run_training()
 
-        # Wait briefly for server to accept the update
+        # Wait for server to accept the update
         try:
             response = await asyncio.wait_for(self.ws.recv(), timeout=10.0)
             data = json.loads(response)
             if data.get("status") == "accepted":
-                self.logger.info("✓ Update accepted by server")
+                self.logger.info("Update accepted by server")
             else:
                 self.logger.info(f"Server response: {data}")
         except asyncio.TimeoutError:
@@ -686,12 +660,43 @@ class FederatedClient:
         except Exception:
             pass
 
-        # Save local model to disk
         self._save_local_model()
 
-        # Disconnect cleanly
-        await self.disconnect()
-        self.logger.info("Training complete. Exiting.")
+        # Enter continuous listen-train loop
+        self.logger.info("Listening for server commands (model_updates, training rounds)...")
+        await self._listen_loop()
+
+    async def _listen_loop(self):
+        """Continuous listen-train loop with automatic reconnection."""
+        reconnect_delay = 2.0
+
+        while True:
+            try:
+                async for message in self.ws:
+                    try:
+                        data = json.loads(message)
+                        await self._handle_message(data)
+                    except json.JSONDecodeError:
+                        self.logger.debug("Received invalid JSON message")
+                        continue
+            except ConnectionClosed:
+                self.logger.warning("Connection closed by server")
+            except Exception as e:
+                self.logger.warning(f"Listen loop error: {e}")
+
+            self.is_connected = False
+
+            # Reconnect after delay
+            self.logger.info(f"Reconnecting in {reconnect_delay:.0f}s...")
+            await asyncio.sleep(reconnect_delay)
+            reconnect_delay = min(reconnect_delay * 1.5, 60.0)
+
+            if await self.connect():
+                reconnect_delay = 2.0
+                await self._sync_group_config()
+                self.logger.info("Reconnected. Listening for commands...")
+            else:
+                self.logger.warning("Reconnect failed, retrying...")
 
 
 class RESTClient:

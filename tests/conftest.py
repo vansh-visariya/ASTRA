@@ -57,9 +57,4 @@ def sample_config():
         "privacy": {"dp_enabled": False, "dp_mode": "client", "clip_norm": 1.0, "sigma": 1.2},
         "communication": {"compression": "none", "topk_ratio": 0.1},
         "training": {"total_steps": 100, "eval_interval_steps": 10},
-        "heterogeneous": {
-            "mapping_method": "average",
-            "allow_partial_updates": True,
-            "min_param_overlap": 0.5,
-        },
     }

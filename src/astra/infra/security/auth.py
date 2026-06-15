@@ -340,14 +340,25 @@ class JoinRequestManager:
         self, group_id: str, user_id: int, metadata: dict | None = None
     ) -> str | None:
         """Create a join request and return the request nonce."""
-        request_nonce = secrets.token_hex(16)
-
         import json
 
         metadata_json = json.dumps(metadata) if metadata else None
 
         with self.user_db._get_connection() as conn:
             cursor = conn.cursor()
+
+            # Prevent duplicate pending requests from the same user to the same group
+            cursor.execute(
+                "SELECT id FROM join_requests WHERE user_id = ? AND group_id = ? AND status = 'pending'",
+                (user_id, group_id),
+            )
+            if cursor.fetchone():
+                self.logger.warning(
+                    f"Duplicate pending request blocked for user {user_id} in group {group_id}"
+                )
+                return None
+
+            request_nonce = secrets.token_hex(16)
             try:
                 cursor.execute(
                     """INSERT INTO join_requests
@@ -359,7 +370,7 @@ class JoinRequestManager:
                 return request_nonce
             except sqlite3.IntegrityError:
                 self.logger.warning(
-                    f"Pending request already exists for user {user_id} in group {group_id}"
+                    f"Integrity error for user {user_id} in group {group_id}"
                 )
                 return None
 

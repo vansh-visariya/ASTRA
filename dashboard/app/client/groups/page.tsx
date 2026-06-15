@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Users, Clock, RefreshCw,
 } from 'lucide-react';
@@ -19,8 +19,31 @@ export default function ClientGroupsPage() {
 
   const [joinStatuses, setJoinStatuses] = useState<Record<string, string>>({});
   const [joining, setJoining] = useState<string | null>(null);
+  const [statusLoading, setStatusLoading] = useState(true);
 
   const groups: Group[] = (groupsData as any)?.groups || [];
+
+  // Sync join statuses from server on mount and when groups change
+  useEffect(() => {
+    let cancelled = false;
+    const syncStatuses = async () => {
+      const statuses: Record<string, string> = {};
+      for (const g of groups) {
+        try {
+          const res = await getMyJoinStatus(g.group_id);
+          statuses[g.group_id] = res.status || 'none';
+        } catch {
+          statuses[g.group_id] = 'none';
+        }
+      }
+      if (!cancelled) {
+        setJoinStatuses(statuses);
+        setStatusLoading(false);
+      }
+    };
+    syncStatuses();
+    return () => { cancelled = true; };
+  }, [groups, getMyJoinStatus]);
 
   const handleJoinRequest = async (groupId: string) => {
     setJoining(groupId);

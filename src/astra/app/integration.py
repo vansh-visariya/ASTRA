@@ -6,7 +6,6 @@ Combines:
 - Notification system
 - Trust score management
 - Model recommendation (Gemini)
-- Heterogeneous aggregation
 - Inference module
 
 This module extends the existing server API with new features.
@@ -25,10 +24,6 @@ from astra.app.model_recommender import (
 from astra.app.notifications import (
     NotificationService,
     init_notification_service,
-)
-from astra.core.aggregation.heterogeneous import (
-    BaselineModelManager,
-    create_heterogeneous_aggregator,
 )
 from astra.core.inference import (
     create_inference_module,
@@ -96,10 +91,8 @@ class FLPlatformIntegration:
             self.logger.warning("No Gemini API key - using fallback recommendations")
 
     def _init_aggregation(self):
-        """Initialize heterogeneous aggregation."""
-        self.heterogeneous_aggregator = create_heterogeneous_aggregator(self.config)
-        self.baseline_manager = BaselineModelManager(self.config)
-        self.logger.info("Heterogeneous aggregation initialized")
+        """Initialize aggregation components."""
+        self.logger.info("Aggregation initialized")
 
     def _init_inference(self):
         """Initialize inference module."""
@@ -173,6 +166,13 @@ class FLPlatformIntegration:
         self, user_id: int, group_id: str, metadata: dict | None = None
     ) -> dict[str, Any]:
         """Request to join a group."""
+        # Validate group exists
+        from astra.app.state import get_fl_server
+
+        fl_server = get_fl_server()
+        if group_id not in fl_server.group_manager.groups:
+            return {"success": False, "error": f"Group '{group_id}' does not exist"}
+
         nonce = self.auth_manager.join_request_manager.create_request(group_id, user_id, metadata)
 
         if not nonce:
@@ -208,23 +208,35 @@ class FLPlatformIntegration:
         return self.auth_manager.join_request_manager.get_pending_requests(group_id)
 
     def approve_join_request(
-        self, token: str, request_id: int, group_id: str, join_token: str
+        self, token: str, request_id: int
     ) -> dict[str, Any]:
         """Approve a join request."""
         admin_payload = self.require_role(token, ["admin"])
         if not admin_payload:
             return {"success": False, "error": "Unauthorized"}
 
-        # Get request details
-        pending = self.auth_manager.join_request_manager.get_pending_requests(group_id)
-        target_request = next((r for r in pending if r["id"] == request_id), None)
+        # Get request details by request_id (look up group_id from the request)
+        all_pending = self.auth_manager.join_request_manager.get_pending_requests()
+        target_request = next((r for r in all_pending if r["id"] == request_id), None)
 
         if not target_request:
             return {"success": False, "error": "Request not found"}
 
+        group_id = target_request["group_id"]
+        target_user_id = target_request["user_id"]
+
+        # Pre-approval validation: check client's trust score
+        trust_score = self.get_trust_score(target_user_id, group_id)
+        if trust_score < 0.1:
+            return {
+                "success": False,
+                "error": f"Client trust score ({trust_score:.2f}) is too low for approval. "
+                f"Minimum required: 0.10.",
+            }
+
         # Create a secure join token for the user
         secure_join_token, nonce = self.auth_manager.token_manager.create_join_token(
-            group_id, target_request["user_id"]
+            group_id, target_user_id
         )
 
         # Update request
@@ -235,9 +247,9 @@ class FLPlatformIntegration:
         if success:
             # Notify user
             self.notification_service.notify_join_approved(
-                user_id=target_request["user_id"],
+                user_id=target_user_id,
                 group_id=group_id,
-                token=secure_join_token,  # In production, this should be encrypted
+                token=secure_join_token,
             )
 
             return {"success": True, "token": secure_join_token}

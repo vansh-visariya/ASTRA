@@ -33,7 +33,7 @@ export default function GroupDetailPage() {
 
   const group: Group | null = (groupData as any)?.group || null;
   const logs: LogEntry[] = (logsData as any)?.logs || [];
-  const joinRequests: any[] = (joinData as any)?.join_requests || [];
+  const joinRequests: any[] = (joinData as any)?.requests || [];
 
   const handleApprove = async (requestId: number) => {
     await doApprove({ request_id: requestId });

@@ -82,11 +82,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "total_steps": 1000,
         "eval_interval_steps": 10,
     },
-    "heterogeneous": {
-        "mapping_method": "average",
-        "allow_partial_updates": True,
-        "min_param_overlap": 0.5,
-    },
 }
 
 

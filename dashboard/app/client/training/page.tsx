@@ -1,12 +1,15 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { useState } from 'react';
 import {
   Cpu, WifiOff, RefreshCw,
   Layers, Activity, Zap, Terminal, CheckCircle, AlertCircle,
 } from 'lucide-react';
 import { useWS } from '@/components/WebSocketProvider';
 import { useTrainingStatus } from '@/hooks';
+import { activateJoin } from '@/lib/api/endpoints';
 import { StatCard } from '@/components/ui/StatCard';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
@@ -17,6 +20,19 @@ import { SessionCard } from '@/components/training/SessionCard';
 export default function ClientTrainingPage() {
   const { isConnected } = useWS();
   const { data: status, loading, error, refetch } = useTrainingStatus(!isConnected);
+  const router = useRouter();
+  const [activating, setActivating] = useState<string | null>(null);
+
+  const handleActivate = async (groupId: string) => {
+    setActivating(groupId);
+    try {
+      await activateJoin(groupId);
+      refetch();
+      router.push('/client/groups');
+    } catch {
+      setActivating(null);
+    }
+  };
 
   if (loading) return <LoadingSpinner message="Loading training status..." />;
   if (error) return <ErrorState message={error} onRetry={refetch} />;
@@ -69,7 +85,13 @@ export default function ClientTrainingPage() {
                   <span className="text-white text-sm font-medium">{pa.group_id}</span>
                   <span className="text-slate-500 text-xs">({pa.model_id})</span>
                 </div>
-                <Link href="/client/groups" className="btn-emerald text-white text-xs px-3 py-1.5">Activate</Link>
+                <button
+                  onClick={() => handleActivate(pa.group_id)}
+                  disabled={activating === pa.group_id}
+                  className="btn-emerald text-white text-xs px-3 py-1.5"
+                >
+                  {activating === pa.group_id ? 'Activating...' : 'Activate'}
+                </button>
               </div>
             ))}
           </div>

@@ -161,6 +161,21 @@ async def register_architecture(body: RegisterArchitectureBody):
     fl_server.model_registry.register_factory(body.model_id, factory_fn, model_info)
     fl_server.model_registry.model_instances[body.model_id] = model
 
+    # Persist to database for survival across restarts
+    from astra.app.database import get_db
+
+    get_db().save_model_registration(
+        model_id=body.model_id,
+        model_type=body.model_type,
+        architecture=attr_name,
+        architecture_path=body.architecture_path,
+        total_params=total_params,
+        trainable_params=trainable_params,
+        is_peft=False,
+        source="external",
+        config={"kwargs": kwargs},
+    )
+
     return {
         "status": "registered",
         "model": model_info.to_dict(),

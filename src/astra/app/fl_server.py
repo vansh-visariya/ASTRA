@@ -6,6 +6,7 @@ and group manager, providing experiment lifecycle methods.
 """
 
 import base64
+import json
 import logging
 import time
 from typing import Any
@@ -43,8 +44,40 @@ class FLServer:
 
         self._setup_server()
 
+    def _reload_models_from_db(self):
+        """Reload external model registrations from the database."""
+        import importlib
+        import logging
+
+        from astra.app.database import get_db
+
+        logger = logging.getLogger(__name__)
+        try:
+            rows = get_db().load_model_registrations()
+        except Exception:
+            rows = []
+
+        for row in rows:
+            model_id = row.get("model_id")
+            arch_path = row.get("architecture_path")
+            if not model_id or not arch_path:
+                continue
+            try:
+                module_path, attr_name = arch_path.rsplit(".", 1)
+                module = importlib.import_module(module_path)
+                factory_fn = getattr(module, attr_name)
+                config_row = row.get("config_json")
+                kwargs = json.loads(config_row).get("kwargs", {}) if config_row else {}
+                self.model_registry.register_factory(model_id, lambda fn=factory_fn, kw=kwargs: fn(**kw) if kw else fn())
+                logger.info("Reloaded model '%s' from DB (path: %s)", model_id, arch_path)
+            except Exception as e:
+                logger.warning("Failed to reload model '%s': %s", model_id, e)
+
     def _setup_server(self):
-        """Initialize the FL server."""
+        """Initialize the FL server components."""
+        # Reload externally registered models from DB
+        self._reload_models_from_db()
+
         is_peft = self.config.get("peft", {}).get("enabled", False)
 
         if is_peft:

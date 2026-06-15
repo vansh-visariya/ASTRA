@@ -72,15 +72,6 @@ FederatedClient → POST /api/clients/register → trains locally → POST /api/
 - **Run client**: `python src/astra/client/client.py --server http://localhost:8000 --client-id client_1`
 - **Config**: `config.yaml` for training params; env vars: `SECRET_KEY`, `ENV`, `GEMINI_API_KEY`
 
-## Known Bugs
-- **Critical**: `/health` endpoint broken — imports non-existent `networking.state`
-- **Critical**: `ConnectionManager.disconnect` leaks `client_sockets` — memory leak
-- **Critical**: `_check_adaptive_lr` checks buffer AFTER it's cleared — adaptive LR dead code
-- **High**: `ParameterEfficientInference.predict` references `self.model` instead of `self.base_model`
-- **High**: `hardcoded config` in `server_api.py` missing `malicious`, `communication` keys
-- **High**: `_training_watchdog` reads group state outside lock — TOCTOU race
-- **High**: `register_local_model` loads any state_dict into `nn.Linear(10,10)` — never works
-
 ## Metrics / Benchmarks
 - Tests: 36/36 passing (3.46s)
 - Config defaults: 20 clients, window_size=10, MNIST/Dirichlet(0.3), hybrid robust aggregation, DP client-side (sigma=1.2, clip_norm=1.0), top-k compression (ratio=0.1)

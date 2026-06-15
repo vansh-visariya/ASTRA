@@ -2,7 +2,6 @@ import { api } from './client';
 import type {
   SystemMetrics,
   Group,
-  Client,
   LogEntry,
   Notification,
   JoinRequest,
@@ -12,7 +11,6 @@ import type {
   Recommendation,
   AuthResponse,
   ApiListResponse,
-  WindowStatus,
 } from './types';
 
 export const getSystemMetrics = () => api.get<SystemMetrics>('/api/system/metrics');
@@ -30,15 +28,7 @@ export const controlGroup = (id: string, action: 'start' | 'pause' | 'resume' | 
 export const deleteGroup = (id: string) =>
   api.del<{ status: string }>(`/api/groups/${id}`);
 
-export const getWindowStatus = (id: string) =>
-  api.get<WindowStatus>(`/api/groups/${id}/window-status`);
-
-export const getClients = () => api.get<ApiListResponse<Client>>('/api/clients');
-
 export const getTrainingStatus = () => api.get<TrainingStatus>('/api/client/training-status');
-
-export const registerClient = (body: Record<string, unknown>) =>
-  api.post<{ status: string }>('/api/clients/register', body);
 
 export const getModels = () => api.get<ApiListResponse<Model>>('/api/models');
 
@@ -54,12 +44,6 @@ export const registerArchitecture = (body: {
   model_type?: string;
   config?: Record<string, unknown>;
 }) => api.post<{ status: string }>('/api/models/register/architecture', body);
-
-export const downloadModel = (groupId: string) =>
-  api.get<Blob>(`/api/models/${groupId}/download`);
-
-export const getModelHistory = (groupId: string) =>
-  api.get<Record<string, unknown>>(`/api/models/${groupId}/history`);
 
 export const getJoinRequests = (groupId?: string) => {
   const path = groupId ? `/api/join/join-requests?group_id=${groupId}` : '/api/join/join-requests';
