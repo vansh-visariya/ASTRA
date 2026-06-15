@@ -1,0 +1,71 @@
+# Docker — files and directories excluded from build context
+
+# Python virtual environment
+.venv/
+venv/
+env/
+
+# Node
+node_modules/
+dashboard/node_modules/
+dashboard/.next/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Type checking and linting cache
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Environment files (copy from .env.example)
+.env
+.env.local
+
+# Logs and data
+logs/
+data/
+
+# Version control
+.git/
+.gitignore
+.gitattributes
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# AI / tool directories
+.claude/
+.commandcode/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Coverage reports
+htmlcov/
+.coverage
+coverage.xml
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.dockerignore

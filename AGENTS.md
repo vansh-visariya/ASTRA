@@ -72,7 +72,7 @@ FederatedClient → POST /api/clients/register → trains locally → POST /api/
 - **Run client**: `python src/astra/client/client.py --server http://localhost:8000 --client-id client_1`
 - **Config**: `config.yaml` for training params; env vars: `SECRET_KEY`, `ENV`, `GEMINI_API_KEY`
 
-## Known Bugs (see PLAN.md for details)
+## Known Bugs
 - **Critical**: `/health` endpoint broken — imports non-existent `networking.state`
 - **Critical**: `ConnectionManager.disconnect` leaks `client_sockets` — memory leak
 - **Critical**: `_check_adaptive_lr` checks buffer AFTER it's cleared — adaptive LR dead code
