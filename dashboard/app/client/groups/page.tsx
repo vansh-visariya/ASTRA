@@ -31,7 +31,7 @@ export default function ClientGroupsPage() {
       for (const g of groups) {
         try {
           const res = await getMyJoinStatus(g.group_id);
-          statuses[g.group_id] = res.status || 'none';
+          statuses[g.group_id] = normalizeStatus(res.status || 'none');
         } catch {
           statuses[g.group_id] = 'none';
         }
@@ -67,6 +67,12 @@ export default function ClientGroupsPage() {
     } finally {
       setJoining(null);
     }
+  };
+
+  // Normalize server statuses to local states
+  const normalizeStatus = (raw: string): string => {
+    if (raw === 'activated' || raw === 'joined') return 'joined';
+    return raw;
   };
 
   if (loading && !groups.length) return <LoadingSpinner message="Loading groups..." />;

@@ -16,6 +16,7 @@ python-multipart>=0.0.6
 ruff>=0.1.0
 transformers
 peft
+python-dotenv>=1.0.0
 
 [dev]
 pytest>=7.4.0

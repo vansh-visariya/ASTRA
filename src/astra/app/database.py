@@ -663,15 +663,24 @@ class AstraDB:
     def save_model_registration(
         self,
         model_id: str,
-        model_type: str,
         architecture: str,
         architecture_path: str | None = None,
-        total_params: int = 0,
-        trainable_params: int = 0,
-        is_peft: bool = False,
-        source: str = "external",
-        config: dict[str, Any] | None = None,
+        config_json: str = "{}",
+        is_huggingface: bool = False,
     ):
+        """Save a model registration that survives server restarts.
+
+        For existing registries, stores just the essentials needed to reload.
+        """
+        import json as jsonlib
+
+        config = jsonlib.loads(config_json) if isinstance(config_json, str) else config_json
+        source = "huggingface" if is_huggingface else "external"
+        model_type = config.get("model_type", "unknown")
+        total_params = config.get("total_params", 0)
+        trainable_params = config.get("trainable_params", 0)
+        is_peft = 1 if config.get("use_peft") else 0
+
         with self.connection() as conn:
             conn.execute(
                 """INSERT OR REPLACE INTO model_registry
@@ -685,9 +694,9 @@ class AstraDB:
                     architecture_path,
                     total_params,
                     trainable_params,
-                    1 if is_peft else 0,
+                    is_peft,
                     source,
-                    json.dumps(config or {}),
+                    jsonlib.dumps(config),
                 ),
             )
             conn.commit()

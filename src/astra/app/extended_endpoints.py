@@ -68,6 +68,7 @@ class ClientMetadataRequest(BaseModel):
     memory_mb: int | None = None
     network_bandwidth_mbps: float | None = None
     preferred_model_type: str | None = None
+    data_type: str | None = None
 
 
 class InferenceRequest(BaseModel):
@@ -85,6 +86,7 @@ class ModelRecommendationRequest(BaseModel):
     memory_mb: int | None = None
     network_bandwidth_mbps: float | None = None
     preferred_model_type: str | None = None
+    data_type: str | None = None
 
 
 class AddHuggingFaceModelRequest(BaseModel):
@@ -278,6 +280,15 @@ def create_group_join_router(platform: FLPlatformIntegration) -> APIRouter:
     async def get_my_request_status(group_id: str, current_user: dict = Depends(require_client)):
         """Get user's join request status for a group."""
         status = platform.get_user_join_status(user_id=current_user["user_id"], group_id=group_id)
+
+        # Also check if user is already an active client in the group
+        from astra.app.state import get_fl_server
+        fl_server = get_fl_server()
+        if group_id in fl_server.group_manager.groups:
+            group = fl_server.group_manager.groups[group_id]
+            for client_id, info in group.clients.items():
+                if info.get("user_id") == current_user["user_id"]:
+                    return {"status": "activated", "group_id": group_id, "client_id": client_id}
 
         if not status:
             return {"status": "none", "message": "No pending request"}

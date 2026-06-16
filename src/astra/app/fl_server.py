@@ -60,26 +60,42 @@ class FLServer:
         for row in rows:
             model_id = row.get("model_id")
             arch_path = row.get("architecture_path")
+            source = row.get("source", "external")
             if not model_id or not arch_path:
                 continue
             try:
-                module_path, attr_name = arch_path.rsplit(".", 1)
-                module = importlib.import_module(module_path)
-                factory_fn = getattr(module, attr_name)
                 config_row = row.get("config_json")
-                kwargs = json.loads(config_row).get("kwargs", {}) if config_row else {}
-                model_info = {
-                    "model_id": model_id,
-                    "source": "external",
-                    "architecture_path": arch_path,
-                    "config": kwargs,
-                }
-                self.model_registry.register_factory(
-                    model_id,
-                    lambda fn=factory_fn, kw=kwargs: fn(**kw) if kw else fn(),
-                    model_info,
-                )
-                logger.info("Reloaded model '%s' from DB (path: %s)", model_id, arch_path)
+                config_data = json.loads(config_row) if config_row else {}
+
+                if source == "huggingface":
+                    self.model_registry.register_hf_model(
+                        model_name=arch_path,
+                        use_peft=config_data.get("use_peft", False),
+                        peft_config={
+                            "enabled": config_data.get("use_peft", False),
+                            "method": config_data.get("peft_method", "lora"),
+                            "lora_rank": 8,
+                            "lora_alpha": 16,
+                            "target_modules": ["q_proj", "v_proj"],
+                        } if config_data.get("use_peft") else {"enabled": False},
+                    )
+                else:
+                    module_path, attr_name = arch_path.rsplit(".", 1)
+                    module = importlib.import_module(module_path)
+                    factory_fn = getattr(module, attr_name)
+                    kwargs = config_data.get("kwargs", {})
+                    model_info = {
+                        "model_id": model_id,
+                        "source": "external",
+                        "architecture_path": arch_path,
+                        "config": kwargs,
+                    }
+                    self.model_registry.register_factory(
+                        model_id,
+                        lambda fn=factory_fn, kw=kwargs: fn(**kw) if kw else fn(),
+                        model_info,
+                    )
+                logger.info("Reloaded model '%s' from DB (source: %s)", model_id, source)
             except Exception as e:
                 logger.warning("Failed to reload model '%s': %s", model_id, e)
 

@@ -18,7 +18,7 @@
 A: Make sure the backend server is running (`uvicorn astra.app.server_api:app --port 8000`). Check `dashboard/.env.local` has the correct `NEXT_PUBLIC_API_URL`.
 
 **Q: How do I log in?**
-A: Create an account at the sign-up page. Choose `admin` role for full access or `client` role to participate in training. Default admin credentials (if DB initialized): username `admin`, password `admin123` (configurable via `ASTRA_DEFAULT_ADMIN_PASSWORD`).
+A: Create an account at the sign-up page. Choose `admin` role for full access or `client` role to participate in training. Default admin credentials (if DB initialized): username `admin`, password `adminpass` (configurable via `ASTRA_DEFAULT_ADMIN_PASSWORD`).
 
 **Q: Can I use my own model?**
 A: Yes. In the dashboard Create Group page, switch to the External tab and enter the Python import path (e.g., `torchvision.models.resnet18`). Or call `POST /api/models/register/architecture` directly.

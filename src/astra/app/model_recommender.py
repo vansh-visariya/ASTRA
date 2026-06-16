@@ -29,6 +29,7 @@ class ClientMetadata:
     memory_mb: int | None = None
     network_bandwidth_mbps: float | None = None
     preferred_model_type: str | None = None
+    data_type: str | None = None  # 'image', 'text', 'audio', 'tabular', 'multimodal'
 
 
 @dataclass
@@ -49,14 +50,20 @@ class ModelRecommendation:
     hf_url: str = ""  # HuggingFace URL if from HF
 
     def __post_init__(self):
+        import uuid
+
         if self.architecture is None:
             self.architecture = {}
         if self.config is None:
             self.config = {}
         if not self.id:
-            import uuid
-
             self.id = str(uuid.uuid4())[:8]
+        if not self.source:
+            self.source = "builtin"
+        if not self.model_id:
+            self.model_id = f"rec_{self.model_type}_{self.model_size}_{uuid.uuid4().hex[:6]}"
+        if not self.model_name:
+            self.model_name = f"{self.model_type.title()} ({self.model_size})"
 
 
 class GeminiRecommender:
@@ -67,7 +74,7 @@ class GeminiRecommender:
     def __init__(self, api_key: str | None = None):
         self.logger = logging.getLogger(__name__)
         self.api_key = api_key or os.environ.get("GEMINI_API_KEY", "")
-        self.model_name = "gemini-2.0-flash"
+        self.model_name = "gemini-2.5-flash"
 
         if not self.api_key:
             self.logger.warning("No Gemini API key provided. Using fallback recommendations.")
@@ -75,50 +82,11 @@ class GeminiRecommender:
     def _build_prompt(self, metadata: ClientMetadata) -> str:
         """Build prompt for Gemini API."""
 
-        distribution_str = ", ".join(
-            [f"class {k}: {v:.1%}" for k, v in list(metadata.class_distribution.items())[:5]]
-        )
+        prompt = f"""FL model recommender. Return ONLY a flat JSON object (no nesting beyond 1 level, no arrays). No markdown.
 
-        prompt = f"""You are a federated learning model recommendation system.
-Given the following client metadata, recommend an appropriate model architecture
-for training in a federated learning setting.
+Client: {metadata.dataset_size} samples, {metadata.num_classes} classes, GPU={metadata.has_gpu}, CPU={metadata.cpu_cores}, data={metadata.data_type or "unknown"}
 
-IMPORTANT constraints:
-- Model must be compatible with federated aggregation
-- Prioritize privacy and efficiency
-- Consider client hardware limitations
-- Support heterogeneous model updates
-
-Client Metadata:
-- Dataset size: {metadata.dataset_size} samples
-- Number of classes: {metadata.num_classes}
-- Class distribution: {distribution_str}
-- Has GPU: {metadata.has_gpu}
-- GPU Memory: {metadata.gpu_memory_mb} MB (if available)
-- CPU Cores: {metadata.cpu_cores}
-- Memory: {metadata.memory_mb} MB (if available)
-- Network bandwidth: {metadata.network_bandwidth_mbps} Mbps (if available)
-- Preferred model type: {metadata.preferred_model_type or "any"}
-
-Respond with ONLY valid JSON (no markdown formatting):
-{{
-  "model_type": "cnn|mlp|transformer|efficientnet",
-  "model_size": "small|medium|large",
-  "estimated_params": <number>,
-  "architecture": {{
-    "conv_layers": <number or null>,
-    "fc_layers": <number or null>,
-    "hidden_dim": <number or null>,
-    "dropout": <number>
-  }},
-  "expected_accuracy": <0.0-1.0>,
-  "reasoning": "<2-3 sentence explanation>",
-  "config": {{
-    "batch_size": <number>,
-    "learning_rate": <number>,
-    "local_epochs": <number>
-  }}
-}}"""
+Return: {{"model_type":"cnn|mlp|transformer|efficientnet","model_size":"small|medium|large","params":N,"accuracy":0.X,"reason":"1 sentence","batch":N,"lr":0.X,"epochs":N}}"""
 
         return prompt
 
@@ -135,8 +103,8 @@ Respond with ONLY valid JSON (no markdown formatting):
             payload = {
                 "contents": [{"parts": [{"text": prompt}]}],
                 "generationConfig": {
-                    "temperature": 0.7,
-                    "maxOutputTokens": 1024,
+                    "temperature": 0.3,
+                    "maxOutputTokens": 2046,
                     "topP": 0.95,
                     "topK": 40,
                 },
@@ -159,28 +127,91 @@ Respond with ONLY valid JSON (no markdown formatting):
 
     def _parse_response(self, response_text: str) -> ModelRecommendation | None:
         """Parse Gemini response into ModelRecommendation."""
+        import re
+
         try:
-            # Try to extract JSON from response
-            # Sometimes Gemini returns markdown-wrapped JSON
-            if "```json" in response_text:
-                response_text = response_text.split("```json")[1].split("```")[0]
-            elif "```" in response_text:
-                response_text = response_text.split("```")[1].split("```")[0]
+            # Clean markdown wrappers
+            cleaned = response_text.strip()
+            for pattern in [r'```json\s*', r'```\s*', r'`json\s*']:
+                cleaned = re.sub(pattern, '', cleaned)
+            cleaned = re.sub(r'```\s*$', '', cleaned).strip()
 
-            data = json.loads(response_text.strip())
+            # Try direct parse
+            data = self._try_json_parse(cleaned)
+            if data:
+                return self._dict_to_recommendation(data)
 
-            return ModelRecommendation(
-                model_type=data.get("model_type", "cnn"),
-                model_size=data.get("model_size", "medium"),
-                estimated_params=data.get("estimated_params", 100000),
-                architecture=data.get("architecture", {}),
-                expected_accuracy=data.get("expected_accuracy", 0.8),
-                reasoning=data.get("reasoning", ""),
-                config=data.get("config", {}),
-            )
-        except json.JSONDecodeError as e:
+            # Extract JSON object with balanced braces
+            brace_count = 0
+            start = -1
+            for i, ch in enumerate(cleaned):
+                if ch == '{':
+                    if brace_count == 0:
+                        start = i
+                    brace_count += 1
+                elif ch == '}':
+                    brace_count -= 1
+                    if brace_count == 0 and start >= 0:
+                        json_str = cleaned[start:i + 1]
+                        data = self._try_json_parse(json_str)
+                        if data:
+                            return self._dict_to_recommendation(data)
+                        start = -1
+
+            self.logger.warning(f"Could not extract JSON from Gemini response: {response_text[:200]}")
+            return None
+
+        except Exception as e:
             self.logger.error(f"Failed to parse Gemini response: {e}")
             return None
+
+    def _try_json_parse(self, text: str) -> dict | None:
+        """Try multiple JSON parse strategies including truncated recovery."""
+        import re
+        for attempt in [text, text.replace('True', 'true').replace('False', 'false').replace('None', 'null')]:
+            try:
+                return json.loads(attempt)
+            except json.JSONDecodeError:
+                pass
+        # Try fixing missing commas (common Gemini bug)
+        try:
+            fixed = re.sub(r'"\s*\n\s*"', '",\n"', text)
+            return json.loads(fixed)
+        except json.JSONDecodeError:
+            pass
+        # Truncation recovery: close dangling strings and braces
+        try:
+            fixed = re.sub(r'(:\s*"[^"]*)$', r'\1"}', text.strip())
+            fixed = re.sub(r'(:\s*[-\d.]+)$', r'\1}', fixed)
+            return json.loads(fixed)
+        except json.JSONDecodeError:
+            pass
+        return None
+
+    def _dict_to_recommendation(self, data: dict) -> ModelRecommendation:
+        """Convert parsed dict to ModelRecommendation. Handles flat (new prompt) and nested formats."""
+        model_type = data.get("model_type", "cnn")
+        model_size = data.get("model_size", "medium")
+        params = data.get("estimated_params", data.get("params", 100000))
+        accuracy = data.get("expected_accuracy", data.get("accuracy", 0.8))
+        reason = data.get("reasoning", data.get("reason", ""))
+        config = data.get("config", {})
+        if not config and "batch" in data:
+            config = {"batch_size": data["batch"], "learning_rate": data["lr"], "local_epochs": data["epochs"]}
+
+        return ModelRecommendation(
+            id=f"gemini_{model_type}_{model_size}",
+            model_type=model_type,
+            model_size=model_size,
+            estimated_params=params,
+            architecture=data.get("architecture", {}),
+            expected_accuracy=accuracy,
+            reasoning=reason,
+            config=config,
+            source="gemini",
+            model_id=f"gemini_{model_type}_{model_size}",
+            model_name=f"Gemini: {model_type.title()} ({model_size})",
+        )
 
     def _fallback_recommendation(self, metadata: ClientMetadata) -> ModelRecommendation:
         """Provide fallback recommendation when API unavailable."""
@@ -237,6 +268,7 @@ Respond with ONLY valid JSON (no markdown formatting):
         if self.api_key:
             prompt = self._build_prompt(metadata)
             response = self._call_api(prompt)
+            print(response)
 
             if response:
                 recommendation = self._parse_response(response)
@@ -268,13 +300,12 @@ Respond with ONLY valid JSON (no markdown formatting):
                     rec.source = "gemini"
                     recommendations.append(rec)
 
-        # If we don't have enough, add fallback recommendations
+        # Add fallback recommendations NOT overlapping with Gemini
         if len(recommendations) < count:
             fallback_opts = self._get_fallback_options(metadata)
             for opt in fallback_opts:
                 if len(recommendations) >= count:
                     break
-                # Avoid duplicates
                 if not any(
                     r.model_type == opt.model_type and r.model_size == opt.model_size
                     for r in recommendations
@@ -284,7 +315,121 @@ Respond with ONLY valid JSON (no markdown formatting):
         return recommendations[:count]
 
     def _get_fallback_options(self, metadata: ClientMetadata) -> list[ModelRecommendation]:
-        """Get multiple fallback options."""
+        """Get multiple fallback options, tailored to data type."""
+        options = []
+        dtype = metadata.data_type or "unknown"
+
+        if dtype == "image":
+            options.append(
+                ModelRecommendation(
+                    model_type="cnn",
+                    model_size="small",
+                    estimated_params=100000,
+                    architecture={"conv_layers": 2, "fc_layers": 1, "hidden_dim": 64, "dropout": 0.5},
+                    expected_accuracy=0.75,
+                    reasoning="Lightweight CNN for small image datasets",
+                    config={"batch_size": 32, "learning_rate": 0.01, "local_epochs": 2},
+                    source="builtin",
+                    model_id="recommended_cnn_small_image",
+                    model_name="Small CNN (Image)",
+                )
+            )
+            options.append(
+                ModelRecommendation(
+                    model_type="efficientnet",
+                    model_size="medium",
+                    estimated_params=5000000,
+                    architecture={"variant": "efficientnet-b0", "pretrained": True},
+                    expected_accuracy=0.85,
+                    reasoning="EfficientNet-B0 — strong image baseline with pretrained weights",
+                    config={"batch_size": 32, "learning_rate": 0.001, "local_epochs": 3},
+                    source="builtin",
+                    model_id="recommended_efficientnet",
+                    model_name="EfficientNet-B0",
+                )
+            )
+            if metadata.has_gpu and metadata.dataset_size > 5000:
+                options.append(
+                    ModelRecommendation(
+                        model_type="vit",
+                        model_size="large",
+                        estimated_params=86000000,
+                        architecture={"variant": "vit-base-patch16-224", "pretrained": True},
+                        expected_accuracy=0.92,
+                        reasoning="Vision Transformer — state-of-the-art for large image datasets",
+                        config={"batch_size": 16, "learning_rate": 0.0001, "local_epochs": 2},
+                        source="builtin",
+                        model_id="recommended_vit",
+                        model_name="ViT-Base (Image)",
+                    )
+                )
+        elif dtype == "text":
+            options.append(
+                ModelRecommendation(
+                    model_type="transformer",
+                    model_size="small",
+                    estimated_params=2000000,
+                    architecture={"variant": "distilbert", "num_layers": 6, "hidden_dim": 768},
+                    expected_accuracy=0.78,
+                    reasoning="DistilBERT — efficient text model, good for FL with limited bandwidth",
+                    config={"batch_size": 16, "learning_rate": 0.0001, "local_epochs": 2},
+                    source="builtin",
+                    model_id="recommended_distilbert",
+                    model_name="DistilBERT (Text)",
+                )
+            )
+            options.append(
+                ModelRecommendation(
+                    model_type="transformer",
+                    model_size="medium",
+                    estimated_params=110000000,
+                    architecture={"variant": "bert-base", "num_layers": 12, "hidden_dim": 768},
+                    expected_accuracy=0.87,
+                    reasoning="BERT-Base — strong transformer for text classification",
+                    config={"batch_size": 8, "learning_rate": 0.00005, "local_epochs": 2},
+                    source="builtin",
+                    model_id="recommended_bert",
+                    model_name="BERT-Base (Text)",
+                )
+            )
+        elif dtype == "tabular":
+            options.append(
+                ModelRecommendation(
+                    model_type="mlp",
+                    model_size="small",
+                    estimated_params=30000,
+                    architecture={"fc_layers": 3, "hidden_dim": 64, "dropout": 0.3},
+                    expected_accuracy=0.72,
+                    reasoning="MLP — simple and effective for tabular data in FL settings",
+                    config={"batch_size": 64, "learning_rate": 0.01, "local_epochs": 2},
+                    source="builtin",
+                    model_id="recommended_mlp_small",
+                    model_name="Small MLP (Tabular)",
+                )
+            )
+            options.append(
+                ModelRecommendation(
+                    model_type="mlp",
+                    model_size="medium",
+                    estimated_params=150000,
+                    architecture={"fc_layers": 4, "hidden_dim": 256, "dropout": 0.3, "batch_norm": True},
+                    expected_accuracy=0.8,
+                    reasoning="Deep MLP with batch norm — handles complex tabular relationships",
+                    config={"batch_size": 64, "learning_rate": 0.005, "local_epochs": 3},
+                    source="builtin",
+                    model_id="recommended_mlp_medium",
+                    model_name="Medium MLP (Tabular)",
+                )
+            )
+        else:
+            # Generic fallback for unknown, audio, or multimodal
+            generic = self._get_fallback_options_legacy(metadata)
+            options.extend(generic)
+
+        return options
+
+    def _get_fallback_options_legacy(self, metadata: ClientMetadata) -> list[ModelRecommendation]:
+        """Original generic fallback (kept for backwards compat)."""
         options = []
 
         # Small option
@@ -299,6 +444,8 @@ Respond with ONLY valid JSON (no markdown formatting):
                     reasoning="Lightweight option for limited resources",
                     config={"batch_size": 16, "learning_rate": 0.01, "local_epochs": 2},
                     source="builtin",
+                    model_id="recommended_mlp_small_legacy",
+                    model_name="Small MLP (General)",
                 )
             )
 
@@ -313,6 +460,8 @@ Respond with ONLY valid JSON (no markdown formatting):
                 reasoning="Balanced option for most scenarios",
                 config={"batch_size": 32, "learning_rate": 0.01, "local_epochs": 2},
                 source="builtin",
+                model_id="recommended_cnn_medium_legacy",
+                model_name="Medium CNN (General)",
             )
         )
 
@@ -333,6 +482,8 @@ Respond with ONLY valid JSON (no markdown formatting):
                     reasoning="High-capacity option for powerful GPUs",
                     config={"batch_size": 64, "learning_rate": 0.01, "local_epochs": 3},
                     source="builtin",
+                    model_id="recommended_cnn_large_legacy",
+                    model_name="Large CNN (General)",
                 )
             )
 
@@ -353,6 +504,8 @@ Respond with ONLY valid JSON (no markdown formatting):
                     reasoning="Transformer architecture for complex patterns",
                     config={"batch_size": 32, "learning_rate": 0.0001, "local_epochs": 2},
                     source="builtin",
+                    model_id="recommended_transformer_legacy",
+                    model_name="Transformer (General)",
                 )
             )
 
@@ -510,10 +663,9 @@ class ModelRecommendationService:
         recommendations = []
         seen_types = set()
 
-        # 1. Get Gemini/recommendations
+        # 1. Get Gemini/Fallback recommendations
         gemini_recs = self.recommender.get_multiple_recommendations(metadata, count)
         for rec in gemini_recs:
-            rec.source = "gemini"
             recommendations.append(rec)
             seen_types.add((rec.model_type, rec.model_size))
 
@@ -602,4 +754,5 @@ def metadata_from_dict(data: dict[str, Any]) -> ClientMetadata:
         memory_mb=data.get("memory_mb"),
         network_bandwidth_mbps=data.get("network_bandwidth_mbps"),
         preferred_model_type=data.get("preferred_model_type"),
+        data_type=data.get("data_type"),
     )

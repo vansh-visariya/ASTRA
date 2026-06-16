@@ -481,6 +481,12 @@ class FederatedClient:
             self.config["dataset"].setdefault("num_classes", 10)
             self.config["dataset"].setdefault("normalize_mean", (0.48145466, 0.4578275, 0.40821073))
             self.config["dataset"].setdefault("normalize_std", (0.26862954, 0.26130258, 0.27577711))
+        elif source == "huggingface" and model_type == "text":
+            self.config.setdefault("dataset", {})
+            self.config["dataset"].setdefault("name", "synthetic_text")
+            self.config["dataset"].setdefault("num_classes", self.config.get("dataset", {}).get("num_classes", 2))
+            self.config["dataset"].setdefault("num_samples", 5000)
+            self.config["dataset"].setdefault("seq_length", 128)
 
         if model_info.get("is_peft"):
             self.config.setdefault("peft", {})
@@ -571,10 +577,30 @@ class FederatedClient:
                         if isinstance(model_info, dict) else None)
             if not model_id:
                 model_id = self.config.get("model", {}).get("model_id")
+            if not model_id:
+                model_id = self.group_model_id
             if model_id:
                 try:
                     return get_registry().build_model(model_id)
                 except ValueError:
+                    # Trial registration may have been lost on server restart.
+                    # Fallback: if it's a hf_ prefixed model, load directly from HF.
+                    if model_id.startswith("hf_"):
+                        self.logger.info(
+                            "Model %s not in registry, loading directly from HF", model_id
+                        )
+                        model_name = model_id[len("hf_"):].replace("_peft", "")
+                        if model_name.endswith("_peft_lora"):
+                            model_name = model_name[:-len("_peft_lora")]
+                        # Restore / in org/model_name format
+                        model_name = model_name.replace("_", "/", 1)
+                        use_peft = model_id.endswith("_peft")
+                        from astra.core.models.hf_models import load_hf_peft_model, freeze_backbone
+                        peft_cfg = {"enabled": use_peft, "method": "lora", "lora_rank": 8, "lora_alpha": 16, "target_modules": ["q_proj", "v_proj"]} if use_peft else {"enabled": False}
+                        model, _ = load_hf_peft_model(model_name, peft_cfg, device="cpu")
+                        if use_peft:
+                            freeze_backbone(model)
+                        return model
                     self.logger.error(
                         "Model '%s' not in registry. Register it first via dashboard.", model_id
                     )

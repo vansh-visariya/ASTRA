@@ -20,6 +20,16 @@ _src_root = Path(__file__).parent.parent.parent  # src/astra/app/ -> src/
 if str(_src_root) not in sys.path:
     sys.path.insert(0, str(_src_root))
 
+# Load .env file before any other imports that read os.environ
+_project_root = Path(_src_root).parent  # src/ -> repo root
+_env_path = _project_root / ".env"
+if _env_path.exists():
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(_env_path)
+    except ImportError:
+        pass  # python-dotenv not installed, user must set env vars manually
+
 from contextlib import asynccontextmanager
 
 import uvicorn

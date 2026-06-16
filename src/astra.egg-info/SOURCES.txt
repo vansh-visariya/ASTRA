@@ -38,7 +38,6 @@ src/astra/core/server.py
 src/astra/core/trust_manager.py
 src/astra/core/aggregation/__init__.py
 src/astra/core/aggregation/aggregator.py
-src/astra/core/aggregation/heterogeneous.py
 src/astra/core/aggregation/robust.py
 src/astra/core/models/__init__.py
 src/astra/core/models/hf_models.py
@@ -58,8 +57,19 @@ src/astra/infra/websocket_handler.py
 src/astra/infra/security/__init__.py
 src/astra/infra/security/auth.py
 tests/test_aggregator.py
+tests/test_auth.py
 tests/test_compression.py
+tests/test_config.py
+tests/test_data_splitter.py
+tests/test_database.py
+tests/test_hf_models.py
+tests/test_integration.py
+tests/test_malicious_simulator.py
+tests/test_metrics.py
+tests/test_model_zoo.py
+tests/test_models.py
 tests/test_privacy.py
 tests/test_reproducibility.py
 tests/test_smoke.py
+tests/test_system.py
 tests/test_trust_manager.py

@@ -26,6 +26,7 @@ dependencies = [
     "ruff>=0.1.0",
     "transformers",
     "peft",
+    "python-dotenv>=1.0.0",
 ]
 
 [project.scripts]

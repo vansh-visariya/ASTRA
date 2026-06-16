@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import torch
 from torch.utils.data import DataLoader, Subset
 from torchvision import datasets, transforms
 
@@ -60,6 +61,10 @@ class DataSplitter:
 
     def _load_dataset(self) -> None:
         """Load the base dataset."""
+        if self.dataset_name.lower() in ("synthetic_text", "text"):
+            self._load_synthetic_text_dataset()
+        if hasattr(self, "train_dataset"):
+            return
         if self.dataset_name == "MNIST":
             self._load_mnist()
         elif self.dataset_name == "CIFAR10":
@@ -97,6 +102,39 @@ class DataSplitter:
         )
         self.val_dataset = datasets.CIFAR10(
             data_dir, train=False, download=True, transform=transform
+        )
+
+    def _load_synthetic_text_dataset(self):
+        """Create a synthetic text dataset for text model training in FL."""
+        import numpy as np
+
+        num_classes = self.dataset_config.get("num_classes", 10)
+        num_samples = self.dataset_config.get("num_samples", 5000)
+        seq_len = self.dataset_config.get("seq_length", 128)
+        vocab_size = self.dataset_config.get("vocab_size", 30522)
+
+        class SyntheticTextDataset:
+            def __init__(self, num_samples, seq_len, vocab_size, num_classes):
+                self.num_samples = num_samples
+                rng = np.random.default_rng(42)
+                self.input_ids = rng.integers(1, vocab_size - 1, (num_samples, seq_len))
+                self.attention_mask = np.ones((num_samples, seq_len), dtype=np.int64)
+                self.labels = rng.integers(0, num_classes, num_samples)
+                self.targets = self.labels
+
+            def __len__(self):
+                return self.num_samples
+
+            def __getitem__(self, idx):
+                return (
+                    {"input_ids": torch.tensor(self.input_ids[idx]),
+                     "attention_mask": torch.tensor(self.attention_mask[idx])},
+                    torch.tensor(self.labels[idx])
+                )
+
+        self.train_dataset = SyntheticTextDataset(num_samples, seq_len, vocab_size, num_classes)
+        self.val_dataset = SyntheticTextDataset(
+            num_samples // 5, seq_len, vocab_size, num_classes
         )
 
     def split_data(self) -> None:

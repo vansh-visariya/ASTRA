@@ -15,6 +15,7 @@ export function Recommendations({ onModelRegistered }: RecommendationsProps) {
     num_classes: '',
     has_gpu: false,
     cpu_cores: '',
+    data_type: '',
   });
   const [recs, setRecs] = useState<Recommendation[]>([]);
   const [loading, setLoading] = useState(false);
@@ -29,6 +30,7 @@ export function Recommendations({ onModelRegistered }: RecommendationsProps) {
         num_classes: metadata.num_classes ? parseInt(metadata.num_classes) : undefined,
         has_gpu: metadata.has_gpu,
         cpu_cores: metadata.cpu_cores ? parseInt(metadata.cpu_cores) : undefined,
+        data_type: metadata.data_type || undefined,
       });
       setRecs(result.recommendations || []);
     } catch {
@@ -90,6 +92,18 @@ export function Recommendations({ onModelRegistered }: RecommendationsProps) {
           type="number"
           className="input-field"
         />
+        <select
+          value={metadata.data_type}
+          onChange={(e) => setMetadata({ ...metadata, data_type: e.target.value })}
+          className="input-field"
+        >
+          <option value="">Data type (optional)</option>
+          <option value="image">Image</option>
+          <option value="text">Text</option>
+          <option value="audio">Audio</option>
+          <option value="tabular">Tabular</option>
+          <option value="multimodal">Multimodal</option>
+        </select>
       </div>
 
       <button onClick={fetchRecommendations} disabled={loading} className="btn-secondary w-full inline-flex items-center justify-center gap-2 !py-2.5">

@@ -98,6 +98,13 @@ async def join_group_as_client(group_id: str, request: Request):
     # Register client in the FL group
     group.add_client(client_id, {"user_id": user_id, "username": username})
 
+    # Mark join request as activated in the auth system
+    try:
+        platform.auth_manager.join_request_manager.mark_user_activated(user_id, group_id)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("Failed to mark user %s activated in group %s: %s", user_id, group_id, e)
+
     # Register in database
     fl_server.db.register_fl_client(client_id, fl_server.experiment_id or "default")
 

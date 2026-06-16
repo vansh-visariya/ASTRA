@@ -374,6 +374,35 @@ class JoinRequestManager:
                 )
                 return None
 
+    def get_all_requests(self) -> list[dict]:
+        """Get all join requests including non-pending ones."""
+        with self.user_db._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """SELECT jr.id, jr.group_id, jr.user_id,
+                   u.username, jr.status, jr.requested_at,
+                   jr.metadata_json, jr.join_token, jr.resolved_at
+                   FROM join_requests jr
+                   JOIN users u ON jr.user_id = u.id
+                   ORDER BY jr.requested_at DESC"""
+            )
+            import json
+            rows = cursor.fetchall()
+            return [
+                {
+                    "id": r[0],
+                    "group_id": r[1],
+                    "user_id": r[2],
+                    "username": r[3],
+                    "status": r[4],
+                    "created_at": r[5],
+                    "metadata": json.loads(r[6]) if r[6] else {},
+                    "token": r[7],
+                    "resolved_at": r[8],
+                }
+                for r in rows
+            ]
+
     def get_pending_requests(self, group_id: str | None = None) -> list[dict]:
         """Get pending join requests."""
         with self.user_db._get_connection() as conn:
@@ -454,6 +483,19 @@ class JoinRequestManager:
 
             conn.commit()
             return True
+
+    def mark_user_activated(self, user_id: int, group_id: str) -> bool:
+        """Mark a user's join request as activated after they join the group."""
+        with self.user_db._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """UPDATE join_requests
+                   SET status = 'activated'
+                   WHERE user_id = ? AND group_id = ? AND status = 'approved'""",
+                (user_id, group_id),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
 
     def reject_request(self, request_id: int, resolved_by: int) -> bool:
         """Reject a join request."""

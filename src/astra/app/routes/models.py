@@ -3,6 +3,7 @@ Model management REST endpoints.
 """
 
 import importlib
+import json
 import os
 from typing import Any
 
@@ -86,8 +87,34 @@ async def register_hf_model(body: RegisterHfBody):
                 "normalize_std", (0.26862954, 0.26130258, 0.27577711)
             )
 
+        import logging, traceback
+
+        logging.getLogger(__name__).info("HF model registered: %s", model_info.to_dict())
+
+        # Persist to DB so it survives restarts
+        try:
+            from astra.app.database import get_db
+            db = get_db()
+            db.save_model_registration(
+                model_id=model_info.model_id,
+                architecture_path=model_info.architecture,
+                config_json=json.dumps({
+                    "source": "huggingface",
+                    "model_type": model_info.model_type,
+                    "use_peft": body.use_peft,
+                    "peft_method": body.peft_method,
+                    "total_params": model_info.total_params,
+                    "trainable_params": model_info.trainable_params,
+                }),
+                is_huggingface=True,
+            )
+        except Exception:
+            pass  # Don't fail the request if DB persist errors
+
         return {"status": "registered", "model": model_info.to_dict()}
     except Exception as e:
+        import logging, traceback
+        logging.getLogger(__name__).error("HF register failed: %s\n%s", e, traceback.format_exc())
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 

@@ -90,7 +90,7 @@ server {
 | `ENV` | **Yes** | Set to `prod` |
 | `GEMINI_API_KEY` | No | AI model recommendations |
 | `DB_PATH` | No | SQLite path (default: `./astra.db`) |
-| `ASTRA_DEFAULT_ADMIN_PASSWORD` | No | First-run admin password (default: `admin123`) |
+| `ASTRA_DEFAULT_ADMIN_PASSWORD` | No | First-run admin password (default: `adminpass`) |
 | `ASTRA_SEED` | No | RNG seed for reproducibility |
 
 ## Scaling
