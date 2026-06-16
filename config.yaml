@@ -1,21 +1,5 @@
 seed: 20260221
 
-groups:
-  - group_id: group_a
-    model_id: simple_cnn_mnist
-    window_size: 3
-    time_limit: 20.0
-    config:
-      aggregator: fedavg
-      join_token: ""
-  - group_id: group_b
-    model_id: simple_cnn_mnist
-    window_size: 
-    time_limit: 20.0
-    config:
-      aggregator: robust
-      join_token: ""
-
 dataset:
   name: MNIST
   split: dirichlet
@@ -23,16 +7,13 @@ dataset:
   imbalance: true
 
 model:
-  type: cnn
-  cnn:
-    name: simple_cnn
   hf:
     hf_model_name: "openai/clip-vit-base-patch32"
     quantization: 8bit
     gradient_checkpointing: true
 
 peft:
-  enabled: true
+  enabled: false
   method: lora
   lora_rank: 8
   lora_alpha: 16

@@ -3,7 +3,7 @@ Model Registry for managing baseline models.
 
 Supports:
 - HuggingFace models (with PEFT)
-- Custom CNN/MLP models
+- External model architectures via import path
 - Local model files
 
 References:
@@ -37,7 +37,7 @@ class ModelInfo:
         config: dict | None = None,
     ):
         self.model_id = model_id
-        self.model_type = model_type  # vision, text, multimodal
+        self.model_type = model_type
         self.architecture = architecture
         self.total_params = total_params
         self.trainable_params = trainable_params
@@ -67,15 +67,7 @@ class ModelInfo:
 
 
 class ModelRegistry:
-    """
-    Central registry for managing baseline models.
-
-    Features:
-    - Register HF models with optional PEFT
-    - Register custom CNN/MLP
-    - Load local .pt files
-    - Validate model compatibility
-    """
+    """Central registry for managing baseline models."""
 
     def __init__(self, cache_dir: str = "./models"):
         self.cache_dir = Path(cache_dir)
@@ -87,62 +79,10 @@ class ModelRegistry:
 
         self.logger = logging.getLogger(__name__)
 
-        self._register_builtin_models()
-
-    def _register_builtin_models(self) -> None:
-        """Register built-in CNN/MLP models."""
-        from astra.core.models.model_zoo import CIFAR10CNN, SimpleCNN
-
-        # SimpleCNN for MNIST
-        model = SimpleCNN(num_classes=10)
-        param_count = sum(p.numel() for p in model.parameters())
-
-        self.register_factory(
-            "simple_cnn_mnist",
-            factory=lambda: SimpleCNN(num_classes=10),
-            model_info=ModelInfo(
-                model_id="simple_cnn_mnist",
-                model_type="vision",
-                architecture="SimpleCNN",
-                total_params=param_count,
-                trainable_params=param_count,
-                is_peft=False,
-                source="builtin",
-                config={"dataset": "MNIST", "num_classes": 10},
-            ),
-        )
-
-        # CIFAR10 CNN
-        model_cifar = CIFAR10CNN(num_classes=10)
-        param_count_cifar = sum(p.numel() for p in model_cifar.parameters())
-
-        self.register_factory(
-            "simple_cnn_cifar10",
-            factory=lambda: CIFAR10CNN(num_classes=10),
-            model_info=ModelInfo(
-                model_id="simple_cnn_cifar10",
-                model_type="vision",
-                architecture="CIFAR10CNN",
-                total_params=param_count_cifar,
-                trainable_params=param_count_cifar,
-                is_peft=False,
-                source="builtin",
-                config={"dataset": "CIFAR10", "num_classes": 10},
-            ),
-        )
-
-        self.logger.info(f"Registered {len(self.models)} builtin models")
-
     def register_factory(
         self, model_id: str, factory: Callable[[], nn.Module], model_info: ModelInfo
     ) -> None:
-        """Register a model with its factory function.
-
-        Args:
-            model_id: Unique model identifier
-            factory: Callable that returns a new model instance
-            model_info: Model metadata
-        """
+        """Register a model with its factory function."""
         self.models[model_id] = model_info
         self.model_factories[model_id] = factory
         self.logger.info(
@@ -153,15 +93,7 @@ class ModelRegistry:
         )
 
     def build_model(self, model_id: str, device: str = "cpu") -> nn.Module:
-        """Instantiate a model from the registry by its ID.
-
-        Args:
-            model_id: Model identifier
-            device: Target device (cpu/cuda)
-
-        Returns:
-            Instantiated model on the specified device.
-        """
+        """Instantiate a model from the registry by its ID."""
         if model_id in self.model_instances:
             return self.model_instances[model_id].to(device)
 
@@ -179,21 +111,10 @@ class ModelRegistry:
     def register_hf_model(
         self, model_name: str, use_peft: bool = True, peft_config: dict | None = None
     ) -> ModelInfo:
-        """
-        Register a HuggingFace model.
-
-        Args:
-            model_name: HF model name (e.g., "openai/clip-vit-base-patch32")
-            use_peft: Whether to apply PEFT (LoRA) — defaults to True
-            peft_config: PEFT configuration if use_peft=True
-
-        Returns:
-            ModelInfo object
-        """
+        """Register a HuggingFace model."""
         from astra.core.models.hf_models import load_hf_peft_model
 
         model_id = f"hf_{model_name.replace('/', '_')}"
-
         if use_peft:
             model_id += "_peft"
 
@@ -212,25 +133,17 @@ class ModelRegistry:
                 "target_modules": ["q_proj", "v_proj"],
             }
 
-            model, processor = load_hf_peft_model(
-                model_name,
-                peft_cfg,
-                device="cpu",  # Load on CPU first
-            )
+            model, processor = load_hf_peft_model(model_name, peft_cfg, device="cpu")
 
             total_params = sum(p.numel() for p in model.parameters())
-
-            if use_peft:
-                trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-            else:
-                trainable = total_params
+            trainable = (
+                sum(p.numel() for p in model.parameters() if p.requires_grad)
+                if use_peft
+                else total_params
+            )
 
             model_type = "vision"
-            if (
-                "text" in model_name.lower()
-                or "bert" in model_name.lower()
-                or "gpt" in model_name.lower()
-            ):
+            if "text" in model_name.lower() or "bert" in model_name.lower() or "gpt" in model_name.lower():
                 model_type = "text"
             if "clip" in model_name.lower() or "blip" in model_name.lower():
                 model_type = "multimodal"
@@ -255,7 +168,6 @@ class ModelRegistry:
             )[0]
 
             self.logger.info(f"Registered HF model: {model_id} ({total_params:,} params)")
-
             return model_info
 
         except Exception as e:
@@ -265,23 +177,12 @@ class ModelRegistry:
     def register_local_model(
         self, model_id: str, model_path: str, architecture: str = "Custom"
     ) -> ModelInfo:
-        """
-        Register a local .pt model file.
-
-        Args:
-            model_id: Unique identifier
-            model_path: Path to .pt file
-            architecture: Model architecture name
-
-        Returns:
-            ModelInfo object
-        """
+        """Register a local .pt model file."""
         if model_id in self.models:
             return self.models[model_id]
 
         try:
             state_dict = torch.load(model_path, map_location="cpu")
-
             total_params = sum(p.numel() for p in state_dict.values())
 
             model_info = ModelInfo(
@@ -296,77 +197,15 @@ class ModelRegistry:
             )
 
             self.models[model_id] = model_info
-
             self.logger.info(f"Registered local model: {model_id}")
-
             return model_info
 
         except Exception as e:
             self.logger.error(f"Failed to load local model: {e}")
             raise
 
-    def register_custom_architecture(
-        self, model_id: str, architecture: str, model_type: str, config: dict[str, Any]
-    ) -> ModelInfo:
-        """
-        Register a custom architecture.
-
-        Args:
-            model_id: Unique identifier
-            architecture: Architecture type (cnn, mlp, or custom class name)
-            model_type: vision, text, multimodal
-            config: Model configuration
-
-        Returns:
-            ModelInfo object
-        """
-        from astra.core.models.model_zoo import create_model
-
-        config_copy = {**config}
-        config_copy.setdefault("model", {})
-        config_copy["model"]["type"] = architecture
-
-        try:
-            model = create_model(config_copy)
-
-            total_params = sum(p.numel() for p in model.parameters())
-            trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-
-            model_info = ModelInfo(
-                model_id=model_id,
-                model_type=model_type,
-                architecture=architecture,
-                total_params=total_params,
-                trainable_params=trainable_params,
-                is_peft=False,
-                source="custom",
-                config=config_copy,
-            )
-
-            self.register_factory(
-                model_id,
-                factory=lambda cfg=config_copy: create_model(cfg),
-                model_info=model_info,
-            )
-            self.model_instances[model_id] = model
-
-            return model_info
-
-        except Exception as e:
-            self.logger.error(f"Failed to create custom model: {e}")
-            raise
-
     def load_model(self, model_id: str, device: str = "cpu") -> nn.Module:
-        """
-        Load model instance.
-
-        Args:
-            model_id: Model identifier
-            device: Target device (cpu/cuda)
-
-        Returns:
-            Model instance
-        """
+        """Load model instance."""
         try:
             return self.build_model(model_id, device=device)
         except ValueError:
@@ -389,30 +228,16 @@ class ModelRegistry:
         elif model_info.source == "local":
             model = torch.load(model_info.model_path or "", map_location=device)
         else:
-            from astra.core.models.model_zoo import create_model
-
-            config = {"model": {"type": model_info.architecture}, **model_info.config}
-            model = create_model(config)
-            model = model.to(device)
+            raise ValueError(f"No loader for source '{model_info.source}' on model '{model_id}'")
 
         self.model_instances[model_id] = model
         return model
 
     def list_models(self, model_type: str | None = None) -> list[dict[str, Any]]:
-        """
-        List all registered models.
-
-        Args:
-            model_type: Optional filter by type
-
-        Returns:
-            List of model info dictionaries
-        """
+        """List all registered models."""
         models = list(self.models.values())
-
         if model_type:
             models = [m for m in models if m.model_type == model_type]
-
         return [m.to_dict() for m in models]
 
     def get_model_info(self, model_id: str) -> dict[str, Any] | None:
@@ -422,29 +247,17 @@ class ModelRegistry:
         return None
 
     def validate_model(self, model_id: str) -> tuple[bool, str]:
-        """
-        Validate model compatibility.
-
-        Args:
-            model_id: Model to validate
-
-        Returns:
-            (is_valid, message)
-        """
+        """Validate model compatibility."""
         if model_id not in self.models:
             return False, f"Model {model_id} not found"
-
         model_info = self.models[model_id]
-
         if model_info.total_params > 1_000_000_000:
             return False, "Model exceeds 1B parameters"
-
         return True, "Valid"
 
     def save_registry(self, path: str) -> None:
         """Save registry to JSON file."""
         data = {model_id: info.to_dict() for model_id, info in self.models.items()}
-
         with open(path, "w") as f:
             json.dump(data, f, indent=2)
 
@@ -452,7 +265,6 @@ class ModelRegistry:
         """Load registry from JSON file."""
         with open(path) as f:
             data = json.load(f)
-
         for model_id, info_dict in data.items():
             self.models[model_id] = ModelInfo.from_dict(info_dict)
 

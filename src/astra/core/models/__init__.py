@@ -1,4 +1,4 @@
-"""Model definitions — CNN/MLP model zoo, HuggingFace loader."""
+"""Model definitions — utility functions, HF loader."""
 
 from astra.core.models.hf_models import (  # noqa: F401
     apply_peft,
@@ -9,21 +9,15 @@ from astra.core.models.hf_models import (  # noqa: F401
     load_lora_state_dict,
 )
 from astra.core.models.model_zoo import (  # noqa: F401
-    CIFAR10CNN,
-    SimpleCNN,
     SimpleMLP,
     apply_flat_delta,
     apply_peft_delta,
-    create_model,
     flatten_all_params,
     flatten_peft_params,
 )
 
 __all__ = [
-    "SimpleCNN",
-    "CIFAR10CNN",
     "SimpleMLP",
-    "create_model",
     "load_hf_peft_model",
     "apply_peft",
     "freeze_backbone",

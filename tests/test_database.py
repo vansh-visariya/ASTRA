@@ -79,14 +79,14 @@ class TestGroups:
             config = json.dumps({"window_size": 5, "time_limit": 300})
             c.execute(
                 "INSERT INTO groups (group_id, model_id, status, config_json, window_size) VALUES (?, ?, ?, ?, ?)",
-                ("grp1", "simple_cnn_mnist", "ACTIVE", config, 5),
+                ("grp1", "my_model", "ACTIVE", config, 5),
             )
             conn.commit()
 
             c.execute("SELECT * FROM groups WHERE group_id = ?", ("grp1",))
             row = c.fetchone()
             assert row is not None
-            assert row["model_id"] == "simple_cnn_mnist"
+            assert row["model_id"] == "my_model"
             assert row["status"] == "ACTIVE"
 
     def test_unique_group_id(self, db):
@@ -94,7 +94,7 @@ class TestGroups:
             c = conn.cursor()
             c.execute(
                 "INSERT INTO groups (group_id, model_id, status) VALUES (?, ?, ?)",
-                ("same_id", "simple_cnn_mnist", "IDLE"),
+                ("same_id", "my_model", "IDLE"),
             )
             conn.commit()
 
@@ -110,7 +110,7 @@ class TestGroups:
             c = conn.cursor()
             c.execute(
                 "INSERT INTO groups (group_id, model_id, status) VALUES (?, ?, ?)",
-                ("grp2", "simple_cnn_mnist", "IDLE"),
+                ("grp2", "my_model", "IDLE"),
             )
             conn.commit()
 
@@ -128,7 +128,7 @@ class TestGroups:
             c = conn.cursor()
             c.execute(
                 "INSERT INTO groups (group_id, model_id, status) VALUES (?, ?, ?)",
-                ("del_me", "simple_cnn_mnist", "IDLE"),
+                ("del_me", "my_model", "IDLE"),
             )
             conn.commit()
 
@@ -382,3 +382,4 @@ class TestEventLogs:
             row = c.fetchone()
             assert row is not None
             assert row["event_type"] == "client_join"
+["event_type"] == "client_join"

@@ -37,7 +37,6 @@ from websockets.exceptions import ConnectionClosed
 
 from astra.core.data_splitter import DataSplitter
 from astra.core.fl_client import FLClient as LocalClient
-from astra.core.models.model_zoo import create_model
 from astra.core.utils.seed import set_seed
 
 
@@ -571,12 +570,19 @@ class FederatedClient:
             model_id = (model_info.get("model_id")
                         if isinstance(model_info, dict) else None)
             if not model_id:
-                model_id = self.config.get("model", {}).get("model_id", "simple_cnn_mnist")
-
-            try:
-                return get_registry().build_model(model_id)
-            except ValueError:
-                return create_model(self.config)
+                model_id = self.config.get("model", {}).get("model_id")
+            if model_id:
+                try:
+                    return get_registry().build_model(model_id)
+                except ValueError:
+                    self.logger.error(
+                        "Model '%s' not in registry. Register it first via dashboard.", model_id
+                    )
+                    raise
+            raise RuntimeError(
+                "No model_id configured. Register a model via the dashboard (External tab)"
+                " and set model_id in config."
+            )
 
         self.local_client = LocalClient(
             client_id=self.client_id,

@@ -35,9 +35,6 @@ export const getModels = () => api.get<ApiListResponse<Model>>('/api/models');
 export const registerHfModel = (body: Record<string, unknown>) =>
   api.post<{ model_id: string }>('/api/models/register/hf', body);
 
-export const registerCustomModel = (body: Record<string, unknown>) =>
-  api.post<{ model_id: string }>('/api/models/register', body);
-
 export const registerArchitecture = (body: {
   model_id: string;
   architecture_path: string;

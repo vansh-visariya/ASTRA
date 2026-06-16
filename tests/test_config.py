@@ -45,7 +45,7 @@ class TestLoadConfig:
         with patch("astra.core.config._find_config_yaml", return_value=None):
             config = load_config(None)
             assert config["seed"] == 42
-            assert config["model"]["type"] == "cnn"
+            assert "hf" in config["model"]
             assert config["client"]["num_clients"] == 20
 
     def test_unknown_key_path_returns_defaults(self):
@@ -92,8 +92,8 @@ class TestLoadConfig:
 
 class TestDefaultConfig:
     def test_model_defaults(self):
-        assert DEFAULT_CONFIG["model"]["type"] == "cnn"
-        assert DEFAULT_CONFIG["model"]["cnn"]["name"] == "simple_cnn"
+        assert "hf" in DEFAULT_CONFIG["model"]
+        assert "hf_model_name" in DEFAULT_CONFIG["model"]["hf"]
 
     def test_server_defaults(self):
         assert DEFAULT_CONFIG["server"]["aggregator_window"] == 10

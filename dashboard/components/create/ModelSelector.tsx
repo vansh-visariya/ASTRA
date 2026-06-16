@@ -6,12 +6,11 @@ import type { Model } from '@/lib/api/types';
 
 interface ModelSelectorProps {
   models: Model[];
-  modelChoice: 'registry' | 'huggingface' | 'custom' | 'external';
+  modelChoice: 'registry' | 'huggingface' | 'external';
   selectedModelId: string;
   onSelectModel: (id: string) => void;
-  onChoiceChange: (choice: 'registry' | 'huggingface' | 'custom' | 'external') => void;
+  onChoiceChange: (choice: 'registry' | 'huggingface' | 'external') => void;
   onRegisterHf: (modelName: string, peftRank?: number) => Promise<void>;
-  onRegisterCustom: (modelId: string, architecture: string, dataset: string) => Promise<void>;
   onRegisterExternal: (modelId: string, architecturePath: string, config?: Record<string, unknown>) => Promise<void>;
   loading?: boolean;
 }
@@ -23,18 +22,12 @@ export function ModelSelector({
   onSelectModel,
   onChoiceChange,
   onRegisterHf,
-  onRegisterCustom,
   onRegisterExternal,
   loading,
 }: ModelSelectorProps) {
   const [hfSearch, setHfSearch] = useState('');
   const [hfResults, setHfResults] = useState<Array<{ id: string }>>([]);
   const [searching, setSearching] = useState(false);
-
-  // Custom model form
-  const [customId, setCustomId] = useState('');
-  const [architecture, setArchitecture] = useState('CNN');
-  const [dataset, setDataset] = useState('MNIST');
 
   const [extId, setExtId] = useState('');
   const [extPath, setExtPath] = useState('');
@@ -58,7 +51,7 @@ export function ModelSelector({
       <h3 className="text-sm font-semibold text-white uppercase tracking-wider">Model Configuration</h3>
 
       <div className="flex gap-2 mb-4">
-        {(['registry', 'huggingface', 'custom', 'external'] as const).map((choice) => (
+        {(['registry', 'huggingface', 'external'] as const).map((choice) => (
           <button
             key={choice}
             onClick={() => onChoiceChange(choice)}
@@ -70,7 +63,6 @@ export function ModelSelector({
           >
             {choice === 'registry' && 'Registry'}
             {choice === 'huggingface' && 'HuggingFace'}
-            {choice === 'custom' && 'Custom'}
             {choice === 'external' && 'External'}
           </button>
         ))}
@@ -130,41 +122,6 @@ export function ModelSelector({
               <Plus size={14} className="text-slate-600" />
             </button>
           ))}
-        </div>
-      )}
-
-      {modelChoice === 'custom' && (
-        <div className="space-y-3">
-          <input
-            value={customId}
-            onChange={(e) => setCustomId(e.target.value)}
-            placeholder="Model ID"
-            className="input-field"
-          />
-          <select
-            value={architecture}
-            onChange={(e) => setArchitecture(e.target.value)}
-            className="input-field"
-          >
-            <option value="CNN">CNN</option>
-            <option value="MLP">MLP</option>
-          </select>
-          <select
-            value={dataset}
-            onChange={(e) => setDataset(e.target.value)}
-            className="input-field"
-          >
-            <option value="MNIST">MNIST</option>
-            <option value="CIFAR10">CIFAR10</option>
-          </select>
-          <button
-            onClick={() => onRegisterCustom(customId, architecture, dataset)}
-            disabled={!customId.trim()}
-            className="btn-primary w-full inline-flex items-center justify-center gap-2 !py-3"
-          >
-            <Database size={16} />
-            Register Custom Model
-          </button>
         </div>
       )}
 

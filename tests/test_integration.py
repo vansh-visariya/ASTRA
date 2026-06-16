@@ -19,7 +19,7 @@ def _make_config(**overrides):
     cfg = {
         "seed": 42,
         "dataset": {"name": "MNIST", "split": "dirichlet", "dirichlet_alpha": 0.3},
-        "model": {"type": "cnn", "model_id": "simple_cnn_mnist"},
+        "model": {},
         "client": {"num_clients": 3, "local_epochs": 1, "batch_size": 8, "lr": 0.01},
         "server": {"server_lr": 0.5, "aggregator_window": 3, "momentum": 0.9, "async_lambda": 0.2, "optimizer": "sgd", "adaptive_lr": False},
         "robust": {"method": "fedavg"},
@@ -192,7 +192,8 @@ class TestByzantineRobustness:
 
         c1 = FLClient("honest1", dummy_data, factory, config)
         c2 = FLClient("bad", dummy_data, factory, config)
-        server = AsyncServer(model, config)
+        aggregator = create_aggregator(config)
+        server = AsyncServer(model, aggregator, config)
         server.handle_update(c1.local_train())
         server.handle_update(c2.local_train())
 

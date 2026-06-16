@@ -20,8 +20,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "imbalance": True,
     },
     "model": {
-        "type": "cnn",
-        "cnn": {"name": "simple_cnn"},
         "hf": {
             "hf_model_name": "openai/clip-vit-base-patch32",
             "quantization": "8bit",

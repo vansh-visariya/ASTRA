@@ -46,7 +46,9 @@ async def create_group(group_data: dict):
     group_id = group_data.get("group_id")
     if not isinstance(group_id, str):
         raise HTTPException(status_code=400, detail="group_id is required and must be a string")
-    model_id = group_data.get("model_id", "simple_cnn_mnist")
+    model_id = group_data.get("model_id")
+    if not model_id:
+        raise HTTPException(status_code=400, detail="model_id is required")
     window_size = group_data.get("window_size", 3)
     time_limit = group_data.get("time_limit", 20.0)
     custom_token = group_data.get("join_token")

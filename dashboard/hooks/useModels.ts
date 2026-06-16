@@ -2,7 +2,6 @@ import { useCallback } from 'react';
 import {
   getModels,
   registerHfModel,
-  registerCustomModel,
 } from '@/lib/api/endpoints';
 import type { Model, ApiListResponse } from '@/lib/api/types';
 import { useApi } from './useApi';
@@ -21,6 +20,5 @@ export function useModels(wsConnected: boolean) {
     error: result.error,
     refetch: apiResult.refetch,
     registerHfModel,
-    registerCustomModel,
   };
 }

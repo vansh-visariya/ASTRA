@@ -67,7 +67,7 @@ def client_headers(fresh_client):
 def group_id(fresh_client, auth_headers):
     resp = fresh_client.post("/api/groups", json={
         "group_id": f"test_grp_{os.urandom(4).hex()}",
-        "model_id": "simple_cnn_mnist",
+        "model_id": "",
         "window_size": 3,
         "time_limit": 20,
     }, headers=auth_headers)
@@ -124,7 +124,7 @@ class TestGroupEndpoints:
     def test_create_group_auth_required(self, fresh_client):
         resp = fresh_client.post("/api/groups", json={
             "group_id": "no_auth",
-            "model_id": "simple_cnn_mnist",
+            "model_id": "",
         })
         assert resp.status_code == 400
 
@@ -132,7 +132,7 @@ class TestGroupEndpoints:
         gid = f"g_create_{os.urandom(4).hex()}"
         resp = fresh_client.post("/api/groups", json={
             "group_id": gid,
-            "model_id": "simple_cnn_mnist",
+            "model_id": "",
         }, headers=auth_headers)
         assert resp.status_code == 200
         assert resp.json()["group"]["group_id"] == gid
@@ -153,7 +153,7 @@ class TestGroupEndpoints:
     def test_delete_group(self, fresh_client, auth_headers):
         gid = f"g_del_{os.urandom(4).hex()}"
         fresh_client.post("/api/groups", json={
-            "group_id": gid, "model_id": "simple_cnn_mnist",
+            "group_id": gid, "model_id": "",
         }, headers=auth_headers)
 
         resp = fresh_client.delete(f"/api/groups/{gid}", headers=auth_headers)
@@ -213,7 +213,7 @@ class TestJoinRequestEndpoints:
     def test_client_join_request(self, fresh_client, client_headers, auth_headers):
         gid = f"j_{os.urandom(4).hex()}"
         fresh_client.post("/api/groups", json={
-            "group_id": gid, "model_id": "simple_cnn_mnist",
+            "group_id": gid, "model_id": "",
         }, headers=auth_headers)
 
         resp = fresh_client.post("/api/join/join-request", json={
@@ -224,7 +224,7 @@ class TestJoinRequestEndpoints:
     def test_duplicate_join_request(self, fresh_client, client_headers, auth_headers):
         gid = f"jd_{os.urandom(4).hex()}"
         fresh_client.post("/api/groups", json={
-            "group_id": gid, "model_id": "simple_cnn_mnist",
+            "group_id": gid, "model_id": "",
         }, headers=auth_headers)
 
         fresh_client.post("/api/join/join-request", json={
@@ -258,7 +258,7 @@ class TestClientEndpoints:
     def test_register_client(self, fresh_client, auth_headers):
         gid = f"reg_{os.urandom(4).hex()}"
         fresh_client.post("/api/groups", json={
-            "group_id": gid, "model_id": "simple_cnn_mnist",
+            "group_id": gid, "model_id": "",
         }, headers=auth_headers)
 
         resp = fresh_client.post("/api/clients/register", json={
@@ -334,7 +334,7 @@ class TestEdgeCases:
     def test_group_create_invalid_window(self, fresh_client, auth_headers):
         resp = fresh_client.post("/api/groups", json={
             "group_id": f"inv_{os.urandom(4).hex()}",
-            "model_id": "simple_cnn_mnist",
+            "model_id": "",
             "window_size": -1,
         }, headers=auth_headers)
         assert resp.status_code == 200

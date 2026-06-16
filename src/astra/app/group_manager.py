@@ -85,7 +85,7 @@ class GroupManager:
 
                     group = TrainingGroup(
                         group_id=gid,
-                        model_id=g.get("model_id", "simple_cnn_mnist"),
+                        model_id=g.get("model_id", ""),
                         config=config,
                         join_token=g.get("join_token", ""),
                         window_config=AsyncWindowConfig(
@@ -181,28 +181,11 @@ class GroupManager:
 
                 self.logger.info(f"Loaded {len(db_groups)} groups from database")
             else:
-                # No persisted groups - create default
-                self.create_group(
-                    group_id="default",
-                    model_id="simple_cnn_mnist",
-                    config={},
-                    window_size=3,
-                    time_limit=20.0,
-                )
-                self.logger.info("Created default group (no groups in DB)")
+                self.logger.info("No groups found in database — create groups via the dashboard")
         except Exception as e:
             self.logger.warning(f"Could not load groups from DB: {e}")
             if not self.groups:
-                aggregator = create_aggregator({})
-                group = TrainingGroup(
-                    group_id="default",
-                    model_id="simple_cnn_mnist",
-                    config={},
-                    join_token=uuid.uuid4().hex[:16],
-                    window_config=AsyncWindowConfig(window_size=3, time_limit=20.0),
-                    aggregator=aggregator,
-                )
-                self.groups["default"] = group
+                self.logger.warning("Could not load groups from DB. Create via dashboard.")
 
     def _load_logs_from_db(self) -> None:
         """Load persisted event logs from database on startup."""

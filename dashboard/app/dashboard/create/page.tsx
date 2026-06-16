@@ -7,7 +7,7 @@ import { Layers, ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 import { useWS } from '@/components/WebSocketProvider';
 import { useModels } from '@/hooks';
-import { createGroup, registerHfModel, registerCustomModel, registerArchitecture } from '@/lib/api/endpoints';
+import { createGroup, registerHfModel, registerArchitecture } from '@/lib/api/endpoints';
 import { ModelSelector } from '@/components/create/ModelSelector';
 import { TrainingConfig } from '@/components/create/TrainingConfig';
 import { WindowConfig } from '@/components/create/WindowConfig';
@@ -22,8 +22,8 @@ export default function CreateGroupPage() {
 
   const models: Model[] = (modelsData as any)?.models || [];
 
-  const [modelChoice, setModelChoice] = useState<'registry' | 'huggingface' | 'custom' | 'external'>('registry');
-  const [selectedModelId, setSelectedModelId] = useState('simple_cnn_mnist');
+  const [modelChoice, setModelChoice] = useState<'registry' | 'huggingface' | 'external'>('registry');
+  const [selectedModelId, setSelectedModelId] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [localEpochs, setLocalEpochs] = useState(2);
   const [batchSize, setBatchSize] = useState(32);
@@ -37,13 +37,6 @@ export default function CreateGroupPage() {
   const handleRegisterHf = async (modelName: string) => {
     const result = await registerHfModel({ model_name: modelName, use_peft: false });
     setSelectedModelId(result.model_id);
-    setModelChoice('registry');
-    refetchModels();
-  };
-
-  const handleRegisterCustom = async (modelId: string, architecture: string, dataset: string) => {
-    await registerCustomModel({ model_id: modelId, model_type: 'vision', architecture, dataset });
-    setSelectedModelId(modelId);
     setModelChoice('registry');
     refetchModels();
   };
@@ -143,7 +136,6 @@ export default function CreateGroupPage() {
           onSelectModel={setSelectedModelId}
           onChoiceChange={setModelChoice}
           onRegisterHf={handleRegisterHf}
-          onRegisterCustom={handleRegisterCustom}
           onRegisterExternal={handleRegisterExternal}
         />
 

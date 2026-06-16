@@ -97,12 +97,19 @@ class FLServer:
             if model_id not in self.model_registry.model_instances:
                 self.model_registry.model_instances[model_id] = model
         else:
-            model_id = self.config.get("model", {}).get("model_id", "simple_cnn_mnist")
+            model_id = self.config.get("model", {}).get("model_id")
+            if not model_id:
+                raise RuntimeError(
+                    "No model_id specified. Register a model first via the dashboard "
+                    "(HuggingFace or External tabs) and pass its model_id in config."
+                )
             try:
                 model = self.model_registry.build_model(model_id)
             except ValueError:
-                from astra.core.models.model_zoo import create_model as _create_model
-                model = _create_model(self.config)
+                raise RuntimeError(
+                    f"Model '{model_id}' not found in registry. "
+                    f"Available: {list(self.model_registry.model_factories.keys())}"
+                ) from None
 
         aggregator = create_aggregator(self.config)
 
@@ -167,7 +174,7 @@ class FLServer:
         if not self.server:
             return {}
 
-        return {"global_version": self.server.global_version, "model_type": "simple_cnn"}
+        return {"global_version": self.server.global_version, "model_type": "custom"}
 
     def start_experiment(self, experiment_id: str, config: dict) -> None:
         """Start a new experiment."""

@@ -1,17 +1,13 @@
 """
-Unit tests for model_zoo: flatten/apply functions, create_model, registry integration.
+Unit tests for model_zoo: flatten/apply functions and SimpleMLP.
 """
 
 import numpy as np
 import torch
 import torch.nn as nn
-import pytest
 
 from astra.core.models.model_zoo import (
-    SimpleCNN,
-    CIFAR10CNN,
     SimpleMLP,
-    create_model,
     flatten_all_params,
     apply_flat_delta,
     flatten_peft_params,
@@ -32,25 +28,29 @@ class DummyModel(nn.Module):
         return x
 
 
-class TestFlattenAllParams:
-    def test_simple_cnn_roundtrip(self):
-        model = SimpleCNN(num_classes=10)
-        flat = flatten_all_params(model)
-        assert flat.dtype == np.float32
-        assert len(flat) > 0
+class TinyNN(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc1 = nn.Linear(10, 5)
+        self.fc2 = nn.Linear(5, 3)
 
-    def test_cifar10_cnn_roundtrip(self):
-        model = CIFAR10CNN(num_classes=10)
-        flat = flatten_all_params(model)
-        assert len(flat) > 0
+    def forward(self, x):
+        return self.fc2(self.fc1(x))
+
+
+class TestFlattenAllParams:
+    def test_roundtrip_deterministic(self):
+        torch.manual_seed(42)
+        m1 = TinyNN()
+        torch.manual_seed(42)
+        m2 = TinyNN()
+        assert np.allclose(flatten_all_params(m1), flatten_all_params(m2))
 
     def test_flatten_then_apply_deterministic(self):
         model = DummyModel()
         original = flatten_all_params(model)
-
         delta = np.ones_like(original)
         apply_flat_delta(model, delta)
-
         updated = flatten_all_params(model)
         assert np.allclose(updated, original + 1.0)
 
@@ -72,14 +72,11 @@ class TestFlattenAllParams:
         apply_flat_delta(model, np.full_like(original, 0.001))
         assert np.allclose(flatten_all_params(model), original + 0.001)
 
-    def test_model_unchanged_weights_unchanged(self):
-        torch.manual_seed(42)
-        model1 = SimpleCNN(num_classes=10)
-        torch.manual_seed(42)
-        model2 = SimpleCNN(num_classes=10)
-        flat1 = flatten_all_params(model1)
-        flat2 = flatten_all_params(model2)
-        assert np.allclose(flat1, flat2)
+    def test_output_dtype(self):
+        model = DummyModel()
+        flat = flatten_all_params(model)
+        assert flat.dtype == np.float32
+        assert len(flat) > 0
 
 
 class TestPEFTFlatten:
@@ -114,47 +111,18 @@ class TestPEFTFlatten:
         apply_peft_delta(model, np.array([1.0]))
 
 
-class TestCreateModel:
-    def test_default_creates_simple_cnn(self):
-        from astra.infra.registry import get_registry
-        model = get_registry().build_model("simple_cnn_mnist")
-        assert isinstance(model, SimpleCNN)
-        assert model.fc2.out_features == 10
-
-    def test_cifar10_dataset_creates_cifar10_cnn(self):
-        from astra.infra.registry import get_registry
-        model = get_registry().build_model("simple_cnn_cifar10")
-        assert isinstance(model, CIFAR10CNN)
-
-    def test_legacy_fallback_creates_simple_cnn(self):
-        config = {"model": {"type": "cnn", "model_id": "NONEXISTENT_xyz"}, "dataset": {"name": "MNIST"}}
-        model = create_model(config)
-        assert isinstance(model, SimpleCNN)
-
-    def test_legacy_fallback_creates_cifar10(self):
-        config = {"model": {"type": "cnn", "model_id": "NONEXISTENT_xyz"}, "dataset": {"name": "CIFAR10"}}
-        model = create_model(config)
-        assert isinstance(model, CIFAR10CNN)
-
-    def test_legacy_fallback_creates_mlp(self):
-        config = {"model": {"type": "mlp", "model_id": "NONEXISTENT_xyz"}, "dataset": {"name": "MNIST"}}
-        model = create_model(config)
-        assert isinstance(model, SimpleMLP)
-
-    def test_forward_pass_works(self):
-        model = SimpleCNN(num_classes=10)
-        x = torch.randn(2, 1, 28, 28)
-        out = model(x)
-        assert out.shape == (2, 10)
-
-    def test_cifar10_forward_pass(self):
-        model = CIFAR10CNN(num_classes=10)
-        x = torch.randn(2, 3, 32, 32)
-        out = model(x)
-        assert out.shape == (2, 10)
-
-    def test_mlp_forward_pass(self):
+class TestSimpleMLP:
+    def test_forward_pass(self):
         model = SimpleMLP(input_dim=784, num_classes=10)
         x = torch.randn(2, 784)
         out = model(x)
         assert out.shape == (2, 10)
+
+    def test_creates_correct_layers(self):
+        model = SimpleMLP(input_dim=100, num_classes=5, hidden_dim=128)
+        assert model.fc1.in_features == 100
+        assert model.fc1.out_features == 128
+        assert model.fc2.in_features == 128
+        assert model.fc2.out_features == 128
+        assert model.fc3.in_features == 128
+        assert model.fc3.out_features == 5
