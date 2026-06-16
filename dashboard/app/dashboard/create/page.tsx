@@ -34,8 +34,8 @@ export default function CreateGroupPage() {
   const [groupId, setGroupId] = useState('');
   const [aggregator, setAggregator] = useState('fedavg');
 
-  const handleRegisterHf = async (modelName: string) => {
-    const result = await registerHfModel({ model_name: modelName, use_peft: false });
+  const handleRegisterHf = async (modelName: string, peftRank?: number) => {
+    const result = await registerHfModel({ model_name: modelName, use_peft: !!peftRank });
     setSelectedModelId(result.model_id);
     setModelChoice('registry');
     refetchModels();

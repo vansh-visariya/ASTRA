@@ -42,8 +42,7 @@ export function Recommendations({ onModelRegistered }: RecommendationsProps) {
     if (!hfUrl.trim()) return;
     setAddingHf(true);
     try {
-      const hfModelName = hfUrl.replace('https://huggingface.co/', '').replace(/\/+$/, '');
-      await addHuggingFaceModel({ model_id: hfModelName });
+      await addHuggingFaceModel({ model_url: hfUrl, use_peft: false });
       onModelRegistered();
       setHfUrl('');
     } catch {

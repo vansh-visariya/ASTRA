@@ -99,7 +99,7 @@ This prevents straggler clients from blocking the entire pipeline.
 | `FLServer` | `app/fl_server.py` | Orchestrator — wires AsyncServer + GroupManager + ConnectionManager |
 | `AstraDB` | `app/database.py` | SQLite persistence, WAL mode, thread-local connections |
 | `ConnectionManager` | `infra/connection_manager.py` | WebSocket registry, broadcast, per-client send |
-| `ModelRegistry` | `infra/registry.py` | Model factory registry, HF integration, builtin models |
+| `ModelRegistry` | `infra/registry.py` | Model factory registry, HF integration, dynamic architecture import + DB persistence |
 | `TrustManager` | `core/trust_manager.py` | Cosine similarity trust, quarantine logic |
 | `Config` | `core/config.py` | YAML + env config loading |
 

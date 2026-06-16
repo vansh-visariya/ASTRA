@@ -7,7 +7,7 @@
 <p align="center">
   <a href="#quick-start"><img src="https://img.shields.io/badge/quick_start-8000?style=flat&logo=fastapi&labelColor=white&color=009688" alt="Quick Start"></a>
   <a href="/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
-  <a href="https://github.com/vansh-visariya/ASTRA/actions"><img src="https://img.shields.io/badge/tests-43%2F43-brightgreen" alt="Tests"></a>
+  <a href="https://github.com/vansh-visariya/ASTRA/actions"><img src="https://img.shields.io/badge/tests-223%2F223-brightgreen" alt="Tests"></a>
   <img src="https://img.shields.io/badge/python-3.10%2B-blue?logo=python" alt="Python">
   <img src="https://img.shields.io/badge/next.js-14-black?logo=next.js" alt="Next.js">
   <img src="https://img.shields.io/badge/pytorch-latest-EE4C2C?logo=pytorch" alt="PyTorch">
@@ -32,7 +32,7 @@ Admin creates group → Clients request to join → Admin approves
   → Global model improves → Dashboard streams live metrics
 ```
 
-1. **Admin** picks a model (built‑in CNN/MLP or any HuggingFace model) and creates a training group.
+1. **Admin** picks a model (from the registry: any PyTorch module, HuggingFace model, or dynamic import) and creates a training group.
 2. **Clients** browse available groups and request to join.
 3. **Admin** approves pending join requests.
 4. **Clients** activate their membership and begin training on their own data.
@@ -49,7 +49,7 @@ Admin creates group → Clients request to join → Admin approves
 | **Robustness** | Byzantine‑tolerant trust scoring · Cosine‑similarity anomaly detection · Soft quarantine |
 | **Privacy** | DP‑SGD (client‑side or server‑side) · Gaussian noise · Gradient clipping · Moments accountant |
 | **Compression** | Top‑k sparsification · Quantization |
-| **Models** | SimpleCNN · CIFAR10CNN · SimpleMLP · Any HuggingFace model · Optional LoRA / PEFT |
+| **Models** | Registry-driven · Any PyTorch module via dynamic import · Any HuggingFace model · Optional LoRA / PEFT |
 | **Data Splits** | IID · Dirichlet (non‑IID) · Pathological |
 | **Auth** | JWT + bcrypt · Roles: `admin` \| `client` \| `observer` |
 | **Dashboard** | Next.js 14 · Admin panel (groups, join requests, metrics) · Client panel (training, trust, notifications) |
@@ -307,7 +307,7 @@ Full reference in [`config.yaml`](./config.yaml).
 
 ```bash
 pip install -e ".[dev]"              # install with dev deps (pytest, ruff, mypy)
-pytest tests/ -v                     # 43 tests — aggregation, compression, DP, trust, API smoke
+pytest tests/ -v                     # 223 tests — aggregation, compression, DP, trust, API, auth, config, schema
 ```
 
 ```
@@ -393,3 +393,12 @@ See [`AGENTS.md`](AGENTS.md) for architecture notes, data flow diagrams, and kno
 ## License
 
 MIT — see [LICENSE](LICENSE).
+).
+n gotchas.
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+).

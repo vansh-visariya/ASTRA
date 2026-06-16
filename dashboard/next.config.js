@@ -2,18 +2,16 @@
 const nextConfig = {
   reactStrictMode: true,
   async rewrites() {
+    const apiUrl = process.env.API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+    const wsUrl = process.env.WS_URL || process.env.NEXT_PUBLIC_WS_URL || 'http://localhost:8000';
     return [
       {
         source: '/api/:path*',
-        destination: process.env.REACT_APP_API_URL
-          ? `${process.env.REACT_APP_API_URL}/api/:path*`
-          : 'http://localhost:8000/api/:path*',
+        destination: `${apiUrl}/api/:path*`,
       },
       {
         source: '/ws',
-        destination: process.env.REACT_APP_WS_URL
-          ? `${process.env.REACT_APP_WS_URL}/ws`
-          : 'http://localhost:8000/ws',
+        destination: `${wsUrl}/ws`,
       },
     ];
   },

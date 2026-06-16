@@ -24,22 +24,10 @@ class RegisterArchitectureBody(BaseModel):
     config: dict | None = None
 
 
-@router.post("/api/models/register")
-async def register_model(model_id: str, model_type: str, model_source: str, config: dict):
-    """Register a new model."""
-    fl_server = get_fl_server()
-    if model_source == "huggingface":
-        model_info = fl_server.model_registry.register_hf_model(
-            config["model_name"],
-            use_peft=config.get("use_peft", False),
-            peft_config=config.get("peft_config"),
-        )
-    elif model_source == "custom":
-        model_info = fl_server.model_registry.register_custom_architecture(
-            model_id, config["architecture"], model_type, config
-        )
-
-    return {"status": "registered", "model": model_info.to_dict()}
+class RegisterHfBody(BaseModel):
+    model_name: str
+    use_peft: bool = False
+    peft_method: str = "lora"
 
 
 @router.get("/api/models")
@@ -63,27 +51,27 @@ def _fetch_hf_model_metadata(model_name: str) -> dict[str, Any]:
 
 
 @router.post("/api/models/register/hf")
-async def register_hf_model(model_name: str, use_peft: bool = False, peft_method: str = "lora"):
+async def register_hf_model(body: RegisterHfBody):
     """Register a HuggingFace model."""
     fl_server = get_fl_server()
     try:
         peft_config = (
             {
-                "enabled": use_peft,
-                "method": peft_method,
+                "enabled": body.use_peft,
+                "method": body.peft_method,
                 "lora_rank": 8,
                 "lora_alpha": 16,
                 "target_modules": ["q_proj", "v_proj"],
             }
-            if use_peft
+            if body.use_peft
             else {"enabled": False}
         )
 
         model_info = fl_server.model_registry.register_hf_model(
-            model_name=model_name, use_peft=use_peft, peft_config=peft_config
+            model_name=body.model_name, use_peft=body.use_peft, peft_config=peft_config
         )
 
-        hf_meta = _fetch_hf_model_metadata(model_name)
+        hf_meta = _fetch_hf_model_metadata(body.model_name)
         hf_config = hf_meta.get("config") or {}
         vision_config = hf_config.get("vision_config") or {}
         image_size = hf_config.get("image_size") or vision_config.get("image_size")

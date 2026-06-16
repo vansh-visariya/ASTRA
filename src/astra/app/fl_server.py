@@ -68,7 +68,17 @@ class FLServer:
                 factory_fn = getattr(module, attr_name)
                 config_row = row.get("config_json")
                 kwargs = json.loads(config_row).get("kwargs", {}) if config_row else {}
-                self.model_registry.register_factory(model_id, lambda fn=factory_fn, kw=kwargs: fn(**kw) if kw else fn())
+                model_info = {
+                    "model_id": model_id,
+                    "source": "external",
+                    "architecture_path": arch_path,
+                    "config": kwargs,
+                }
+                self.model_registry.register_factory(
+                    model_id,
+                    lambda fn=factory_fn, kw=kwargs: fn(**kw) if kw else fn(),
+                    model_info,
+                )
                 logger.info("Reloaded model '%s' from DB (path: %s)", model_id, arch_path)
             except Exception as e:
                 logger.warning("Failed to reload model '%s': %s", model_id, e)
@@ -99,28 +109,33 @@ class FLServer:
         else:
             model_id = self.config.get("model", {}).get("model_id")
             if not model_id:
-                raise RuntimeError(
-                    "No model_id specified. Register a model first via the dashboard "
-                    "(HuggingFace or External tabs) and pass its model_id in config."
+                self.logger.warning(
+                    "No model_id in config — server starting without a global model. "
+                    "Register a model via the dashboard (HuggingFace or External tabs) "
+                    "and create a group with model_id."
                 )
-            try:
-                model = self.model_registry.build_model(model_id)
-            except ValueError:
-                raise RuntimeError(
-                    f"Model '{model_id}' not found in registry. "
-                    f"Available: {list(self.model_registry.model_factories.keys())}"
-                ) from None
+                model = None
+            else:
+                try:
+                    model = self.model_registry.build_model(model_id)
+                except ValueError:
+                    raise RuntimeError(
+                        f"Model '{model_id}' not found in registry. "
+                        f"Available: {list(self.model_registry.model_factories.keys())}"
+                    ) from None
 
         aggregator = create_aggregator(self.config)
 
-        data_splitter = DataSplitter(self.config)
-        _, val_loader = data_splitter.create_data_loaders()
+        if model is not None:
+            data_splitter = DataSplitter(self.config)
+            _, val_loader = data_splitter.create_data_loaders()
 
-        self.server = AsyncServer(
-            model=model, aggregator=aggregator, config=self.config, val_loader=val_loader
-        )
-
-        self.group_manager.server_model = self.server.model
+            self.server = AsyncServer(
+                model=model, aggregator=aggregator, config=self.config, val_loader=val_loader
+            )
+            self.group_manager.server_model = self.server.model
+        else:
+            self.server = None
 
         self.logger.info("FL Server initialized")
 

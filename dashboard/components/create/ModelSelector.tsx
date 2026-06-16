@@ -28,6 +28,7 @@ export function ModelSelector({
   const [hfSearch, setHfSearch] = useState('');
   const [hfResults, setHfResults] = useState<Array<{ id: string }>>([]);
   const [searching, setSearching] = useState(false);
+  const [usePeft, setUsePeft] = useState(false);
 
   const [extId, setExtId] = useState('');
   const [extPath, setExtPath] = useState('');
@@ -115,13 +116,22 @@ export function ModelSelector({
           {hfResults.slice(0, 5).map((m) => (
             <button
               key={m.id}
-              onClick={() => onRegisterHf(m.id)}
+              onClick={() => onRegisterHf(m.id, usePeft ? 8 : undefined)}
               className="w-full p-3 rounded-xl text-left hover:bg-white/5 transition-all flex items-center justify-between"
             >
               <span className="text-white text-sm">{m.id}</span>
               <Plus size={14} className="text-slate-600" />
             </button>
           ))}
+          <label className="flex items-center gap-2 pt-2 text-xs text-slate-400 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={usePeft}
+              onChange={(e) => setUsePeft(e.target.checked)}
+              className="rounded"
+            />
+            Use LoRA/PEFT (train only adapters — faster, less bandwidth)
+          </label>
         </div>
       )}
 
