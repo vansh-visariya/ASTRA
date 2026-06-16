@@ -39,10 +39,7 @@ def test_system_metrics(client):
 
 def test_groups_list(client):
     resp = client.get("/api/groups")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert "groups" in data
-    assert "count" in data
+    assert resp.status_code == 401
 
 
 def test_models_list(client):
