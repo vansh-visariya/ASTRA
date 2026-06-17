@@ -51,3 +51,4 @@ __pycache__/
 .venv
 .commandcode
 .claude
+tests/models

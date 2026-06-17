@@ -92,7 +92,7 @@ class AstraDB:
                     group_id TEXT NOT NULL,
                     user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
                     status TEXT DEFAULT 'pending'
-                        CHECK(status IN ('pending', 'approved', 'rejected')),
+                        CHECK(status IN ('pending', 'approved', 'rejected', 'activated')),
                     requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     resolved_at TIMESTAMP,
                     resolved_by INTEGER REFERENCES users(id),
@@ -286,6 +286,74 @@ class AstraDB:
 
             conn.commit()
             logger.info("[DB] Schema initialized in %s", self.db_path)
+
+        # Forward-compat migrations: extend CHECK constraints that newer
+        # code paths need (e.g. join_requests.status='activated').
+        # CREATE TABLE IF NOT EXISTS only runs on first init, so existing
+        # databases need explicit ALTER TABLE.
+        self._migrate_join_requests_status()
+
+    def _migrate_join_requests_status(self):
+        """Allow 'activated' as a join_requests.status value.
+
+        Pre-existing CHECK constraint only allowed
+        ('pending', 'approved', 'rejected'). The activate endpoint writes
+        'activated' after a client joins the FL group; without this
+        migration the update silently fails with a CHECK constraint error.
+        """
+        import sqlite3
+
+        with self.connection() as conn:
+            row = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='join_requests'"
+            ).fetchone()
+            if not row:
+                return
+            create_sql = row[0] or ""
+            if "'activated'" in create_sql:
+                return  # already migrated
+
+            # SQLite can't ALTER a CHECK constraint in place. Recreate
+            # the table with the new constraint and copy data over.
+            try:
+                conn.execute("PRAGMA foreign_keys=OFF")
+                conn.execute("ALTER TABLE join_requests RENAME TO _join_requests__old")
+                conn.execute(
+                    """
+                    CREATE TABLE join_requests (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        group_id TEXT NOT NULL,
+                        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+                        status TEXT DEFAULT 'pending'
+                            CHECK(status IN ('pending', 'approved', 'rejected', 'activated')),
+                        requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        resolved_at TIMESTAMP,
+                        resolved_by INTEGER REFERENCES users(id),
+                        token_delivered BOOLEAN DEFAULT 0,
+                        token_delivered_at TIMESTAMP,
+                        request_nonce TEXT UNIQUE NOT NULL,
+                        metadata_json TEXT
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    INSERT INTO join_requests
+                        (id, group_id, user_id, status, requested_at, resolved_at,
+                         resolved_by, token_delivered, token_delivered_at,
+                         request_nonce, metadata_json)
+                    SELECT id, group_id, user_id, status, requested_at, resolved_at,
+                           resolved_by, token_delivered, token_delivered_at,
+                           request_nonce, metadata_json
+                    FROM _join_requests__old
+                    """
+                )
+                conn.execute("DROP TABLE _join_requests__old")
+                conn.execute("PRAGMA foreign_keys=ON")
+                conn.commit()
+                logger.info("[DB] Migrated join_requests.status to allow 'activated'")
+            except sqlite3.OperationalError as e:
+                logger.warning("[DB] join_requests migration skipped: %s", e)
 
     # ========================================================================
     # Migration from legacy databases
@@ -781,10 +849,22 @@ _db: AstraDB | None = None
 
 
 def get_db() -> AstraDB:
-    """Get the global AstraDB instance."""
+    """Get the global AstraDB instance.
+
+    Honors the `ASTRA_DB_PATH` environment variable so tests can redirect
+    the DB to a temporary file without touching the developer's real
+    `astra.db`. If the singleton was already initialized under a different
+    path, it is re-initialized.
+    """
     global _db
+    env_path = os.environ.get("ASTRA_DB_PATH")
     if _db is None:
-        _db = AstraDB()
+        _db = AstraDB(env_path or "./astra.db")
+    elif env_path and env_path != _db.db_path:
+        # Singleton was created with the default path but the env now asks
+        # for a different one — re-init. This happens when tests redirect
+        # the DB after `get_db()` has already been called.
+        _db = AstraDB(env_path)
     return _db
 
 

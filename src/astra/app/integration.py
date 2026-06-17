@@ -220,11 +220,17 @@ class FLPlatformIntegration:
         target_request = next((r for r in all_pending if r["id"] == request_id), None)
 
         if not target_request:
-            # Check if already approved/rejected (idempotent double-click)
+            # Check if already approved/rejected/activated (idempotent double-click).
+            # 'activated' means the client already finished the activation
+            # flow — approving again should still succeed.
             all_reqs = self.auth_manager.join_request_manager.get_all_requests()
             target_request = next((r for r in all_reqs if r["id"] == request_id), None)
-            if target_request and target_request.get("status") == "approved":
-                return {"success": True, "already_approved": True, "token": target_request.get("token", "")}
+            if target_request and target_request.get("status") in ("approved", "activated"):
+                return {
+                    "success": True,
+                    "already_approved": True,
+                    "token": target_request.get("token", ""),
+                }
             if target_request and target_request.get("status") == "rejected":
                 return {"success": False, "error": "Request already rejected"}
             return {"success": False, "error": "Request not found"}

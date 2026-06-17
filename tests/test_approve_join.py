@@ -1,5 +1,4 @@
 """Quick sanity test for the approve-join-request endpoint fix."""
-import os
 import uuid
 
 import pytest
@@ -85,6 +84,22 @@ def test_approve_join_request_returns_token(fresh_client, admin_creds, client_cr
     assert body.get("success") is True
     assert "token" in body
     assert len(body["token"]) > 0
+
+    # Activate — must succeed without raising the CHECK constraint error.
+    # Pre-fix this silently failed (the row stayed 'approved', but the
+    # warning "Failed to mark user N activated ... CHECK constraint
+    # failed" was logged). The HTTP response is still 200 because the
+    # activation logic catches the error.
+    r = fresh_client.post(f"/api/join/activate/{gid}", headers=client_h)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["status"] == "joined"
+
+    # Verify the join_requests row was actually marked activated.
+    me = fresh_client.get(
+        f"/api/join/my-requests/{gid}", headers=client_h
+    ).json()
+    assert me.get("status") in ("activated", "joined"), me
 
     # Idempotent: approve again — should also succeed with already_approved=True
     r = fresh_client.post(
