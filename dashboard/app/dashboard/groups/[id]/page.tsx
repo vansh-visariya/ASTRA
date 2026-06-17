@@ -293,12 +293,12 @@ export default function GroupDetailPage() {
             </div>
           </div>
           <div className="glass-card p-5">
-            <h3 className="text-sm font-semibold text-white mb-4">Training Config</h3>
+            <h3 className="text-sm font-semibold text-white mb-4">Server Config</h3>
             <div className="space-y-2">
               {[
-                ['Epochs', (group as any)?.config?.local_epochs || '—'],
-                ['Batch Size', (group as any)?.config?.batch_size || '—'],
+                ['Aggregator', (group as any)?.config?.aggregator || 'fedavg'],
                 ['Learning Rate', (group as any)?.config?.lr || '—'],
+                ['Differential Privacy', (group as any)?.config?.dp_enabled ? 'Enabled' : 'Disabled'],
               ].map(([label, value]) => (
                 <div key={label} className="flex justify-between p-3 rounded-xl" style={{ background: 'rgba(30,41,59,0.4)' }}>
                   <span className="text-slate-400 text-sm">{label}</span>

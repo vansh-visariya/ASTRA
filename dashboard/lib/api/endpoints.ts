@@ -5,7 +5,6 @@ import type {
   LogEntry,
   Notification,
   JoinRequest,
-  TrainingStatus,
   TrustData,
   Model,
   Recommendation,
@@ -27,8 +26,6 @@ export const controlGroup = (id: string, action: 'start' | 'pause' | 'resume' | 
 
 export const deleteGroup = (id: string) =>
   api.del<{ status: string }>(`/api/groups/${id}`);
-
-export const getTrainingStatus = () => api.get<TrainingStatus>('/api/client/training-status');
 
 export const getModels = () => api.get<ApiListResponse<Model>>('/api/models');
 

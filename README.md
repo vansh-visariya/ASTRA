@@ -7,7 +7,6 @@
 <p align="center">
   <a href="#quick-start"><img src="https://img.shields.io/badge/quick_start-8000?style=flat&logo=fastapi&labelColor=white&color=009688" alt="Quick Start"></a>
   <a href="/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
-  <a href="https://github.com/vansh-visariya/ASTRA/actions"><img src="https://img.shields.io/badge/tests-223%2F223-brightgreen" alt="Tests"></a>
   <img src="https://img.shields.io/badge/python-3.10%2B-blue?logo=python" alt="Python">
   <img src="https://img.shields.io/badge/next.js-14-black?logo=next.js" alt="Next.js">
   <img src="https://img.shields.io/badge/pytorch-latest-EE4C2C?logo=pytorch" alt="PyTorch">
@@ -17,9 +16,11 @@
 
 ## Overview
 
-ASTRA is a production-ready federated learning platform. It lets you train machine learning models across distributed clients **without centralizing raw data**. A dual-panel dashboard (Admin + Client) gives you full control over training groups, trust scoring, differential privacy, and real-time metrics.
+**ASTRA** is a production-ready federated learning (FL) platform. Clients train machine learning models on their own hardware — the server never sees raw data — and submit pre-computed weight deltas via REST or the bundled Next.js dashboard. The server aggregates those deltas using hybrid async windowing, scores trust per-client, optionally applies server-side DP, and broadcasts the new global model back to every dashboard.
 
-**What makes it different:** ASTRA uses **hybrid async windowing** — aggregation triggers when _either_ N client updates arrive _or_ a time window expires. No more waiting on stragglers. Byzantine-robust aggregation, trust-based client scoring, and DP-SGD come built in.
+**What makes it different:** ASTRA uses **hybrid async windowing** — aggregation triggers when _either_ N client updates arrive _or_ a time window expires. No more waiting on stragglers. Byzantine-robust aggregation (FedAvg / Trimmed Mean / Coordinate Median / Hybrid), trust-based client scoring, and server-side DP-SGD come built in.
+
+> **Scope:** ASTRA is a **server + aggregation + delivery** platform. The client training loop itself is **out of scope** — clients bring their own training code (PyTorch, JAX, anything) and submit the resulting weight delta. The dashboard's "Upload Delta" page is the easiest way to do this.
 
 ---
 
@@ -27,17 +28,25 @@ ASTRA is a production-ready federated learning platform. It lets you train machi
 
 ```
 Admin creates group → Clients request to join → Admin approves
-  → Clients train locally and push model deltas
-  → Server aggregates using FedAvg / Trimmed Mean / Median / Hybrid
-  → Global model improves → Dashboard streams live metrics
+  → Client activates membership (REST or dashboard)
+  → Client trains externally on its own data
+  → Client computes delta = new_weights - old_weights (float32 little-endian)
+  → Client POSTs base64-encoded delta to /api/clients/{id}/delta
+  → Server validates, applies DP if configured, scores trust via cosine similarity
+  → Server aggregates when N updates received OR T seconds elapsed (whichever first)
+  → Server applies aggregated delta to global model, broadcasts model_update
+  → Dashboard shows live accuracy, loss, trust scores, event logs via WebSocket
 ```
 
-1. **Admin** picks a model (from the registry: any PyTorch module, HuggingFace model, or dynamic import) and creates a training group.
-2. **Clients** browse available groups and request to join.
+### Step-by-step
+
+1. **Admin** registers a model in the registry (any PyTorch module, HuggingFace model, or dynamic import) and creates a training group.
+2. **Clients** sign up, browse available groups, and request to join.
 3. **Admin** approves pending join requests.
-4. **Clients** activate their membership and begin training on their own data.
-5. **Updates** flow asynchronously — the server aggregates every `window_size` updates or `time_limit` seconds (whichever comes first).
-6. **Dashboard** shows live accuracy, loss, trust scores, and event logs via WebSocket.
+4. **Clients** activate their membership via `POST /api/join/activate/{group_id}` or the dashboard.
+5. **Clients** train **on their own hardware** (out of scope for ASTRA), then POST the resulting delta to the server.
+6. **Updates** flow asynchronously — the server aggregates every `window_size` updates or `time_limit` seconds (whichever comes first), using the configured aggregator.
+7. **Dashboard** shows live accuracy, loss, trust scores, and event logs via WebSocket + REST.
 
 ---
 
@@ -45,16 +54,16 @@ Admin creates group → Clients request to join → Admin approves
 
 | Category | Capability |
 |---|---|
-| **Aggregation** | FedAvg · Trimmed Mean · Coordinate Median · Hybrid (trust‑weighted + staleness decay) |
-| **Robustness** | Byzantine‑tolerant trust scoring · Cosine‑similarity anomaly detection · Soft quarantine |
-| **Privacy** | DP‑SGD (client‑side or server‑side) · Gaussian noise · Gradient clipping · Moments accountant |
-| **Compression** | Top‑k sparsification · Quantization |
+| **Aggregation** | FedAvg · Trimmed Mean · Coordinate Median · Hybrid (trust-weighted + staleness decay) |
+| **Robustness** | Byzantine-tolerant trust scoring · Cosine-similarity anomaly detection · Soft quarantine |
+| **Privacy** | DP-SGD (server-side) · Gaussian noise · Gradient clipping |
+| **Compression** | Top-k sparsification · Quantization |
 | **Models** | Registry-driven · Any PyTorch module via dynamic import · Any HuggingFace model · Optional LoRA / PEFT |
-| **Data Splits** | IID · Dirichlet (non‑IID) · Pathological |
+| **Client training** | Out of scope — clients train externally and submit pre-computed deltas |
 | **Auth** | JWT + bcrypt · Roles: `admin` \| `client` \| `observer` |
-| **Dashboard** | Next.js 14 · Admin panel (groups, join requests, metrics) · Client panel (training, trust, notifications) |
-| **Real‑time** | WebSocket + Socket.IO · Live metrics streaming | 
-| **Recommendations** | Gemini API‑powered model suggestions (optional) |
+| **Dashboard** | Next.js 14 · Admin panel (groups, join requests, metrics, logs) · Client panel (upload delta, trust, notifications) |
+| **Real-time** | WebSocket + Socket.IO · Live metrics streaming |
+| **Recommendations** | Gemini API-powered model suggestions (optional) |
 
 ---
 
@@ -63,76 +72,73 @@ Admin creates group → Clients request to join → Admin approves
 ```
 ASTRA/
 ├── src/astra/                     # Python package (importable as astra.*)
-│   ├── __init__.py                #   Public exports: AsyncServer, FLClient, load_config…
+│   ├── __init__.py                #   Public exports: AsyncServer, TrustManager, load_config
 │   ├── app/                       #   API layer — FastAPI, orchestration, DB, groups
 │   │   ├── server_api.py          #     Entry point — REST + WebSocket + Socket.IO
-│   │   ├── fl_server.py           #     FLServer — bridges core engine ↔ API
-│   │   ├── group_manager.py       #     Manages concurrent TrainingGroups
-│   │   ├── training_group.py      #     TrainingGroup + AsyncWindowConfig dataclass
+│   │   ├── fl_server.py           #     FLServer — orchestrates AsyncServer + GroupManager
+│   │   ├── group_manager.py       #     Manages concurrent TrainingGroups + hybrid windowing
+│   │   ├── training_group.py      #     TrainingGroup + AsyncWindowConfig dataclasses
 │   │   ├── database.py            #     AstraDB — single SQLite file (astra.db), WAL mode
 │   │   ├── state.py               #     FLServer singleton accessor
 │   │   ├── integration.py         #     Wires auth + notifications + trust + recommender
 │   │   ├── extended_endpoints.py  #     Auth / join / notification / trust REST routes
-│   │   ├── notifications.py       #     In‑app notification service
-│   │   ├── model_recommender.py   #     Gemini‑powered model suggestions
+│   │   ├── notifications.py       #     In-app notification service
+│   │   ├── model_recommender.py   #     Gemini-powered model suggestions
 │   │   └── routes/                #     system · groups · clients · models · experiments
 │   │
-│   ├── core/                      #   FL algorithms — pure Python, zero web deps
-│   │   ├── server.py              #     AsyncServer — staleness‑weighted aggregation engine
-│   │   ├── fl_client.py           #     FLClient — local training loop
+│   ├── core/                      #   Server-side FL algorithms — pure Python, no web deps
+│   │   ├── server.py              #     AsyncServer — staleness-weighted aggregation engine
 │   │   ├── trust_manager.py       #     Trust scoring via cosine similarity + quarantine
 │   │   ├── config.py              #     Centralized YAML + env config loader
-│   │   ├── compression.py         #     Top‑k sparsification + quantization
-│   │   ├── data_splitter.py       #     IID / Dirichlet / pathological data splits
-│   │   ├── inference.py           #     Server‑side and client‑side inference
+│   │   ├── compression.py         #     Top-k sparsification + quantization
+│   │   ├── inference.py           #     Server-side and client-side inference
 │   │   ├── exceptions.py          #     Custom FL exception hierarchy
 │   │   ├── aggregation/           #     aggregator · robust · heterogeneous
-│   │   ├── models/                #     model_zoo (CNN/MLP) · hf_models (HF + PEFT)
-│   │   ├── privacy/               #     DP‑SGD · MaliciousSimulator
+│   │   ├── models/                #     model_zoo · hf_models (HF + PEFT)
+│   │   ├── privacy/               #     DP-SGD (server-side clip_and_noise)
 │   │   └── utils/                 #     metrics · seed · logging
 │   │
-│   ├── infra/                     #   Transport, schemas, auth, model registry
-│   │   ├── connection_manager.py  #     WebSocket registry — broadcast + per‑client send
-│   │   ├── websocket_handler.py   #     WS endpoint + Socket.IO event handlers
-│   │   ├── models.py              #     Pydantic schemas (ClientUpdate, ExperimentConfig…)
-│   │   ├── registry.py            #     ModelRegistry — HF / custom / local .pt
-│   │   └── security/auth.py       #     JWT + bcrypt authentication
-│   │
-│   └── client/
-│       └── cli.py                 #   FederatedClient CLI — trains locally, pushes updates
+│   └── infra/                     #   Transport, schemas, auth, model registry
+│       ├── connection_manager.py  #     WebSocket registry — broadcast + per-client send
+│       ├── websocket_handler.py   #     WS endpoint (event channel only) + Socket.IO handlers
+│       ├── models.py              #     Pydantic schemas (ClientUpdate, ExperimentConfig…)
+│       ├── registry.py            #     ModelRegistry — HF / custom / local .pt
+│       └── security/auth.py       #     JWT + bcrypt authentication
 │
 ├── dashboard/                     # Next.js 14 app
 │   ├── Dockerfile
 │   ├── next.config.js
 │   ├── app/
 │   │   ├── dashboard/             #   Admin UI — groups, join requests, logs, events
-│   │   └── client/                #   Client UI — browse groups, training, trust, notifs
+│   │   └── client/                #   Client UI — groups, upload delta, trust, notifs
 │   └── components/
 │       └── AuthContext.tsx
 │
-├── tests/                         # 43 pytest tests
+├── tests/                         # pytest tests (~220 passing)
 │   ├── conftest.py                #   Test fixtures (TestClient, sample_config)
-│   ├── test_smoke.py              #   API smoke tests (health, status, groups, clients…)
+│   ├── test_smoke.py              #   API smoke tests (health, status, groups, clients)
 │   ├── test_aggregator.py
 │   ├── test_compression.py
 │   ├── test_privacy.py
 │   ├── test_reproducibility.py
-│   └── test_trust_manager.py
+│   ├── test_trust_manager.py
+│   ├── test_upload_endpoint.py    #   POST /api/clients/{id}/delta validation
+│   ├── test_external_client_flow.py # End-to-end upload cycle
+│   └── test_websocket_cleanup.py  #   WebSocket rejects client-training messages
 │
 ├── .github/workflows/ci.yml       # CI — lint + typecheck + test
-├── .pre-commit-config.yaml        # pre‑commit hooks (ruff + mypy)
-├── config.yaml                    # Default training configuration
+├── .pre-commit-config.yaml        # pre-commit hooks (ruff + mypy)
+├── config.yaml                    # Default server configuration
 ├── pyproject.toml                 # Package metadata + tool config (ruff, mypy, pytest)
-├── Makefile                       # make test / lint / run-server / run-client …
+├── Makefile                       # make test / lint / run-server …
 ├── Dockerfile                     # Root — API server
-├── Dockerfile.server              # Production API server
-├── Dockerfile.client              # FL client container
-├── docker-compose.yml             # Multi‑service deployment
+├── docker-compose.yml             # Multi-service deployment
 ├── requirements.txt               # Python dependencies
 ├── conftest.py                    # Adds src/ to sys.path for pytest
 ├── LICENSE                        # MIT
 ├── CHANGELOG.md
-└── AGENTS.md                      # AI assistant memory (architecture, gotchas, workflows)
+├── AGENTS.md                      # AI assistant memory (architecture, gotchas, workflows)
+└── .claude/                       # Claude memory (architecture.md, progress.md, decisions.md)
 ```
 
 ---
@@ -157,13 +163,13 @@ python -m venv .venv
 .venv\Scripts\activate     # Windows
 source .venv/bin/activate  # macOS / Linux
 
-pip install -r requirements.txt
+pip install -e ".[dev]"
 
-# Start the server
+# Start the server (port 8000 by default)
 uvicorn astra.app.server_api:app --reload --port 8000
 ```
 
-The API is now live at **http://localhost:8000**. Interactive Swagger docs at `/docs`.
+The API is live at **http://localhost:8000**. Interactive Swagger docs at `/docs`.
 
 ### 2. Dashboard
 
@@ -179,33 +185,62 @@ Dashboard at **http://localhost:3000**. Sign up with any role (`admin` or `clien
 
 ```bash
 docker compose up -d
-# → API on :8000, Dashboard on :3000, Redis on :6379
+# → API on :8000, Dashboard on :3000, optional Redis on :6379
 ```
 
 ---
 
-## Running a Client
+## Submitting a Delta
+
+Clients train on their own hardware and submit pre-computed weight deltas to the server. There are two ways.
+
+### Via the dashboard
+
+1. Sign in as a client.
+2. Navigate to **Upload Delta** in the client sidebar.
+3. Pick your group, paste or select a `.pt` / `.npy` / `.bin` file containing the float32 delta bytes.
+4. (Optional) enter training accuracy / loss for nicer dashboard metrics.
+5. Click **Upload Delta**. The page also lets you download the current global model and copy your auth token for use in scripts.
+
+### Via REST
 
 ```bash
-# Start a client that connects to the server
-python -m astra.client.cli \
-  --server http://localhost:8000 \
-  --client-id client_1
+# 1. Download the current global model
+curl -OJ -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8000/api/models/$GROUP_ID/download
 
-# With a specific group
-python -m astra.client.cli \
-  --server http://localhost:8000 \
-  --client-id client_1 \
-  --group-id group_a
+# 2. Train locally on your own hardware, compute the delta
+#    delta = (new_weights - old_weights).astype('<f4').tobytes()
+
+# 3. Upload the delta (Python example)
+python -c "
+import base64, requests, numpy as np
+delta = np.load('my_delta.npy').astype('<f4').tobytes()
+r = requests.post(
+    f'http://localhost:8000/api/clients/$CLIENT_ID/delta',
+    headers={'Authorization': f'Bearer $TOKEN'},
+    json={
+        'client_id': '$CLIENT_ID',
+        'client_version': 0,
+        'local_updates': base64.b64encode(delta).decode(),
+        'update_type': 'delta',
+        'local_dataset_size': 1000,
+        'meta': {'train_accuracy': 0.7, 'train_loss': 0.4},
+    },
+)
+print(r.json())
+"
 ```
 
-Or use the installed CLI (after `pip install -e .`):
+The server decodes the delta, applies server-side DP if configured (`dp_mode: server`), scores trust via cosine similarity, and triggers aggregation when the window fills. Returns `{status: 'accepted', global_version: N}` on success.
 
-```bash
-astra-client --server http://localhost:8000 --client-id client_1
-```
-
-The client auto‑registers, downloads the global model, trains locally, and pushes gradient updates. It reconnects automatically on connection loss.
+**Limits and validation:**
+- Delta bytes must be float32 little-endian (`<f4`).
+- Max 100 MB per upload.
+- One upload per client per 2 seconds (rate limit).
+- NaN/Inf values in the delta are rejected with HTTP 400.
+- `client_id` in the body must match the URL.
+- The client must belong to an active group; otherwise the upload is rejected with `client_not_in_group` or `group_not_training`.
 
 ---
 
@@ -215,19 +250,21 @@ Full Swagger UI at **http://localhost:8000/docs**.
 
 ### Auth
 ```
-POST /api/auth/signup          Register (role: admin | client | observer)
-POST /api/auth/login           Login → JWT token
+POST /api/auth/signup                  Register (role: admin | client | observer)
+POST /api/auth/login                   Login → JWT token
+GET  /api/auth/me                      Current user info
 ```
 
 ### Groups
 ```
-GET    /api/groups              List all groups
-POST   /api/groups              Create group (admin)
-GET    /api/groups/{id}         Group detail
-POST   /api/groups/{id}/start   Start training (admin)
-POST   /api/groups/{id}/pause   Pause training
-POST   /api/groups/{id}/resume  Resume training
-POST   /api/groups/{id}/stop    Stop training
+GET    /api/groups                      List all groups (authenticated)
+POST   /api/groups                      Create group (admin)
+GET    /api/groups/{id}                 Group detail
+POST   /api/groups/{id}/start           Start accepting deltas (admin)
+POST   /api/groups/{id}/pause           Pause
+POST   /api/groups/{id}/resume          Resume
+POST   /api/groups/{id}/stop            Stop
+DELETE /api/groups/{id}                 Delete group
 ```
 
 ### Join Requests
@@ -237,24 +274,37 @@ GET   /api/join/join-requests              List pending (admin)
 POST  /api/join/join-requests/approve      Approve request (admin)
 POST  /api/join/join-requests/reject       Reject request (admin)
 POST  /api/join/activate/{group_id}        Activate membership (client)
+GET   /api/join/my-requests/{group_id}     My join status
 ```
 
-### Clients & Models
+### Clients
 ```
-GET   /api/clients                         List connected clients
-POST  /api/clients/register                Register a client
-GET   /api/models                          List registered models
-POST  /api/models/register/hf             Register a HuggingFace model
-GET   /api/models/{group_id}/download      Download trained model weights
+GET   /api/clients                          List known FL clients across groups
+POST  /api/clients/register                 Register a client (admin / REST)
+POST  /api/clients/{client_id}/delta         Submit a pre-computed model delta (JWT)
+GET   /api/clients/{client_id}/status        Per-client server view (JWT)
+GET   /api/clients/connected                 List currently connected WebSocket clients
+```
+
+### Models
+```
+GET   /api/models                           List registered models
+POST  /api/models/register/hf               Register a HuggingFace model
+POST  /api/models/register/architecture     Register via Python path (e.g. SimpleMLP)
+GET   /api/models/{id}                       Model info
+GET   /api/models/{group_id}/download        Download global model weights (full)
+GET   /api/models/{group_id}/adapter        Download LoRA adapter only (PEFT)
+GET   /api/models/{group_id}/base           Download base model (PEFT)
 ```
 
 ### System
 ```
-GET   /health                              Health check
-GET   /api/server/status                   Server runtime status
-GET   /api/system/metrics                  System‑wide metrics
-GET   /api/logs                            Event logs
-WS    /ws?token=<jwt>                      Live dashboard updates
+GET   /health                               Health check
+GET   /api/server/status                    Server runtime status
+GET   /api/system/metrics                   System-wide metrics
+GET   /api/logs                             Event logs (filterable by group, type)
+GET   /api/notifications                    User notifications
+WS    /ws?token=<jwt>                       Live dashboard updates
 ```
 
 ---
@@ -264,19 +314,21 @@ WS    /ws?token=<jwt>                      Live dashboard updates
 ### Environment Variables
 
 ```bash
-SECRET_KEY=your-secure-key           # JWT signing secret (required in production)
-ENV=dev                              # dev | prod
-GEMINI_API_KEY=your-key              # Optional — Gemini model recommendations
+SECRET_KEY=your-secure-key            # JWT signing secret (required in production)
+ENV=dev                               # dev | prod
+GEMINI_API_KEY=your-key               # Optional — Gemini model recommendations
+ASTRA_DEFAULT_ADMIN_PASSWORD=admin    # Initial admin password on first run
+ASTRA_SEED=42                         # Global random seed
 ```
 
-### `config.yaml` — Key Toggles
+### `config.yaml` — Server-side Toggles
 
 ```yaml
 server:
   aggregator_window: 10              # Aggregate after N updates…
   poll_timeout: 1.0                  # …or after T seconds (whichever first)
   async_lambda: 0.2                  # Staleness decay (higher = harder penalty)
-  adaptive_lr: true                  # Auto‑reduce LR on instability
+  adaptive_lr: true                  # Auto-reduce LR on instability
   momentum: 0.9
 
 robust:
@@ -285,8 +337,8 @@ robust:
   trust_power: 1.0                   # Trust exponent in hybrid weighting
 
 privacy:
-  dp_enabled: true
-  dp_mode: client                    # client | server
+  dp_enabled: false
+  dp_mode: server                    # server (client-side DP removed with FLClient)
   clip_norm: 1.0                     # Gradient clipping threshold
   sigma: 1.2                         # Gaussian noise multiplier
 
@@ -294,9 +346,11 @@ communication:
   compression: topk                  # topk | none
   topk_ratio: 0.1                    # Fraction of gradients to transmit
 
-malicious:
-  ratio: 0.30                        # Fraction of clients simulated as malicious
-  behaviors: [label_flip, noise, sign_flip, scale, backdoor]
+trust:
+  init: 1.0
+  update_alpha: 0.3
+  quarantine_threshold: 0.35
+  soft_decay: 0.8
 ```
 
 Full reference in [`config.yaml`](./config.yaml).
@@ -307,19 +361,26 @@ Full reference in [`config.yaml`](./config.yaml).
 
 ```bash
 pip install -e ".[dev]"              # install with dev deps (pytest, ruff, mypy)
-pytest tests/ -v                     # 223 tests — aggregation, compression, DP, trust, API, auth, config, schema
+pytest tests/ -v                     # ~220 tests across aggregation, compression, DP,
+                                     # trust, upload, schema, auth, smoke
 ```
 
+Sample test layout:
+
 ```
-tests/test_aggregator.py ........   9 passed
-tests/test_compression.py .......   7 passed
-tests/test_privacy.py .........     9 passed
-tests/test_reproducibility.py ....  4 passed
-tests/test_trust_manager.py ......  7 passed
-tests/test_smoke.py .......         7 passed
+tests/test_aggregator.py .............   9 passed
+tests/test_compression.py ...........   7 passed
+tests/test_privacy.py ...............   9 passed
+tests/test_reproducibility.py ......   4 passed
+tests/test_trust_manager.py .........   7 passed
+tests/test_smoke.py .................   7 passed
+tests/test_upload_endpoint.py .......   8 passed
+tests/test_external_client_flow.py ..   3 passed
+tests/test_websocket_cleanup.py .....   9 passed
 ```
 
 Run with coverage:
+
 ```bash
 pytest tests/ -v --cov=astra --cov-report=term-missing
 ```
@@ -336,7 +397,6 @@ make lint           # ruff check src/ tests/
 make fmt            # ruff format src/ tests/
 make typecheck      # mypy src/astra/
 make run-server     # uvicorn astra.app.server_api:app --reload
-make run-client     # run FL client
 make clean          # remove all cache dirs
 make docker-build   # build all images
 make docker-up      # start all services
@@ -357,8 +417,9 @@ make docker-up      # start all services
 - [ ] Set `ENV=prod` and a strong random `SECRET_KEY` (32+ chars)
 - [ ] Configure CORS origins in [`server_api.py`](src/astra/app/server_api.py)
 - [ ] Put a reverse proxy in front (nginx / Caddy / Traefik) with HTTPS
-- [ ] Migrate from SQLite to PostgreSQL for concurrent‑write workloads (Alembic ready)
+- [ ] Migrate from SQLite to PostgreSQL for concurrent-write workloads (Alembic ready)
 - [ ] Run `docker compose --profile production up -d` for Redis cache layer
+- [ ] Set `GEMINI_API_KEY` if you want Gemini-powered model recommendations
 
 ---
 
@@ -371,11 +432,11 @@ make docker-up      # start all services
 | **ML** | PyTorch · HuggingFace Transformers · PEFT (LoRA) |
 | **Database** | SQLite with WAL mode (`astra.db`) |
 | **Auth** | PyJWT · bcrypt (4.1+) |
-| **Real‑time** | WebSocket · Socket.IO (`fastapi-socketio`) |
-| **Privacy** | DP‑SGD · Gaussian noise · Moments accountant |
+| **Real-time** | WebSocket · Socket.IO (`fastapi-socketio`) |
+| **Privacy** | Server-side DP-SGD · Gaussian noise · Gradient clipping |
 | **Deployment** | Docker · Docker Compose |
 | **CI** | GitHub Actions (lint + typecheck + test) |
-| **Linting** | Ruff · mypy · pre‑commit |
+| **Linting** | Ruff · mypy · pre-commit |
 
 ---
 
@@ -386,19 +447,10 @@ make docker-up      # start all services
 3. Make changes, write tests, run `make lint test typecheck`.
 4. Open a PR against `main`.
 
-See [`AGENTS.md`](AGENTS.md) for architecture notes, data flow diagrams, and known gotchas.
+See [`AGENTS.md`](AGENTS.md) and [`.claude/`](.claude/) for architecture notes, data flow diagrams, and known gotchas.
 
 ---
 
 ## License
 
 MIT — see [LICENSE](LICENSE).
-).
-n gotchas.
-
----
-
-## License
-
-MIT — see [LICENSE](LICENSE).
-).

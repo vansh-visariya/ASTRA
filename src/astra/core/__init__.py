@@ -1,10 +1,13 @@
-"""Core FL algorithms — pure Python, no web dependencies."""
+"""Core FL algorithms — pure Python, no web dependencies.
+
+The server-side FL engine: aggregation, trust scoring, model utilities,
+and privacy/compression primitives. Clients train externally and submit
+pre-computed deltas via the REST API.
+"""
 
 __all__ = [
     "AsyncServer",
-    "FLClient",
     "TrustManager",
-    "DataSplitter",
     "load_config",
 ]
 
@@ -14,18 +17,10 @@ def __getattr__(name):
         from astra.core.server import AsyncServer
 
         return AsyncServer
-    if name == "FLClient":
-        from astra.core.fl_client import FLClient
-
-        return FLClient
     if name == "TrustManager":
         from astra.core.trust_manager import TrustManager
 
         return TrustManager
-    if name == "DataSplitter":
-        from astra.core.data_splitter import DataSplitter
-
-        return DataSplitter
     if name == "load_config":
         from astra.core.config import load_config
 

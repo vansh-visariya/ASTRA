@@ -88,13 +88,12 @@ async def get_group(group_id: str):
 
 @router.post("/api/groups/{group_id}/start")
 async def start_group_training(group_id: str):
-    """Start training for a group - clients train independently."""
+    """Start accepting deltas for a group."""
     fl_server = get_fl_server()
     success = fl_server.group_manager.start_group_training(group_id)
     if not success:
         raise HTTPException(status_code=400, detail="Cannot start training")
 
-    # Notify all clients that training is now open - they train autonomously
     await fl_server.group_manager.notify_training_started(group_id)
 
     return {"status": "started", "group_id": group_id}
@@ -102,18 +101,17 @@ async def start_group_training(group_id: str):
 
 @router.post("/api/groups/{group_id}/pause")
 async def pause_group_training(group_id: str):
-    """Pause training for a group."""
+    """Pause accepting deltas for a group."""
     fl_server = get_fl_server()
     success = fl_server.group_manager.pause_group_training(group_id)
     if not success:
         raise HTTPException(status_code=400, detail="Cannot pause training")
-    await fl_server.group_manager.notify_training_paused(group_id)
     return {"status": "paused", "group_id": group_id}
 
 
 @router.post("/api/groups/{group_id}/resume")
 async def resume_group_training(group_id: str):
-    """Resume training for a group."""
+    """Resume accepting deltas for a group."""
     fl_server = get_fl_server()
     success = fl_server.group_manager.resume_group_training(group_id)
     if not success:
@@ -124,12 +122,11 @@ async def resume_group_training(group_id: str):
 
 @router.post("/api/groups/{group_id}/stop")
 async def stop_group_training(group_id: str):
-    """Stop training for a group."""
+    """Stop accepting deltas for a group."""
     fl_server = get_fl_server()
     success = fl_server.group_manager.stop_group_training(group_id)
     if not success:
         raise HTTPException(status_code=400, detail="Cannot stop training")
-    await fl_server.group_manager.notify_training_stopped(group_id)
     return {"status": "stopped", "group_id": group_id}
 
 

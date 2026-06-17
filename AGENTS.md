@@ -1,9 +1,9 @@
 # Memory
 
 ## Project Overview
-ASTRA (Async Scalable Training & Research Architecture) is a production-ready distributed Federated Learning platform. Clients train locally without sharing data; the server aggregates updates using hybrid async windowing (N updates OR T seconds). Stack: FastAPI + PyTorch backend (`src/astra/`), Next.js 14 frontend (`dashboard/`).
+ASTRA (Async Scalable Training & Research Architecture) is a production-ready distributed Federated Learning platform. **Clients train externally and submit pre-computed model deltas** to the server; the server aggregates using hybrid async windowing (N updates OR T seconds) and broadcasts the new global model. Stack: FastAPI + PyTorch backend (`src/astra/`), Next.js 14 frontend (`dashboard/`).
 
-Key FL features: async aggregation with staleness decay, Byzantine-robust aggregation (FedAvg, Trimmed Mean, Median, Hybrid), trust scoring via cosine similarity, DP-SGD (client-side or server-side), top-k sparsification + quantization, IID/Dirichlet/pathological data splits, HuggingFace model support with optional LoRA/PEFT, registry-driven model loading with dynamic import.
+Key server features: async aggregation with staleness decay, Byzantine-robust aggregation (FedAvg, Trimmed Mean, Median, Hybrid), trust scoring via cosine similarity, server-side DP-SGD, top-k sparsification, HuggingFace model support with optional LoRA/PEFT, registry-driven model loading with dynamic import.
 
 ## Package Layout
 All Python source lives under `src/astra/` and is importable as `astra.*`. `src/` must be on `sys.path` (handled by `conftest.py` and `pyproject.toml pythonpath = ["src"]`).
@@ -12,15 +12,16 @@ All Python source lives under `src/astra/` and is importable as `astra.*`. `src/
 src/astra/
 ├── app/          # API layer, orchestration, DB, group lifecycle
 │   └── routes/   # FastAPI routers (system, groups, clients, models, experiments)
-├── core/         # FL algorithms — pure Python, no web dependencies
+├── core/         # Server-side FL algorithms — pure Python, no web dependencies
 │   ├── aggregation/   # aggregator.py, robust.py — FedAvg, TrimmedMean, Median, Hybrid
 │   ├── models/        # model_zoo.py (flatten_all_params, apply_flat_delta, PEFT utils), hf_models.py (HuggingFace+PEFT)
-│   ├── privacy/       # privacy.py (DP-SGD), malicious_simulator.py
+│   ├── privacy/       # privacy.py (server-side DP-SGD)
 │   └── utils/         # metrics.py, seed.py, logging_utils.py
 ├── infra/        # Transport, DB schemas, auth, WebSocket, model registry
 │   └── security/ # auth.py — JWT + bcrypt + role-based access
-└── client/       # Standalone FL client CLI (cli.py)
 ```
+
+No `client/` directory and no `FLClient` class — those were removed. Clients upload deltas via REST or the dashboard.
 
 ## Model System (Registry-Driven)
 No hardcoded model classes. All models are registered via the ModelRegistry:
@@ -31,12 +32,12 @@ No hardcoded model classes. All models are registered via the ModelRegistry:
 | `POST /api/models/register/hf` | HuggingFace tab | Register from HF Hub with optional PEFT |
 | `POST /api/models/register/architecture` | External tab | Dynamic import from Python path (e.g. `torchvision.models.resnet18`) |
 
-Models registered via External/Architecture tab are persisted to `model_registry` table in SQLite and auto-reloaded on server restart. The registry is the single source of truth — client and server both call `registry.build_model(model_id)` to get identical architectures.
+Models registered via External/Architecture tab are persisted to `model_registry` table in SQLite and auto-reloaded on server restart. The registry is the single source of truth — server calls `registry.build_model(model_id)` to get the architecture.
 
 ## Component Map
 - `src/astra/app/server_api.py` — FastAPI entry point; assembles app, mounts routers, WebSocket, Socket.IO; lifespan manages FLServer singleton
-- `src/astra/app/fl_server.py` — FLServer: orchestrates AsyncServer + GroupManager + ConnectionManager; loads persisted models from DB on startup
-- `src/astra/app/group_manager.py` — GroupManager: manages concurrent TrainingGroups; window-based aggregation, WebSocket-triggered + watchdog-triggered
+- `src/astra/app/fl_server.py` — FLServer: orchestrates AsyncServer + GroupManager + ConnectionManager; lazy-builds the AsyncServer for a group's model on first delta upload if the server started with no model_id
+- `src/astra/app/group_manager.py` — GroupManager: manages concurrent TrainingGroups; window-based aggregation, watchdog-triggered time-based aggregation
 - `src/astra/app/training_group.py` — TrainingGroup + AsyncWindowConfig dataclass; `add_update()`, `to_dict()` with full clients/accuracy/loss fields
 - `src/astra/app/database.py` — AstraDB: single SQLite `astra.db`; WAL mode, thread-local connections; `model_registry` table for persisted models
 - `src/astra/app/integration.py` — FLPlatformIntegration: wires auth + notifications + trust + recommender + inference
@@ -48,49 +49,49 @@ Models registered via External/Architecture tab are persisted to `model_registry
 - `src/astra/core/models/model_zoo.py` — `flatten_all_params()`, `apply_flat_delta()`, PEFT utilities, `SimpleMLP`
 - `src/astra/core/models/hf_models.py` — HuggingFace model loading with optional LoRA/PEFT
 - `src/astra/core/trust_manager.py` — Cosine-similarity trust scoring, exponential decay, quarantine at 0.35
-- `src/astra/core/privacy/` — DP-SGD (clip_and_noise, MomentsAccountant), malicious simulator
-- `src/astra/core/data_splitter.py` — IID/Dirichlet/pathological data splits (MNIST, CIFAR-10 datasets)
+- `src/astra/core/privacy/privacy.py` — Server-side DP (`clip_and_noise`); the `MaliciousSimulator` was removed
 - `src/astra/core/compression.py` — Top-k sparsification and quantization
 - `src/astra/infra/connection_manager.py` — WebSocket registry; broadcast + per-client send
 - `src/astra/infra/registry.py` — ModelRegistry: `register_factory()`, `build_model()`, HF registration, architecture registration
-- `src/astra/infra/security/auth.py` — JWT + bcrypt auth, role-based access (admin/client/observer), join tokens
+- `src/astra/infra/websocket_handler.py` — WebSocket endpoint (event channel only); rejects `train_command`, `update`, `metrics`, `training_*` messages
+- `src/astra/app/routes/clients.py` — **`POST /api/clients/{client_id}/delta`** — the new entry point for external clients to submit deltas (auth required, base64-decodes float32, validates NaN/Inf, enforces ≤100 MB and 2 s rate limit)
 
 ## Data / State Flow
 
-### Client continuous training cycle
+### External client upload flow
 ```
-CLI startup → connect WebSocket → sync group config → build_model(model_id) → first training round
-  → send update via WebSocket → enter _listen_loop():
-    → on model_update: _download_model() → REST GET /api/models/{group_id}/download (full) or /adapter (PEFT)
-    → on train_command: _run_training() → train → push delta → repeat
-  → on disconnect: exponential backoff reconnect (2s → max 60s)
+Client signs up → requests to join group → admin approves → client activates
+  → client trains externally on their own data
+  → computes delta = new_weights - old_weights (float32, little-endian)
+  → POST /api/clients/{client_id}/delta with base64(local_updates)
+    → JWT verified
+    → size ≤ 100 MB, length % 4 == 0, no NaN/Inf
+    → rate-limited (1 upload / 2 s per client)
+    → AsyncServer.handle_update(): apply server-side DP, score trust, append to buffer
+    → if window full → AsyncServer._perform_aggregation() → apply delta to model → bump global_version
+    → also GroupManager.process_client_update + aggregate_group (keeps group model_version in sync)
+    → broadcast "client_update" / "aggregation_complete" over WebSocket
+  → GET /api/models/{group_id}/download to pull the new global model
 ```
 
-### Model update flow
+### Aggregation trigger flow
 ```
-FLClient._run_training():
-  → capture_initial_weights() → train local_epochs → compute_delta()
-  → apply DP (clip + noise) → apply top-k compression → base64 encode
-  → send via WebSocket {"type": "update", "update": {...}}
-
-GroupManager.add_client_update():
-  → normalize → TrustManager.update_trust() → group.pending_updates.append(delta)
-  → if len(pending_updates) >= window_size → TRIGGER aggregate_group()
-
 GroupManager._training_watchdog():
-  → asyncio.sleep(1s) loop → if elapsed >= time_limit → TRIGGER aggregate_group()
+  → asyncio.sleep(1s) loop → if elapsed >= time_limit → aggregate_group()
 
 GroupManager.aggregate_group():
-  → is_peft? apply_peft_delta() : apply_flat_delta() → update server model
-  → save checkpoint → broadcast model_update → clear buffer
+  → aggregate deltas (FedAvg / Trimmed Mean / Median / Hybrid)
+  → apply_peft_delta() or apply_flat_delta() to live server model
+  → save checkpoint → broadcast "model_update" → clear buffer
 ```
 
 ## Key Decisions
-- **Registry-driven models**: No hardcoded model classes. All models registered via ModelRegistry with factory lambdas. Client and server both call `build_model(model_id)`.
+- **External training**: Clients train on their own hardware/data. This project only handles aggregation + trust + DP + delivery.
+- **Registry-driven models**: No hardcoded model classes. All models registered via ModelRegistry with factory lambdas.
 - **Hybrid async windowing**: Aggregate when N updates received OR T seconds elapsed — prevents straggler clients from blocking
 - **Staleness-weighted aggregation**: Weight each update by `exp(-lambda * staleness)`, default lambda=0.2
 - **Trust via cosine similarity**: Client update vs. running global estimate; quarantine below 0.35
-- **Join approval with trust gate**: Admin approves join requests; server checks trust score ≥ 0.10 before activating client
+- **Lazy AsyncServer init**: If the FL server starts with no `model_id` in config, it builds the AsyncServer on the first delta upload using the group's `model_id` and `window_size`.
 - **Single SQLite (astra.db)**: WAL mode, thread-local connections, fine for research/dev scale
 - **All imports use `astra.*`**: Zero shim packages, `src/` on sys.path
 - **Extended endpoints guarded**: `_extended_api_registered` flag prevents double-registration on FastAPI dev-reload
@@ -103,15 +104,25 @@ GroupManager.aggregate_group():
 - Join requests require the group to exist (checked before DB insert) and won't duplicate pending requests
 - Client requires authentication (JWT) for both WebSocket and REST calls
 - `GET /api/groups` requires authentication (any role)
+- Delta bytes must be float32 little-endian (`np.frombuffer(..., dtype='<f4')`); a wrong-endian numpy build (some Windows configs) will read garbage. The upload endpoint uses `'<f4'` explicitly to avoid this.
+- The route's `submit_client_delta` calls BOTH `AsyncServer.handle_update` (for DP + trust + aggregator) AND `GroupManager.process_client_update` + `aggregate_group` (so the group's `model_version` and metrics_history stay in sync with the AsyncServer's `global_version`). Both must stay in step.
+- `client_to_group` map is updated by `GroupManager.register_client`, NOT by `group.add_client`. The activate endpoint uses `register_client` to wire this correctly.
 
 ## Common Workflows
 - **Start server**: `uvicorn astra.app.server_api:app --reload` from repo root
 - **Start dashboard**: `cd dashboard && npm run dev` → http://localhost:3000
-- **Run tests**: `pytest tests/ -v` (223 tests expected)
-- **Run client**: `python -m astra.client.cli --server http://localhost:8000 --client-id client_1 --group-id test --username user --password pass`
-- **Register model**: Via dashboard (Registry / HuggingFace / External tabs) or programmatically via registry
+- **Run tests**: `pytest tests/ -v` (~210 tests)
+- **Submit a delta (REST)**:
+  ```bash
+  curl -X POST http://localhost:8000/api/clients/$CLIENT_ID/delta \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{"client_id":"...","client_version":0,"local_updates":"<base64 float32 bytes>","update_type":"delta","local_dataset_size":1000,"meta":{}}'
+  ```
+- **Submit a delta (dashboard)**: log in as client → Upload Delta → select group, file, click Upload
+- **Register model**: Via dashboard (Registry / HuggingFace / External tabs) or programmatically via `registry.register_factory(model_id, factory, info)`
 - **Config**: `config.yaml` for training params; env vars: `SECRET_KEY`, `ENV`, `GEMINI_API_KEY`, `ASTRA_DEFAULT_ADMIN_PASSWORD`, `ASTRA_SEED`
 
 ## Metrics / Benchmarks
-- Tests: 223/223 passing
+- Tests: ~210 passing (3 new test files for the upload pipeline + WebSocket cleanup; 3 old test files deleted)
 - Config defaults: 20 clients, window_size=10, MNIST/Dirichlet(0.3), hybrid robust aggregation, DP client-side (sigma=1.2, clip_norm=1.0), top-k compression (ratio=0.1)

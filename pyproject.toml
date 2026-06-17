@@ -31,7 +31,6 @@ dependencies = [
 
 [project.scripts]
 astra-server = "astra.app.server_api:run_server"
-astra-client = "astra.client.cli:main"
 
 [project.optional-dependencies]
 dev = [
@@ -61,7 +60,6 @@ select = ["E", "F", "I", "N", "W", "UP", "B", "SIM"]
 [tool.ruff.lint.per-file-ignores]
 # E402: sys.path manipulation before imports is the standard pattern for these entry-point files
 "src/astra/app/server_api.py" = ["E402"]
-"src/astra/client/cli.py" = ["E402"]
 # B008: FastAPI's Depends() in default args is the idiomatic pattern
 "src/astra/app/extended_endpoints.py" = ["B008"]
 

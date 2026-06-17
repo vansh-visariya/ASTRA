@@ -798,72 +798,33 @@ class GroupManager:
 
             self._start_training_watchdog(group_id)
 
-            self.log_event("training_started", f"Training started for group {group_id}", group_id)
+            self.log_event("training_started", f"Group {group_id} ready to accept deltas", group_id)
             self.logger.info(f"Started training for group {group_id}")
             return True
 
     async def notify_training_started(self, group_id: str):
-        """Notify all clients that training is open - they should begin autonomous training."""
+        """Broadcast a model_update to all clients so they can pull the new global model.
+
+        Clients train externally and call POST /api/clients/{id}/delta to submit updates.
+        This broadcast tells the dashboard that a new aggregated version is available.
+        """
         group = self.groups.get(group_id)
         if not group:
             return
 
         self.log_event(
-            "training_started_notify",
-            f"Training opened for group {group_id}, clients may begin",
+            "aggregation_broadcast",
+            f"Aggregation complete for group {group_id}, new global model available",
             group_id,
-            {"client_count": len(group.clients)},
+            {"client_count": len(group.clients), "version": group.model_version},
         )
 
         await self.broadcast_to_group(
             group_id,
             {
-                "type": "training_started",
+                "type": "model_update",
                 "group_id": group_id,
-                "config": {
-                    "local_epochs": group.config.get("local_epochs", 2),
-                    "batch_size": group.config.get("batch_size", 32),
-                    "lr": group.config.get("lr", 0.01),
-                },
-            },
-        )
-
-    async def trigger_clients_training(self, group_id: str):
-        """Explicitly trigger a new local training round for all clients in a group."""
-        group = self.groups.get(group_id)
-        if not group:
-            return
-
-        await self.broadcast_to_group(
-            group_id,
-            {
-                "type": "train_command",
-                "group_id": group_id,
-                "config": {
-                    "local_epochs": group.config.get("local_epochs", 2),
-                    "batch_size": group.config.get("batch_size", 32),
-                    "lr": group.config.get("lr", 0.01),
-                },
-            },
-        )
-
-    async def notify_training_paused(self, group_id: str):
-        """Notify all clients that training is paused."""
-        await self.broadcast_to_group(
-            group_id,
-            {
-                "type": "training_paused",
-                "group_id": group_id,
-            },
-        )
-
-    async def notify_training_stopped(self, group_id: str):
-        """Notify all clients that training is stopped."""
-        await self.broadcast_to_group(
-            group_id,
-            {
-                "type": "training_stopped",
-                "group_id": group_id,
+                "version": group.model_version,
             },
         )
 

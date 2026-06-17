@@ -4,7 +4,7 @@ import Link from 'next/link';
 import {
   Users, Shield, Activity,
   TrendingUp, CheckCircle,
-  ArrowUpRight, Cpu, Bell, AlertCircle
+  ArrowUpRight, Upload, Bell, AlertCircle,
 } from 'lucide-react';
 import { useWS } from '@/components/WebSocketProvider';
 import { useGroups, useTrustScores, useNotifications } from '@/hooks';
@@ -68,16 +68,16 @@ export default function ClientDashboard() {
             <ArrowUpRight size={16} className="text-slate-600 group-hover:text-white transition-colors" />
           </div>
         </Link>
-        <Link href="/client/training" className="glass-card p-5 group cursor-pointer">
+        <Link href="/client/upload" className="glass-card p-5 group cursor-pointer">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
               <div className="w-11 h-11 rounded-xl flex items-center justify-center transition-all duration-300 group-hover:scale-110"
                 style={{ background: 'rgba(255,255,255,0.06)' }}>
-                <Cpu className="text-gray-300" size={20} />
+                <Upload className="text-gray-300" size={20} />
               </div>
               <div>
-                <h3 className="text-white font-semibold text-sm">Start Training</h3>
-                <p className="text-slate-500 text-xs mt-0.5">Begin local model training</p>
+                <h3 className="text-white font-semibold text-sm">Upload Delta</h3>
+                <p className="text-slate-500 text-xs mt-0.5">Submit your pre-computed model delta</p>
               </div>
             </div>
             <ArrowUpRight size={16} className="text-slate-600 group-hover:text-white transition-colors" />

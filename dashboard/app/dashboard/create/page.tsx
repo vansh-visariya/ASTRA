@@ -25,8 +25,6 @@ export default function CreateGroupPage() {
   const [modelChoice, setModelChoice] = useState<'registry' | 'huggingface' | 'external'>('registry');
   const [selectedModelId, setSelectedModelId] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [localEpochs, setLocalEpochs] = useState(2);
-  const [batchSize, setBatchSize] = useState(32);
   const [learningRate, setLearningRate] = useState(0.01);
   const [dpEnabled, setDpEnabled] = useState(false);
   const [windowSize, setWindowSize] = useState(1);
@@ -62,8 +60,6 @@ export default function CreateGroupPage() {
         model_id: selectedModelId,
         window_size: windowSize,
         time_limit: timeLimit,
-        local_epochs: localEpochs,
-        batch_size: batchSize,
         lr: learningRate,
         dp_enabled: dpEnabled,
         aggregator,
@@ -140,14 +136,10 @@ export default function CreateGroupPage() {
         />
 
         <TrainingConfig
-          localEpochs={localEpochs}
-          batchSize={batchSize}
           learningRate={learningRate}
           dpEnabled={dpEnabled}
           onChange={(field, value) => {
             switch (field) {
-              case 'local_epochs': setLocalEpochs(value as number); break;
-              case 'batch_size': setBatchSize(value as number); break;
               case 'lr': setLearningRate(value as number); break;
               case 'dp_enabled': setDpEnabled(value as boolean); break;
             }

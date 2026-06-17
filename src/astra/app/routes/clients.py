@@ -1,15 +1,29 @@
 """
 Client management REST endpoints.
+
+Clients train externally and submit pre-computed deltas via
+POST /api/clients/{client_id}/delta. The server aggregates
+them with the configured aggregator and broadcasts the
+new global model on the WebSocket.
 """
 
+import base64
+import contextlib
 import logging
+import time
 
 from fastapi import APIRouter, HTTPException, Request
 
 from astra.app.state import get_fl_server
-from astra.infra.models import ClientRegister
+from astra.infra.models import ClientRegister, ClientUpdate
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
+
+MAX_DELTA_BYTES = 100 * 1024 * 1024  # 100 MB cap on decoded delta
+MIN_DELTA_INTERVAL_S = 2.0  # per-client rate limit
+
+_last_delta_at: dict[str, float] = {}
 
 
 @router.get("/api/clients/connected")
@@ -26,32 +40,189 @@ async def register_client(client: ClientRegister):
     fl_server = get_fl_server()
     client_id = client.client_id
 
-    # Register in database
     fl_server.db.register_fl_client(client_id, fl_server.experiment_id or "default")
-
-    # Add to connected clients
     fl_server.connection_manager.register_client(client_id, None)  # type: ignore[arg-type]
 
     return {"status": "registered", "client_id": client_id}
+
+
+@router.post("/api/clients/{client_id}/delta")
+async def submit_client_delta(client_id: str, request: Request):
+    """Submit a pre-computed model delta from an external training process.
+
+    Body: ClientUpdate (client_version, local_updates as base64 float32 bytes,
+    local_dataset_size, optional meta). Requires a valid JWT.
+    """
+    fl_server = get_fl_server()
+
+    # Auth
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="No authorization token")
+    token = auth_header.replace("Bearer ", "")
+    try:
+        from astra.app.integration import get_platform_integration
+
+        platform = get_platform_integration()
+        payload = platform.verify_token(token)
+        if not payload:
+            raise HTTPException(status_code=401, detail="Invalid token")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=401, detail="Token verification failed") from None
+
+    # Rate limit
+    now = time.monotonic()
+    last = _last_delta_at.get(client_id, 0.0)
+    if now - last < MIN_DELTA_INTERVAL_S:
+        wait = MIN_DELTA_INTERVAL_S - (now - last)
+        raise HTTPException(
+            status_code=429,
+            detail=f"Rate limit: wait {wait:.1f}s before next upload",
+        )
+    _last_delta_at[client_id] = now
+
+    # Parse body
+    try:
+        body = await request.json()
+        update = ClientUpdate(**body)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid request body: {e}") from None
+
+    if update.client_id != client_id:
+        raise HTTPException(
+            status_code=400,
+            detail=f"client_id in body ({update.client_id}) does not match URL ({client_id})",
+        )
+
+    # Size check
+    try:
+        delta_bytes = base64.b64decode(update.local_updates, validate=True)
+    except Exception as e:
+        raise HTTPException(
+            status_code=400, detail=f"local_updates is not valid base64: {e}"
+        ) from None
+    if len(delta_bytes) > MAX_DELTA_BYTES:
+        raise HTTPException(
+            status_code=413, detail=f"delta payload too large ({len(delta_bytes)} bytes)"
+        )
+    if len(delta_bytes) % 4 != 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"delta byte length ({len(delta_bytes)}) is not a multiple of 4 (float32)",
+        )
+
+    # Validate payload before dispatching — NaN/Inf always rejected.
+    import numpy as np
+
+    # Use explicit little-endian dtype — np.frombuffer with dtype=np.float32 on
+    # big-endian numpy builds (some Windows configurations) reads bytes in
+    # network order, silently producing garbled deltas.
+    delta = np.frombuffer(delta_bytes, dtype="<f4")
+    if not np.all(np.isfinite(delta)):
+        raise HTTPException(status_code=400, detail="delta contains NaN or Inf values")
+
+    # Dispatch to FL server pipeline
+    if fl_server.is_paused:
+        return {"status": "rejected", "reason": "server_paused"}
+
+    # Find the group this client belongs to
+    group = fl_server.group_manager.get_client_group(client_id)
+    if not group:
+        return {"status": "rejected", "reason": "client_not_in_group"}
+    if not group.is_training:
+        return {"status": "rejected", "reason": "group_not_training"}
+
+    # If the global AsyncServer isn't built yet (e.g., server started with
+    # no model_id), build it lazily using the group's model_id and window.
+    if fl_server.server is None:
+        try:
+            if not fl_server.config.get("model", {}).get("model_id"):
+                fl_server.config.setdefault("model", {})["model_id"] = group.model_id
+            fl_server.config.setdefault("server", {})["aggregator_window"] = (
+                group.window_config.window_size
+            )
+            fl_server._setup_server()
+        except Exception as e:
+            logger.exception("Lazy server init failed")
+            return {"status": "rejected", "reason": f"server_init_failed: {e}"}
+
+    if fl_server.server is None:
+        return {"status": "rejected", "reason": "server_not_ready"}
+
+    client_update = {
+        "client_id": update.client_id,
+        "client_version": update.client_version,
+        "local_updates": delta.tobytes(),
+        "update_type": update.update_type,
+        "local_dataset_size": update.local_dataset_size,
+        "timestamp": time.time(),
+        "meta": update.meta,
+    }
+
+    # Dispatch via the AsyncServer (applies DP if configured, updates trust,
+    # and triggers aggregation when the window fills).
+    fl_server.server.handle_update(client_update)
+    new_version = fl_server.server.global_version
+
+    # Auto-mark server as running once it has accepted at least one update
+    if not fl_server.is_running:
+        fl_server.is_running = True
+
+    # Also let the GroupManager aggregate so the group-level model_version
+    # and metrics stay in sync with the AsyncServer's global_version.
+    # The aggregator is the same one used by the WebSocket path.
+    triggered = fl_server.group_manager.process_client_update(
+        client_id, client_update
+    )
+    if triggered.get("aggregate"):
+        fl_server.group_manager.aggregate_group(group.group_id)
+
+    # Bump client's update counter / last_update
+    try:
+        fl_server.db.update_fl_client_metrics(
+            client_id=client_id,
+            local_accuracy=update.meta.get("train_accuracy", 0.0),
+            local_loss=update.meta.get("train_loss", 0.0),
+            updates_count=group.clients.get(client_id, {}).get("updates_count", 0),
+            status="active",
+        )
+    except Exception as e:
+        logger.warning("Could not persist client metrics for %s: %s", client_id, e)
+
+    # Broadcast to dashboard (best-effort)
+    with contextlib.suppress(Exception):
+        await fl_server.connection_manager.broadcast(
+            {
+                "type": "client_update",
+                "client_id": client_id,
+                "step": new_version,
+            }
+        )
+
+    return {
+        "status": "accepted",
+        "client_id": client_id,
+        "global_version": new_version,
+    }
 
 
 @router.post("/api/join/activate/{group_id}")
 async def join_group_as_client(group_id: str, request: Request):
     """Join an FL group as a participant after admin approval.
 
-    Bridges the auth system (join request approval) with the FL system (group registration).
-    The client must have an approved join request for this group.
+    The user is registered as an FL client in the group. They can then
+    train externally and submit deltas via POST /api/clients/{client_id}/delta.
     """
     fl_server = get_fl_server()
 
-    # Verify JWT token
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="No authorization token")
 
     token = auth_header.replace("Bearer ", "")
 
-    # Verify token via extended platform integration
     try:
         from astra.app.integration import get_platform_integration
 
@@ -69,7 +240,6 @@ async def join_group_as_client(group_id: str, request: Request):
         raise HTTPException(status_code=401, detail="Invalid user_id in token")
     username = payload.get("sub", f"user_{user_id}")
 
-    # Verify join request is approved
     try:
         status = platform.get_user_join_status(user_id, group_id)
         if not status or status.get("status") != "approved":
@@ -83,32 +253,28 @@ async def join_group_as_client(group_id: str, request: Request):
     except HTTPException:
         raise
     except Exception:
-        raise HTTPException(
-            status_code=400, detail="Could not verify join status"
-        ) from None
+        raise HTTPException(status_code=400, detail="Could not verify join status") from None
 
-    # Check group exists in FL server
     group = fl_server.group_manager.groups.get(group_id)
     if not group:
         raise HTTPException(status_code=404, detail=f"Group '{group_id}' not found")
 
-    # Generate a client ID from the username
     client_id = f"{username}_{group_id}"
 
-    # Register client in the FL group
-    group.add_client(client_id, {"user_id": user_id, "username": username})
+    # Register client via GroupManager.register_client so client_to_group is updated
+    success = fl_server.group_manager.register_client(
+        client_id=client_id,
+        group_id=group_id,
+        client_info={"user_id": user_id, "username": username},
+    )
+    if not success:
+        raise HTTPException(status_code=400, detail="Could not register client in group")
 
-    # Mark join request as activated in the auth system
     try:
         platform.auth_manager.join_request_manager.mark_user_activated(user_id, group_id)
     except Exception as e:
-        import logging
-        logging.getLogger(__name__).warning("Failed to mark user %s activated in group %s: %s", user_id, group_id, e)
+        logger.warning("Failed to mark user %s activated in group %s: %s", user_id, group_id, e)
 
-    # Register in database
-    fl_server.db.register_fl_client(client_id, fl_server.experiment_id or "default")
-
-    # Log the join event
     fl_server.group_manager.log_event(
         "client_joined",
         f"Client {username} joined group {group_id}",
@@ -116,9 +282,9 @@ async def join_group_as_client(group_id: str, request: Request):
         {"client_id": client_id, "user_id": user_id, "username": username},
     )
 
-    # Auto-start training if this is the first client
-    if len(group.clients) == 1 and not group.is_training:
-        fl_server.group_manager.start_group_training(group_id)
+    if group.is_training:
+        with contextlib.suppress(RuntimeError):
+            await fl_server.group_manager.notify_training_started(group_id)
 
     return {
         "status": "joined",
@@ -130,34 +296,26 @@ async def join_group_as_client(group_id: str, request: Request):
 
 @router.get("/api/clients")
 async def list_clients():
-    """List connected clients."""
+    """List all known FL clients across groups."""
     fl_server = get_fl_server()
     clients = fl_server.group_manager.get_all_client_status()
-    logger = logging.getLogger(__name__)
-    logger.info(f"[API-CLIENTS] Returning {len(clients)} clients")
-    for c in clients:
-        logger.info(
-            f"  Client {c.get('client_id')} in group {c.get('group_id')}: "
-            f"acc={c.get('local_accuracy', 0):.4f}, loss={c.get('local_loss', 0):.4f}"
-        )
     return {"clients": clients, "count": len(clients)}
 
 
-@router.get("/api/client/training-status")
-async def get_client_training_status(request: Request):
-    """Get training status for the authenticated client across all joined groups.
+@router.get("/api/clients/{client_id}/status")
+async def get_client_status(client_id: str, request: Request):
+    """Return the latest server-known status for a single client.
 
-    Returns FL client entries matching the user's username, along with
-    their group's training state, metrics, and model info.
+    Includes the current global model version, the client's last-update
+    timestamp, and the global accuracy/loss from the most recent aggregation
+    in the client's group. Requires authentication.
     """
     fl_server = get_fl_server()
 
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="No authorization token")
-
     token = auth_header.replace("Bearer ", "")
-
     try:
         from astra.app.integration import get_platform_integration
 
@@ -168,90 +326,24 @@ async def get_client_training_status(request: Request):
     except HTTPException:
         raise
     except Exception:
-        raise HTTPException(
-            status_code=401, detail="Token verification failed"
-        ) from None
+        raise HTTPException(status_code=401, detail="Token verification failed") from None
 
-    username = payload.get("sub", "")
-    user_id = payload.get("user_id")
+    group = fl_server.group_manager.get_client_group(client_id)
+    if not group:
+        raise HTTPException(status_code=404, detail=f"Client {client_id} not found")
 
-    # Find all FL clients belonging to this user (pattern: {username}_{group_id})
-    sessions = []
-    for group_id, group in fl_server.group_manager.groups.items():
-        for client_id, client_info in group.clients.items():
-            # Match by username prefix or by user_id in client_info
-            is_match = (
-                client_id.startswith(f"{username}_")
-                or client_info.get("user_id") == user_id
-                or client_info.get("username") == username
-            )
-            if is_match:
-                # Get the group's latest metrics
-                latest_metrics = {}
-                if group.metrics_history:
-                    last = group.metrics_history[-1]
-                    latest_metrics = {
-                        "global_accuracy": last.get("accuracy", 0),
-                        "global_loss": last.get("loss", 0),
-                        "global_version": last.get("version", 0),
-                    }
-
-                sessions.append(
-                    {
-                        "client_id": client_id,
-                        "group_id": group_id,
-                        "model_id": group.model_id,
-                        "group_status": group.status,
-                        "is_training": group.is_training,
-                        "local_accuracy": client_info.get("local_accuracy", 0),
-                        "local_loss": client_info.get("local_loss", 0),
-                        "trust_score": client_info.get("trust_score", 1.0),
-                        "updates_count": client_info.get("updates_count", 0),
-                        "last_update": client_info.get("last_update"),
-                        "status": client_info.get("status", "idle"),
-                        "joined_at": client_info.get("joined_at"),
-                        "model_version": group.model_version,
-                        "window_status": group.get_window_status(),
-                        **latest_metrics,
-                    }
-                )
-
-    # Also check which groups user has approved join requests for but hasn't activated yet
-    pending_activations = []
-    try:
-        from astra.app.integration import get_platform_integration
-
-        platform = get_platform_integration()
-        # Get all groups and check join status
-        for group_id in fl_server.group_manager.groups:
-            already_joined = any(s["group_id"] == group_id for s in sessions)
-            if not already_joined:
-                try:
-                    if isinstance(user_id, int):
-                        status = platform.get_user_join_status(user_id, group_id)
-                        if status and status.get("status") == "approved":
-                            pending_activations.append(
-                                {
-                                    "group_id": group_id,
-                                    "model_id": fl_server.group_manager.groups[group_id].model_id,
-                                    "status": "approved_not_activated",
-                                }
-                            )
-                except Exception:
-                    pass
-    except Exception:
-        pass
-
-    # Check if any WebSocket client is connected for this user
-    connected_ws_clients = []
-    for client_id in fl_server.connection_manager.client_sockets:
-        if client_id.startswith(f"{username}_"):
-            connected_ws_clients.append(client_id)
+    latest = group.metrics_history[-1] if group.metrics_history else {}
+    client_info = group.clients.get(client_id, {})
 
     return {
-        "username": username,
-        "sessions": sessions,
-        "pending_activations": pending_activations,
-        "connected_clients": connected_ws_clients,
-        "has_active_training": any(s["is_training"] for s in sessions),
+        "client_id": client_id,
+        "group_id": group.group_id,
+        "model_id": group.model_id,
+        "is_training": group.is_training,
+        "global_version": group.model_version,
+        "global_accuracy": latest.get("accuracy", 0),
+        "global_loss": latest.get("loss", 0),
+        "last_update": client_info.get("last_update"),
+        "updates_count": client_info.get("updates_count", 0),
+        "trust_score": client_info.get("trust_score", 1.0),
     }

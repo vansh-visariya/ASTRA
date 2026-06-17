@@ -90,33 +90,6 @@ export interface JoinRequest {
   created_at: string;
 }
 
-export interface TrainingSession {
-  group_id: string;
-  model_id: string;
-  status: string;
-  is_training: boolean;
-  client_id?: string;
-  local_accuracy?: number;
-  local_loss?: number;
-  updates_sent?: number;
-  trust_score?: number;
-  last_update?: number;
-  global_model_version?: number;
-  global_accuracy?: number;
-  global_loss?: number;
-  window_status?: {
-    current_size: number;
-    max_size: number;
-  };
-}
-
-export interface TrainingStatus {
-  sessions: TrainingSession[];
-  pending_activations: { group_id: string; model_id: string }[];
-  connected_clients: string[];
-  has_active_training: boolean;
-}
-
 export interface TrustData {
   user_id: number;
   score: number;

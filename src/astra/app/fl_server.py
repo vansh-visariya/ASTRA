@@ -16,7 +16,6 @@ import numpy as np
 from astra.app.database import get_db
 from astra.app.group_manager import GroupManager
 from astra.core.aggregation.aggregator import create_aggregator
-from astra.core.data_splitter import DataSplitter
 from astra.core.server import AsyncServer
 from astra.core.utils.seed import set_seed
 from astra.infra.connection_manager import ConnectionManager
@@ -143,11 +142,8 @@ class FLServer:
         aggregator = create_aggregator(self.config)
 
         if model is not None:
-            data_splitter = DataSplitter(self.config)
-            _, val_loader = data_splitter.create_data_loaders()
-
             self.server = AsyncServer(
-                model=model, aggregator=aggregator, config=self.config, val_loader=val_loader
+                model=model, aggregator=aggregator, config=self.config, val_loader=None
             )
             self.group_manager.server_model = self.server.model
         else:
