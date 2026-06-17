@@ -129,17 +129,23 @@ class TestGroupEndpoints:
         assert resp.status_code == 400
 
     def test_create_and_get_group(self, fresh_client, auth_headers):
+        mid = f"info_{os.urandom(4).hex()}"
+        fresh_client.post("/api/models/register/architecture", json={
+            "model_id": mid,
+            "architecture_path": "torch.nn.Linear",
+            "config": {"in_features": 10, "out_features": 3},
+        }, headers=auth_headers)
         gid = f"g_create_{os.urandom(4).hex()}"
         resp = fresh_client.post("/api/groups", json={
             "group_id": gid,
-            "model_id": "",
+            "model_id": mid,
         }, headers=auth_headers)
         assert resp.status_code == 200
         assert resp.json()["group"]["group_id"] == gid
 
         resp2 = fresh_client.get(f"/api/groups/{gid}", headers=auth_headers)
         assert resp2.status_code == 200
-        assert resp2.json()["group_id"] == gid
+        assert resp2.json()["group"]["group_id"] == gid
 
     def test_list_groups_requires_auth(self, fresh_client):
         resp = fresh_client.get("/api/groups")
@@ -151,9 +157,15 @@ class TestGroupEndpoints:
         assert "groups" in resp.json()
 
     def test_delete_group(self, fresh_client, auth_headers):
+        mid = f"del_m_{os.urandom(4).hex()}"
+        fresh_client.post("/api/models/register/architecture", json={
+            "model_id": mid,
+            "architecture_path": "torch.nn.Linear",
+            "config": {"in_features": 10, "out_features": 3},
+        }, headers=auth_headers)
         gid = f"g_del_{os.urandom(4).hex()}"
         fresh_client.post("/api/groups", json={
-            "group_id": gid, "model_id": "",
+            "group_id": gid, "model_id": mid,
         }, headers=auth_headers)
 
         resp = fresh_client.delete(f"/api/groups/{gid}", headers=auth_headers)
@@ -211,9 +223,15 @@ class TestModelEndpoints:
 
 class TestJoinRequestEndpoints:
     def test_client_join_request(self, fresh_client, client_headers, auth_headers):
+        mid = f"jr2_{os.urandom(4).hex()}"
+        fresh_client.post("/api/models/register/architecture", json={
+            "model_id": mid,
+            "architecture_path": "torch.nn.Linear",
+            "config": {"in_features": 10, "out_features": 3},
+        }, headers=auth_headers)
         gid = f"j_{os.urandom(4).hex()}"
         fresh_client.post("/api/groups", json={
-            "group_id": gid, "model_id": "",
+            "group_id": gid, "model_id": mid,
         }, headers=auth_headers)
 
         resp = fresh_client.post("/api/join/join-request", json={
@@ -332,9 +350,15 @@ class TestEdgeCases:
         assert resp.status_code == 400
 
     def test_group_create_invalid_window(self, fresh_client, auth_headers):
+        mid = f"inv_m_{os.urandom(4).hex()}"
+        fresh_client.post("/api/models/register/architecture", json={
+            "model_id": mid,
+            "architecture_path": "torch.nn.Linear",
+            "config": {"in_features": 10, "out_features": 3},
+        }, headers=auth_headers)
         resp = fresh_client.post("/api/groups", json={
             "group_id": f"inv_{os.urandom(4).hex()}",
-            "model_id": "",
+            "model_id": mid,
             "window_size": -1,
         }, headers=auth_headers)
-        assert resp.status_code == 200
+        assert resp.status_code == 400

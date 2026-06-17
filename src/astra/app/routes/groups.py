@@ -50,7 +50,17 @@ async def create_group(group_data: dict):
     if not model_id:
         raise HTTPException(status_code=400, detail="model_id is required")
     window_size = group_data.get("window_size", 3)
+    if not isinstance(window_size, int) or window_size < 1:
+        raise HTTPException(
+            status_code=400,
+            detail=f"window_size must be a positive integer (got {window_size!r})",
+        )
     time_limit = group_data.get("time_limit", 20.0)
+    if not isinstance(time_limit, (int, float)) or time_limit <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"time_limit must be a positive number (got {time_limit!r})",
+        )
     custom_token = group_data.get("join_token")
 
     # Build config with training parameters

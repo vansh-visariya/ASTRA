@@ -238,12 +238,23 @@ class ModelRegistry:
         models = list(self.models.values())
         if model_type:
             models = [m for m in models if m.model_type == model_type]
-        return [m.to_dict() for m in models]
+        out: list[dict[str, Any]] = []
+        for m in models:
+            if isinstance(m, ModelInfo):
+                out.append(m.to_dict())
+            elif isinstance(m, dict):
+                out.append(m)
+        return out
 
     def get_model_info(self, model_id: str) -> dict[str, Any] | None:
         """Get model info by ID."""
-        if model_id in self.models:
-            return self.models[model_id].to_dict()
+        if model_id not in self.models:
+            return None
+        info = self.models[model_id]
+        if isinstance(info, ModelInfo):
+            return info.to_dict()
+        if isinstance(info, dict):
+            return info
         return None
 
     def validate_model(self, model_id: str) -> tuple[bool, str]:

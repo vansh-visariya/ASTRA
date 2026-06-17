@@ -381,7 +381,7 @@ class JoinRequestManager:
             cursor.execute(
                 """SELECT jr.id, jr.group_id, jr.user_id,
                    u.username, jr.status, jr.requested_at,
-                   jr.metadata_json, jr.join_token, jr.resolved_at
+                   jr.metadata_json, jr.resolved_at
                    FROM join_requests jr
                    JOIN users u ON jr.user_id = u.id
                    ORDER BY jr.requested_at DESC"""
@@ -397,8 +397,7 @@ class JoinRequestManager:
                     "status": r[4],
                     "created_at": r[5],
                     "metadata": json.loads(r[6]) if r[6] else {},
-                    "token": r[7],
-                    "resolved_at": r[8],
+                    "resolved_at": r[7],
                 }
                 for r in rows
             ]

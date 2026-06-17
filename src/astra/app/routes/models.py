@@ -160,7 +160,25 @@ async def register_architecture(body: RegisterArchitectureBody):
     total_params = sum(p.numel() for p in model.parameters())
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
+    from astra.app.database import get_db
     from astra.infra.registry import ModelInfo
+
+    if body.model_id in fl_server.model_registry.models:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Model '{body.model_id}' is already registered",
+        )
+    try:
+        db_rows = get_db().load_model_registrations()
+        if any(r.get("model_id") == body.model_id for r in db_rows):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Model '{body.model_id}' is already registered",
+            )
+    except HTTPException:
+        raise
+    except Exception:
+        pass  # DB lookup is best-effort
 
     model_info = ModelInfo(
         model_id=body.model_id,
@@ -177,18 +195,13 @@ async def register_architecture(body: RegisterArchitectureBody):
     fl_server.model_registry.model_instances[body.model_id] = model
 
     # Persist to database for survival across restarts
-    from astra.app.database import get_db
+    import json as _json
 
     get_db().save_model_registration(
         model_id=body.model_id,
-        model_type=body.model_type,
         architecture=attr_name,
         architecture_path=body.architecture_path,
-        total_params=total_params,
-        trainable_params=trainable_params,
-        is_peft=False,
-        source="external",
-        config={"kwargs": kwargs},
+        config_json=_json.dumps({"kwargs": kwargs, "model_type": body.model_type}),
     )
 
     return {
