@@ -9,7 +9,7 @@ from typing import Any
 
 import requests
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
 from astra.app.database import get_db
@@ -228,11 +228,21 @@ async def validate_model(model_id: str):
 
 
 @router.get("/api/models/{group_id}/download")
-async def download_model(group_id: str, version: int | None = None):
+async def download_model(
+    group_id: str,
+    version: int | None = None,
+    format: str = "pt",
+):
     """Download the global model weights for a group.
 
     If version is specified, downloads that version. Otherwise downloads latest.
-    Returns the .pt file as a binary download.
+
+    ``format``:
+      - ``pt`` (default) — returns the PyTorch checkpoint file (.pt) as-is.
+      - ``raw`` — loads the checkpoint, flattens the weights to a single
+        little-endian float32 array, and returns the raw bytes. This is
+        the format the ``/api/clients/{id}/delta`` and ``/api/uploads``
+        endpoints expect.
     """
     fl_server = get_fl_server()
     if group_id not in fl_server.group_manager.groups:
@@ -250,8 +260,38 @@ async def download_model(group_id: str, version: int | None = None):
             status_code=404, detail="Model file not found. No training has been completed yet."
         )
 
-    filename = f"{group_id}_model_v{version}.pt" if version else f"{group_id}_model_latest.pt"
-    return FileResponse(file_path, media_type="application/octet-stream", filename=filename)
+    if format == "pt":
+        filename = f"{group_id}_model_v{version}.pt" if version else f"{group_id}_model_latest.pt"
+        return FileResponse(file_path, media_type="application/octet-stream", filename=filename)
+
+    if format == "raw":
+        import numpy as np
+        import torch
+
+        ckpt = torch.load(file_path, map_location="cpu", weights_only=False)
+        if isinstance(ckpt, dict) and "weights" in ckpt:
+            arr = ckpt["weights"]
+        elif isinstance(ckpt, dict):
+            # state_dict — concatenate values in deterministic order
+            tensors = [v.detach().cpu().float().numpy().ravel() for v in ckpt.values()]
+            arr = np.concatenate(tensors) if tensors else np.zeros(0, dtype="<f4")
+        else:
+            arr = ckpt.detach().cpu().float().numpy().ravel()
+
+        raw_bytes = arr.astype("<f4").tobytes()
+        filename = f"{group_id}_model_v{version}.bin" if version else f"{group_id}_model_latest.bin"
+        return Response(
+            content=raw_bytes,
+            media_type="application/octet-stream",
+            headers={
+                "Content-Length": str(len(raw_bytes)),
+                "X-Num-Parameters": str(arr.size),
+                "X-Dtype": "<f4",
+                "Content-Disposition": f'attachment; filename="{filename}"',
+            },
+        )
+
+    raise HTTPException(status_code=400, detail=f"unknown format: {format!r}")
 
 
 @router.get("/api/models/{group_id}/base")

@@ -192,27 +192,21 @@ docker compose up -d
 
 ## Submitting a Delta
 
-Clients train on their own hardware and submit pre-computed weight deltas to the server. There are two ways.
+Clients train on their own hardware and submit pre-computed weight deltas to the server. Three transports are supported depending on file size.
 
-### Via the dashboard
+### 1. Inline REST upload (≤ max_inline_bytes, default 100 MB)
 
-1. Sign in as a client.
-2. Navigate to **Upload Delta** in the client sidebar.
-3. Pick your group, paste or select a `.pt` / `.npy` / `.bin` file containing the float32 delta bytes.
-4. (Optional) enter training accuracy / loss for nicer dashboard metrics.
-5. Click **Upload Delta**. The page also lets you download the current global model and copy your auth token for use in scripts.
-
-### Via REST
+Best for small models or when the delta fits comfortably in memory.
 
 ```bash
-# 1. Download the current global model
+# Download the current global model as raw float32 weight bytes
 curl -OJ -H "Authorization: Bearer $TOKEN" \
-  http://localhost:8000/api/models/$GROUP_ID/download
+  'http://localhost:8000/api/models/$GROUP_ID/download?format=raw'
 
-# 2. Train locally on your own hardware, compute the delta
-#    delta = (new_weights - old_weights).astype('<f4').tobytes()
+# Train locally, compute the delta
+# delta = (new_weights - old_weights).astype('<f4').tobytes()
 
-# 3. Upload the delta (Python example)
+# Upload the delta
 python -c "
 import base64, requests, numpy as np
 delta = np.load('my_delta.npy').astype('<f4').tobytes()
@@ -232,15 +226,96 @@ print(r.json())
 "
 ```
 
-The server decodes the delta, applies server-side DP if configured (`dp_mode: server`), scores trust via cosine similarity, and triggers aggregation when the window fills. Returns `{status: 'accepted', global_version: N}` on success.
+### 2. Presigned-URL chunked upload (> max_inline_bytes)
 
-**Limits and validation:**
-- Delta bytes must be float32 little-endian (`<f4`).
-- Max 100 MB per upload.
-- One upload per client per 2 seconds (rate limit).
-- NaN/Inf values in the delta are rejected with HTTP 400.
-- `client_id` in the body must match the URL.
-- The client must belong to an active group; otherwise the upload is rejected with `client_not_in_group` or `group_not_training`.
+For large models (3B+ params, ~12 GB deltas), use the staged upload flow. The server allocates a slot on disk, returns a presigned PUT URL, and the client streams bytes directly to disk. The server verifies sha256 + dispatches into the FLServer only on `complete`.
+
+```bash
+# 1. Download the current global model
+curl -OJ -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8000/api/models/$GROUP_ID/download
+
+# 2. Train locally, compute the delta
+python train_and_compute_delta.py   # produces delta.bin + sha256
+
+# 3. Initiate the upload
+python -c "
+import hashlib, requests
+delta = open('delta.bin','rb').read()
+sha = hashlib.sha256(delta).hexdigest()
+r = requests.post(
+    'http://localhost:8000/api/uploads/init',
+    headers={'Authorization': 'Bearer $TOKEN'},
+    json={
+        'client_id': '$CLIENT_ID',
+        'group_id': '$GROUP_ID',
+        'content_length': len(delta),
+        'sha256': sha,
+    },
+)
+info = r.json()
+print('upload_id', info['upload_id'])
+print('upload_url', info['upload_url'])
+print('chunk_size', info['chunk_size'])
+"
+
+# 4. PUT the bytes (single PUT or chunked with Content-Range)
+curl -X PUT --data-binary @delta.bin \
+  -H 'Content-Type: application/octet-stream' \
+  'http://localhost:8000/api/uploads/$UPLOAD_ID/blob?expires=$E&sig=$SIG'
+
+# 5. Complete — server verifies sha256, applies size/NaN checks, dispatches
+python -c "
+import requests
+r = requests.post(
+    'http://localhost:8000/api/uploads/$UPLOAD_ID/complete',
+    headers={'Authorization': 'Bearer $TOKEN'},
+    json={'sha256': '$SHA'},
+)
+print(r.json())   # {status: 'completed', global_version: N, size: ..., sha256: ...}
+"
+```
+
+### 3. Dashboard
+
+1. Sign in as a client.
+2. Navigate to **Upload Delta** in the client sidebar.
+3. Pick your group, select a `.pt` / `.npy` / `.bin` file.
+4. Files ≤ 100 MB are sent inline. Larger files automatically use the chunked upload flow with a live progress bar and cancel button.
+5. (Optional) enter training accuracy / loss for nicer dashboard metrics.
+
+The dashboard also has **Download Weights (.bin, raw float32)** and **Download Full Model (.pt checkpoint)** buttons. Both use the chunked download flow — files stream in 8 MB chunks with live progress, can be cancelled mid-transfer, and the browser verifies the sha256 of the assembled file before saving it. No need to extract weights from the `.pt` checkpoint yourself, and works reliably for 3B+ models over slow connections.
+
+### Server behavior
+
+Regardless of transport, the server:
+1. Decodes the delta as float32 little-endian (`<f4`).
+2. Verifies byte count matches `total_params × 4` (or `× 8` for float64).
+3. Rejects NaN / Inf with HTTP 400.
+4. Enforces a per-client rate limit (1 upload / 2 s).
+5. Applies server-side DP if configured (`dp_mode: server`).
+6. Scores trust via cosine similarity against the running global estimate.
+7. Appends to the AsyncServer aggregator buffer (window sized to the group's `window_size`).
+8. Triggers aggregation when the window fills or the time limit elapses.
+9. Broadcasts `client_update` + `aggregation_complete` over WebSocket.
+10. Returns `{status: 'accepted', global_version: N}`.
+
+**Limits:**
+- Default `max_inline_bytes = 100 MB`. Larger files must use the chunked flow.
+- Default `chunk_size = 8 MB`. The server tells the client the chunk size in the init response.
+- Default `presign_ttl = 3600 s` for the presigned PUT URL.
+- Per-client rate limit: 1 upload / 2 s (any transport).
+- Disk-space check: init refuses uploads that wouldn't fit on the uploads partition.
+
+**Configurable in `config.yaml` or env vars:**
+```yaml
+uploads:
+  max_inline_bytes: 104857600   # 100 MB
+  chunk_size: 8388608           # 8 MB
+  disk_path: ./uploads
+  presign_ttl_seconds: 3600
+  min_free_bytes: 104857600     # refuse if < 100 MB free
+```
 
 ---
 
@@ -281,10 +356,30 @@ GET   /api/join/my-requests/{group_id}     My join status
 ```
 GET   /api/clients                          List known FL clients across groups
 POST  /api/clients/register                 Register a client (admin / REST)
-POST  /api/clients/{client_id}/delta         Submit a pre-computed model delta (JWT)
+POST  /api/clients/{client_id}/delta         Submit a pre-computed model delta (JWT, ≤ max_inline_bytes)
 GET   /api/clients/{client_id}/status        Per-client server view (JWT)
 GET   /api/clients/connected                 List currently connected WebSocket clients
 ```
+
+### Uploads (presigned-URL flow for files > 100 MB)
+```
+POST   /api/uploads/init                     Allocate an upload slot (returns presigned PUT URL + chunk_size)
+PUT    /api/uploads/{upload_id}/blob         PUT delta bytes to the presigned URL (chunked, resumable)
+POST   /api/uploads/{upload_id}/complete     Verify sha256 + dispatch into the FLServer
+DELETE /api/uploads/{upload_id}              Abort the upload and free disk
+GET    /api/uploads/{upload_id}              Inspect upload state
+```
+
+### Downloads (chunked flow for large model files)
+```
+POST   /api/downloads/init                   Allocate a download slot (returns manifest + signed chunk URLs)
+GET    /api/downloads/{id}/chunk/{N}         Stream chunk N (HMAC-signed, Content-Range aware)
+POST   /api/downloads/{id}/complete          Mark download finished (telemetry only)
+DELETE /api/downloads/{id}                   Abort the download and free the slot
+GET    /api/downloads/{id}                   Inspect download slot state
+```
+
+The single-shot `/api/models/{group_id}/download[?format=raw]` still works for small files (< a few MB). For 3B+ models, use the chunked flow — it streams bytes with progress, supports cancel, and verifies sha256 client-side before saving the file.
 
 ### Models
 ```
@@ -293,6 +388,7 @@ POST  /api/models/register/hf               Register a HuggingFace model
 POST  /api/models/register/architecture     Register via Python path (e.g. SimpleMLP)
 GET   /api/models/{id}                       Model info
 GET   /api/models/{group_id}/download        Download global model weights (full)
+                                           ?format=raw returns flattened float32 .bin (upload-ready)
 GET   /api/models/{group_id}/adapter        Download LoRA adapter only (PEFT)
 GET   /api/models/{group_id}/base           Download base model (PEFT)
 ```

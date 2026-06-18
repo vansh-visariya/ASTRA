@@ -52,3 +52,4 @@ __pycache__/
 .commandcode
 .claude
 tests/models
+uploads/

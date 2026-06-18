@@ -80,6 +80,21 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "total_steps": 1000,
         "eval_interval_steps": 10,
     },
+    "uploads": {
+        # Inline /api/clients/{id}/delta payload cap. Above this, clients
+        # must use the presigned-URL upload flow (/api/uploads/init).
+        "max_inline_bytes": 100 * 1024 * 1024,
+        # Disk path for staged uploads (only used by LocalDiskObjectStore).
+        "disk_path": "./uploads",
+        # Chunk size hint returned by /api/uploads/init to chunked clients.
+        "chunk_size": 8 * 1024 * 1024,
+        # How long a presigned PUT URL stays valid.
+        "presign_ttl_seconds": 3600,
+        # Auto-cleanup completed/aborted uploads after this many seconds.
+        "cleanup_after_seconds": 86400,
+        # Min free disk required to accept a new upload.
+        "min_free_disk_bytes": 1024 * 1024 * 1024,
+    },
 }
 
 

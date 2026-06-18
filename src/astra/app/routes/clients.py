@@ -10,6 +10,7 @@ new global model on the WebSocket.
 import base64
 import contextlib
 import logging
+import os
 import time
 
 from fastapi import APIRouter, HTTPException, Request
@@ -20,10 +21,25 @@ from astra.infra.models import ClientRegister, ClientUpdate
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-MAX_DELTA_BYTES = 100 * 1024 * 1024  # 100 MB cap on decoded delta
+MAX_DELTA_BYTES = int(
+    os.environ.get("ASTRA_DELTA_CAP_BYTES", str(100 * 1024 * 1024))
+)  # default 100 MB cap on decoded delta
 MIN_DELTA_INTERVAL_S = 2.0  # per-client rate limit
 
 _last_delta_at: dict[str, float] = {}
+
+
+def _get_expected_param_count(fl_server, model_id: str) -> int | None:
+    """Look up the registered model's total parameter count.
+
+    Returns None if the model can't be built (missing import, broken
+    factory, etc.) — callers should fall back to a lenient check.
+    """
+    try:
+        model = fl_server.model_registry.build_model(model_id)
+        return sum(p.numel() for p in model.parameters())
+    except Exception:
+        return None
 
 
 @router.get("/api/clients/connected")
@@ -96,22 +112,122 @@ async def submit_client_delta(client_id: str, request: Request):
             detail=f"client_id in body ({update.client_id}) does not match URL ({client_id})",
         )
 
-    # Size check
+    # Decode base64
     try:
         delta_bytes = base64.b64decode(update.local_updates, validate=True)
     except Exception as e:
         raise HTTPException(
             status_code=400, detail=f"local_updates is not valid base64: {e}"
         ) from None
+
+    # Large-payload handoff: if the inline delta exceeds the configured cap,
+    # tell the client to use the presigned-URL upload flow instead.
     if len(delta_bytes) > MAX_DELTA_BYTES:
+        from astra.app.uploads import get_upload_manager as _get_um
+
+        manager = _get_um()
+        # We can't compute sha256 here (the client didn't send it), so we
+        # require the client to call /api/uploads/init themselves.
         raise HTTPException(
-            status_code=413, detail=f"delta payload too large ({len(delta_bytes)} bytes)"
+            status_code=413,
+            detail=(
+                f"delta payload too large for inline upload "
+                f"({len(delta_bytes):,} bytes; inline cap is "
+                f"{MAX_DELTA_BYTES // 1024 // 1024} MB). Use the presigned-URL "
+                f"flow: POST /api/uploads/init with content_length and "
+                f"sha256, then PUT the raw bytes to the returned upload_url, "
+                f"then POST /api/uploads/{{upload_id}}/complete."
+            ),
+            headers={
+                "X-Astra-Upload-Cap-Bytes": str(MAX_DELTA_BYTES),
+                "X-Astra-Upload-Init-Path": "/api/uploads/init",
+                "X-Astra-Upload-Manager-Ready": "1" if manager else "0",
+            },
         )
-    if len(delta_bytes) % 4 != 0:
+
+    # Find the group this client belongs to — we need its model_id to
+    # validate the delta size against the expected parameter count.
+    group = fl_server.group_manager.get_client_group(client_id)
+    if not group:
         raise HTTPException(
-            status_code=400,
-            detail=f"delta byte length ({len(delta_bytes)}) is not a multiple of 4 (float32)",
+            status_code=404,
+            detail=f"client {client_id} is not registered in any group",
         )
+
+    # Compute expected delta size from the registered model's param count.
+    # The delta must be exactly num_parameters * 4 bytes (float32) OR
+    # num_parameters * 8 bytes (float64). Anything else is the wrong file
+    # (e.g. a PyTorch checkpoint, a state_dict pickle, a .npy with header).
+    expected_params = _get_expected_param_count(fl_server, group.model_id)
+    if expected_params is None:
+        # Model can't be built (missing import, broken factory). Allow the
+        # size check to pass and let the dispatch path fail later with a
+        # better diagnostic. This keeps legitimate uploads flowing even
+        # when the registry has a broken entry.
+        expected_params = None
+        expected_f32_bytes = None
+        expected_f64_bytes = None
+    else:
+        expected_f32_bytes = expected_params * 4
+        expected_f64_bytes = expected_params * 8
+
+    # Size validation with actionable error message. Note: the early
+    # handoff above already converted any payload > MAX_DELTA_BYTES into
+    # a 413 with upload-flow instructions, so reaching this branch means
+    # the payload is within the inline cap but the model param count
+    # itself is bigger than the cap (i.e. the model simply can't be
+    # uploaded via this endpoint at all).
+    if len(delta_bytes) > MAX_DELTA_BYTES:
+        if expected_f32_bytes is not None and expected_f32_bytes > MAX_DELTA_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"delta payload too large ({len(delta_bytes)} bytes). "
+                    f"This model has {expected_params:,} parameters; the "
+                    f"expected float32 delta is {expected_f32_bytes:,} bytes "
+                    f"({expected_f32_bytes / 1024 / 1024:.1f} MB). The inline "
+                    f"upload cap is {MAX_DELTA_BYTES // 1024 // 1024} MB. "
+                    f"This model is too large to upload via this endpoint. "
+                    f"Raise MAX_DELTA_BYTES in config.yaml or run the server "
+                    f"with a custom ASTRA_DELTA_CAP_BYTES env var."
+                ),
+            )
+        raise HTTPException(
+            status_code=413,
+            detail=f"delta payload too large ({len(delta_bytes)} bytes); max is {MAX_DELTA_BYTES}",
+        )
+
+    if expected_f32_bytes is not None:
+        # We know the expected size — be strict and tell the user exactly
+        # what's wrong.
+        if len(delta_bytes) not in (expected_f32_bytes, expected_f64_bytes):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"delta byte length ({len(delta_bytes):,}) does not match "
+                    f"the expected size for model '{group.model_id}' "
+                    f"({expected_params:,} parameters). "
+                    f"Expected {expected_f32_bytes:,} bytes (float32) or "
+                    f"{expected_f64_bytes:,} bytes (float64). "
+                    f"Did you upload a PyTorch checkpoint (.pt from "
+                    f"/api/models/{{group_id}}/download) instead of raw "
+                    f"weight bytes? The download returns a checkpoint "
+                    f"dictionary — extract the 'weights' array, flatten it, "
+                    f"cast to float32 (.astype('<f4')), and call .tobytes()."
+                ),
+            )
+    else:
+        # Model param count unknown — fall back to the lenient % 4 check.
+        if len(delta_bytes) % 4 != 0:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"delta byte length ({len(delta_bytes)}) is not a multiple "
+                    f"of 4 (float32). The model registry has no param count "
+                    f"for '{group.model_id}'; cannot validate size. Did you "
+                    f"upload a serialized state_dict or PyTorch checkpoint?"
+                ),
+            )
 
     # Validate payload before dispatching — NaN/Inf always rejected.
     import numpy as np
@@ -127,10 +243,6 @@ async def submit_client_delta(client_id: str, request: Request):
     if fl_server.is_paused:
         return {"status": "rejected", "reason": "server_paused"}
 
-    # Find the group this client belongs to
-    group = fl_server.group_manager.get_client_group(client_id)
-    if not group:
-        return {"status": "rejected", "reason": "client_not_in_group"}
     if not group.is_training:
         return {"status": "rejected", "reason": "group_not_training"}
 

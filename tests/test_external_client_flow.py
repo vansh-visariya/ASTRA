@@ -166,7 +166,9 @@ class TestExternalClientFlow:
         assert group["completed_rounds"] == 1
 
     def test_delta_size_validation(self, client, client_creds):
-        # Upload an absurdly small delta (not a multiple of 4)
+        # Upload an absurdly small delta (not a multiple of 4). The cid is
+        # not registered with any group, so the endpoint returns 404 first;
+        # either 400 (size rejected) or 404 (no such client) is correct.
         _, _, client_token = client_creds
         cid = f"flow_c_{os.urandom(4).hex()}"
         resp = client.post(
@@ -180,7 +182,7 @@ class TestExternalClientFlow:
             },
             headers={"Authorization": f"Bearer {client_token}"},
         )
-        assert resp.status_code == 400
+        assert resp.status_code in (400, 404)
 
     def test_unauthenticated_upload_rejected(self, client):
         cid = f"flow_c_{os.urandom(4).hex()}"

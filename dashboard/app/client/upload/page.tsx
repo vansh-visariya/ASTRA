@@ -17,7 +17,19 @@ import { ErrorState } from '@/components/ui/ErrorState';
 import { EmptyState } from '@/components/ui/EmptyState';
 import type { Group } from '@/lib/api/types';
 
-const MAX_FILE_MB = 100;
+const INLINE_LIMIT_MB = 100;
+const CHUNK_SIZE = 8 * 1024 * 1024;
+
+async function sha256Hex(buffer: ArrayBuffer): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', buffer);
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+type UploadResult =
+  | { ok: true; version: number; bytes: number; via: 'inline' | 'chunked' }
+  | { ok: false; error: string };
 
 export default function ClientUploadPage() {
   const { user, token } = useAuth();
@@ -34,11 +46,106 @@ export default function ClientUploadPage() {
   const [trainLoss, setTrainLoss] = useState<string>('');
   const [globalVersion, setGlobalVersion] = useState<number>(0);
   const [uploading, setUploading] = useState(false);
-  const [lastResult, setLastResult] = useState<
-    { ok: boolean; version?: number; error?: string } | null
-  >(null);
+  const [progress, setProgress] = useState<{ phase: string; pct: number } | null>(null);
+  const [lastResult, setLastResult] = useState<UploadResult | null>(null);
   const [copied, setCopied] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const [downloading, setDownloading] = useState<'pt' | 'raw' | null>(null);
+  const [downloadProgress, setDownloadProgress] = useState<
+    { received: number; total: number; pct: number } | null
+  >(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const downloadAbortRef = useRef<AbortController | null>(null);
+
+  const downloadModel = async (fmt: 'pt' | 'raw') => {
+    if (!selectedGroup) return;
+    setDownloading(fmt);
+    setDownloadProgress({ received: 0, total: 0, pct: 0 });
+    setDownloadError(null);
+    try {
+      downloadAbortRef.current = new AbortController();
+
+      const initBody = await api.post<{
+        download_id: string;
+        total_size: number;
+        sha256: string;
+        num_chunks: number;
+        chunks: { index: number; url: string }[];
+      }>('/api/downloads/init', {
+        group_id: selectedGroup,
+        format: fmt,
+      });
+
+      const totalBytes = initBody.total_size;
+      const chunks: Uint8Array[] = [];
+      for (let i = 0; i < initBody.chunks.length; i++) {
+        if (downloadAbortRef.current.signal.aborted) {
+          setDownloadError('cancelled');
+          return;
+        }
+        const r = await fetch(initBody.chunks[i].url, {
+          signal: downloadAbortRef.current.signal,
+        });
+        if (!r.ok) {
+          throw new Error(`chunk ${i}: HTTP ${r.status}`);
+        }
+        const buf = new Uint8Array(await r.arrayBuffer());
+        chunks.push(buf);
+        const received = chunks.reduce((s, c) => s + c.length, 0);
+        setDownloadProgress({
+          received: i + 1,
+          total: initBody.chunks.length,
+          pct: Math.round((received / totalBytes) * 100),
+        });
+      }
+
+      // Reassemble + verify sha256 in-browser
+      const reassembled = new Uint8Array(totalBytes);
+      let offset = 0;
+      for (const c of chunks) {
+        reassembled.set(c, offset);
+        offset += c.length;
+      }
+      const actualSha = await sha256Hex(reassembled.buffer);
+      if (actualSha !== initBody.sha256) {
+        throw new Error(
+          `sha256 mismatch: expected ${initBody.sha256}, got ${actualSha}`,
+        );
+      }
+
+      // Trigger download as a file in the browser
+      const blob = new Blob([reassembled], { type: 'application/octet-stream' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download =
+        fmt === 'raw'
+          ? `${selectedGroup}_model.bin`
+          : `${selectedGroup}_model.pt`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      // Best-effort telemetry
+      try {
+        await api.post(`/api/downloads/${initBody.download_id}/complete`, {});
+      } catch {
+        // ignore — telemetry only
+      }
+    } catch (e: any) {
+      if (e?.name !== 'AbortError') {
+        setDownloadError(e?.message || 'Download failed');
+      } else {
+        setDownloadError('cancelled');
+      }
+    } finally {
+      setDownloading(null);
+      setDownloadProgress(null);
+      downloadAbortRef.current = null;
+    }
+  };
 
   const groups: Group[] = useMemo(() => (groupsData as any)?.groups || [], [groupsData]);
   const activatedGroups = groups.filter((g) => joinStatuses[g.group_id] === 'activated');
@@ -93,14 +200,117 @@ export default function ClientUploadPage() {
   const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (!f) return setFile(null);
-    if (f.size > MAX_FILE_MB * 1024 * 1024) {
-      setLastResult({ ok: false, error: `File too large (${f.size} bytes). Limit is ${MAX_FILE_MB} MB.` });
-      setFile(null);
-      if (fileRef.current) fileRef.current.value = '';
-      return;
-    }
     setFile(f);
     setLastResult(null);
+  };
+
+  const cancelUpload = () => {
+    abortRef.current?.abort();
+  };
+
+  const uploadInline = async (
+    bytes: Uint8Array, base64: string
+  ): Promise<UploadResult> => {
+    const meta: Record<string, unknown> = {
+      dataset_size: datasetSize,
+    };
+    if (trainAccuracy !== '') meta.train_accuracy = Number(trainAccuracy);
+    if (trainLoss !== '') meta.train_loss = Number(trainLoss);
+
+    const result = await api.post<{ status: string; global_version: number }>(
+      `/api/clients/${clientId}/delta`,
+      {
+        client_id: clientId,
+        client_version: globalVersion,
+        local_updates: base64,
+        update_type: 'delta',
+        local_dataset_size: datasetSize,
+        meta,
+      }
+    );
+    if (result.status === 'accepted') {
+      return { ok: true, version: result.global_version, bytes: bytes.length, via: 'inline' };
+    }
+    return { ok: false, error: result.status };
+  };
+
+  const uploadChunked = async (file: File): Promise<UploadResult> => {
+    abortRef.current = new AbortController();
+
+    // 1. Compute sha256 of the whole file
+    setProgress({ phase: 'hashing', pct: 0 });
+    const fileBuffer = await file.arrayBuffer();
+    const sha = await sha256Hex(fileBuffer);
+
+    // 2. Init upload — get presigned URL
+    setProgress({ phase: 'init', pct: 5 });
+    const initBody = await api.post<{
+      upload_id: string;
+      upload_url: string;
+      expires_at: number;
+      chunk_size: number;
+    }>('/api/uploads/init', {
+      client_id: clientId,
+      group_id: selectedGroup,
+      content_length: file.size,
+      sha256: sha,
+      filename: file.name,
+    });
+
+    const chunkSize = initBody.chunk_size || CHUNK_SIZE;
+    const total = Math.ceil(file.size / chunkSize);
+
+    // 3. PUT all chunks (single PUT for now — chunked PUT via Content-Range
+    //    is a future enhancement once the server endpoint supports Range)
+    let uploaded = 0;
+    setProgress({ phase: 'uploading', pct: 10 });
+    for (let i = 0; i < total; i++) {
+      if (abortRef.current.signal.aborted) {
+        return { ok: false, error: 'cancelled' };
+      }
+      const start = i * chunkSize;
+      const end = Math.min(start + chunkSize, file.size);
+      const chunk = fileBuffer.slice(start, end);
+      const putRes = await fetch(initBody.upload_url, {
+        method: 'PUT',
+        body: chunk,
+        signal: abortRef.current.signal,
+      });
+      if (!putRes.ok) {
+        return { ok: false, error: `PUT chunk ${i} failed: ${putRes.status}` };
+      }
+      uploaded += end - start;
+      const pct = 10 + Math.round((uploaded / file.size) * 75);
+      setProgress({ phase: 'uploading', pct });
+    }
+
+    // 4. Complete — server verifies sha256 + dispatches into the FLServer
+    setProgress({ phase: 'completing', pct: 90 });
+    const completeBody = await api.post<{
+      status: string;
+      sha256: string;
+      size: number;
+      global_version: number;
+      message?: string;
+    }>(`/api/uploads/${initBody.upload_id}/complete`, {
+      sha256: sha,
+      meta: {
+        dataset_size: datasetSize,
+        ...(trainAccuracy !== '' ? { train_accuracy: Number(trainAccuracy) } : {}),
+        ...(trainLoss !== '' ? { train_loss: Number(trainLoss) } : {}),
+      },
+    });
+
+    if (completeBody.status !== 'completed') {
+      return { ok: false, error: completeBody.message || `status=${completeBody.status}` };
+    }
+    setProgress({ phase: 'done', pct: 100 });
+    return {
+      ok: true,
+      version: completeBody.global_version,
+      bytes: completeBody.size,
+      via: 'chunked',
+    };
   };
 
   const onSubmit = async () => {
@@ -108,40 +318,35 @@ export default function ClientUploadPage() {
     setUploading(true);
     setLastResult(null);
     try {
-      const buffer = await file.arrayBuffer();
-      const bytes = new Uint8Array(buffer);
-      let binary = '';
-      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-      const base64 = btoa(binary);
+      const isLarge = file.size > INLINE_LIMIT_MB * 1024 * 1024;
+      let result: UploadResult;
+      if (isLarge) {
+        result = await uploadChunked(file);
+      } else {
+        setProgress({ phase: 'encoding', pct: 0 });
+        const buffer = await file.arrayBuffer();
+        const bytes = new Uint8Array(buffer);
+        let binary = '';
+        for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+        const base64 = btoa(binary);
+        setProgress({ phase: 'uploading', pct: 50 });
+        result = await uploadInline(bytes, base64);
+      }
 
-      const meta: Record<string, unknown> = {};
-      if (trainAccuracy !== '') meta.train_accuracy = Number(trainAccuracy);
-      if (trainLoss !== '') meta.train_loss = Number(trainLoss);
-      meta.dataset_size = datasetSize;
-
-      const result = await api.post<{ status: string; global_version: number }>(
-        `/api/clients/${clientId}/delta`,
-        {
-          client_id: clientId,
-          client_version: globalVersion,
-          local_updates: base64,
-          update_type: 'delta',
-          local_dataset_size: datasetSize,
-          meta,
-        }
-      );
-      if (result.status === 'accepted') {
-        setLastResult({ ok: true, version: result.global_version });
-        setGlobalVersion(result.global_version);
+      if (result.ok) {
+        setLastResult(result);
+        setGlobalVersion(result.version);
         if (fileRef.current) fileRef.current.value = '';
         setFile(null);
       } else {
-        setLastResult({ ok: false, error: result.status });
+        setLastResult({ ok: false, error: 'error' in result ? result.error : 'upload failed' });
       }
     } catch (e: any) {
       setLastResult({ ok: false, error: e?.message || 'Upload failed' });
     } finally {
       setUploading(false);
+      setProgress(null);
+      abortRef.current = null;
     }
   };
 
@@ -170,6 +375,8 @@ export default function ClientUploadPage() {
 
   const group = groups.find((g) => g.group_id === selectedGroup);
   const hasActivated = activatedGroups.length > 0;
+  const fileSizeMB = file ? (file.size / 1024 / 1024).toFixed(2) : null;
+  const isLarge = file && file.size > INLINE_LIMIT_MB * 1024 * 1024;
 
   return (
     <div className="space-y-6">
@@ -260,23 +467,45 @@ export default function ClientUploadPage() {
               <h3 className="text-white font-semibold text-sm">Download Global Model</h3>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <a
-                href={`${API_URL}/api/models/${selectedGroup}/download`}
-                target="_blank"
-                rel="noreferrer"
-                className="btn-secondary inline-flex items-center justify-center gap-2 py-2.5 text-sm"
+              <button
+                onClick={() => downloadModel('raw')}
+                disabled={downloading !== null}
+                className="btn-secondary inline-flex items-center justify-center gap-2 py-2.5 text-sm disabled:opacity-50"
               >
-                <Download size={14} /> Full Model (.pt)
-              </a>
-              <a
-                href={`${API_URL}/api/models/${selectedGroup}/adapter`}
-                target="_blank"
-                rel="noreferrer"
-                className="btn-secondary inline-flex items-center justify-center gap-2 py-2.5 text-sm"
+                <Download size={14} />
+                {downloading === 'raw' ? 'Downloading…' : 'Weights (.bin, raw float32)'}
+              </button>
+              <button
+                onClick={() => downloadModel('pt')}
+                disabled={downloading !== null}
+                className="btn-secondary inline-flex items-center justify-center gap-2 py-2.5 text-sm disabled:opacity-50"
               >
-                <Download size={14} /> LoRA Adapter (.pt)
-              </a>
+                <Download size={14} />
+                {downloading === 'pt' ? 'Downloading…' : 'Full Model (.pt checkpoint)'}
+              </button>
             </div>
+            {downloadProgress && (
+              <div className="mt-3 space-y-1">
+                <div className="flex items-center justify-between text-xs text-slate-400">
+                  <span>
+                    Downloading ({downloadProgress.received}/{downloadProgress.total} chunks)
+                  </span>
+                  <span className="font-mono">{downloadProgress.pct}%</span>
+                </div>
+                <div className="h-2 rounded-full overflow-hidden" style={{ background: 'rgba(15,23,42,0.6)' }}>
+                  <div
+                    className="h-full bg-blue-500 transition-all"
+                    style={{ width: `${downloadProgress.pct}%` }}
+                  />
+                </div>
+              </div>
+            )}
+            {downloadError && (
+              <div className="mt-3 flex items-center gap-2 p-2 rounded-xl text-sm" style={{ background: 'rgba(239,68,68,0.1)' }}>
+                <AlertCircle size={14} className="text-red-400" />
+                <span className="text-red-300 text-xs">{downloadError}</span>
+              </div>
+            )}
             <p className="text-slate-500 text-xs mt-3">
               Current global version: <span className="text-slate-300 font-mono">v{globalVersion}</span>
             </p>
@@ -318,17 +547,24 @@ export default function ClientUploadPage() {
               </div>
 
               <div>
-                <label className="text-slate-400 text-xs block mb-1">Delta File (.pt / .npy / .bin)</label>
+                <label className="text-slate-400 text-xs block mb-1">
+                  Delta File (.pt / .npy / .bin) — raw float32 weight bytes
+                </label>
                 <input
                   ref={fileRef}
                   type="file"
-                  accept=".pt,.npy,.bin"
+                  accept=".pt,.npy,.bin,.raw"
                   onChange={onFileChange}
                   className="block w-full text-sm text-slate-300 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-sm file:bg-slate-800 file:text-white"
                 />
                 {file && (
-                  <p className="text-slate-500 text-xs mt-1">
-                    {file.name} — {(file.size / 1024).toFixed(1)} KB
+                  <p className="text-slate-500 text-xs mt-1 flex items-center gap-2">
+                    <span>{file.name} — {fileSizeMB} MB</span>
+                    {isLarge && (
+                      <span className="text-amber-400 font-medium">
+                        (large file — chunked upload to /api/uploads)
+                      </span>
+                    )}
                   </p>
                 )}
               </div>
@@ -366,14 +602,39 @@ export default function ClientUploadPage() {
                 </div>
               </div>
 
-              <button
-                onClick={onSubmit}
-                disabled={uploading || !file || !clientId}
-                className="btn-emerald text-white text-sm px-5 py-2.5 inline-flex items-center gap-2 disabled:opacity-50"
-              >
-                <FileUp size={15} />
-                {uploading ? 'Uploading…' : 'Upload Delta'}
-              </button>
+              {progress && (
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between text-xs text-slate-400">
+                    <span>{progress.phase}</span>
+                    <span className="font-mono">{progress.pct}%</span>
+                  </div>
+                  <div className="h-2 rounded-full overflow-hidden" style={{ background: 'rgba(15,23,42,0.6)' }}>
+                    <div
+                      className="h-full bg-emerald-500 transition-all"
+                      style={{ width: `${progress.pct}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={onSubmit}
+                  disabled={uploading || !file || !clientId}
+                  className="btn-emerald text-white text-sm px-5 py-2.5 inline-flex items-center gap-2 disabled:opacity-50"
+                >
+                  <FileUp size={15} />
+                  {uploading ? 'Uploading…' : 'Upload Delta'}
+                </button>
+                {uploading && (
+                  <button
+                    onClick={cancelUpload}
+                    className="btn-secondary text-sm px-4 py-2.5"
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
 
               {lastResult && (
                 <div
@@ -386,13 +647,14 @@ export default function ClientUploadPage() {
                     <>
                       <CheckCircle size={15} className="text-emerald-400" />
                       <span className="text-emerald-300">
-                        Accepted — global model is now v{lastResult.version}
+                        Accepted via {lastResult.via} — global model is now v{lastResult.version}
+                        {' '}({(lastResult.bytes / 1024 / 1024).toFixed(2)} MB)
                       </span>
                     </>
                   ) : (
                     <>
                       <AlertCircle size={15} className="text-red-400" />
-                      <span className="text-red-300">{lastResult.error || 'Upload failed'}</span>
+                      <span className="text-red-300">{'error' in lastResult ? lastResult.error || 'Upload failed' : 'Upload failed'}</span>
                     </>
                   )}
                 </div>
@@ -412,14 +674,21 @@ export default function ClientUploadPage() {
             { step: '4', title: 'Upload Here', desc: 'Submit the delta bytes via this page or REST' },
           ].map((item) => (
             <div key={item.step} className="p-3 rounded-xl" style={{ background: 'rgba(15,23,42,0.4)' }}>
-              <span className="w-6 h-6 rounded-lg flex items-center justify-center text-[11px] font-bold mb-2 inline-flex"
-                style={{ color: 'var(--color-info)', background: 'rgba(59,130,246,0.12)' }}>
+              <span
+                className="w-6 h-6 rounded-lg flex items-center justify-center text-[11px] font-bold mb-2 inline-flex"
+                style={{ color: 'var(--color-info)', background: 'rgba(59,130,246,0.12)' }}
+              >
                 {item.step}
               </span>
               <p className="text-white text-xs font-medium">{item.title}</p>
               <p className="text-slate-500 text-[11px] mt-0.5">{item.desc}</p>
             </div>
           ))}
+        </div>
+        <div className="mt-4 p-3 rounded-xl text-xs text-slate-400" style={{ background: 'rgba(15,23,42,0.4)' }}>
+          <strong className="text-slate-200">Upload format:</strong> raw float32 little-endian weight delta,
+          byte count = <code className="font-mono">total_params × 4</code>. Files ≤ {INLINE_LIMIT_MB} MB are sent inline;
+          larger files are uploaded via the presigned-URL flow (chunked, resumable, sha256-verified).
         </div>
       </div>
     </div>

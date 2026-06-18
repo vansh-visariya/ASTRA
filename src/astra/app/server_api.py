@@ -32,6 +32,8 @@ if _env_path.exists():
 
 from contextlib import asynccontextmanager
 
+import os
+
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -57,6 +59,18 @@ async def lifespan(app: FastAPI):
     fl_server = FLServer(config)
     fl_server.group_manager.server_model = fl_server.server.model if fl_server.server else None
     state.set_fl_server(fl_server)
+
+    # Initialize the upload manager (presigned-URL flow for multi-GB deltas).
+    secret_key = (
+        config.get("secret_key")
+        or os.environ.get("SECRET_KEY")
+        or "astra-dev-secret"
+    ).encode()
+    from astra.app.uploads import init_upload_manager
+    from astra.app.downloads import init_download_manager
+
+    init_upload_manager(config=config, secret_key=secret_key)
+    init_download_manager(config=config, secret_key=secret_key)
 
     yield
 
@@ -111,11 +125,16 @@ app.add_middleware(
 )
 
 # Include route modules
+from astra.app.routes import uploads as uploads_routes
+from astra.app.routes import downloads as downloads_routes
+
 app.include_router(system.router)
 app.include_router(groups.router)
 app.include_router(clients.router)
 app.include_router(models.router)
 app.include_router(experiments.router)
+app.include_router(uploads_routes.router)
+app.include_router(downloads_routes.router)
 
 # WebSocket endpoint
 app.websocket("/ws")(websocket_endpoint)

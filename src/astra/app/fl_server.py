@@ -83,12 +83,17 @@ class FLServer:
                     module = importlib.import_module(module_path)
                     factory_fn = getattr(module, attr_name)
                     kwargs = config_data.get("kwargs", {})
-                    model_info = {
-                        "model_id": model_id,
-                        "source": "external",
-                        "architecture_path": arch_path,
-                        "config": kwargs,
-                    }
+                    from astra.infra.registry import ModelInfo
+
+                    model_info = ModelInfo(
+                        model_id=model_id,
+                        model_type="classifier",
+                        architecture=arch_path,
+                        total_params=0,
+                        trainable_params=0,
+                        source="external",
+                        config=kwargs,
+                    )
                     self.model_registry.register_factory(
                         model_id,
                         lambda fn=factory_fn, kw=kwargs: fn(**kw) if kw else fn(),
