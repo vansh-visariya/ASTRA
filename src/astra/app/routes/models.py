@@ -8,7 +8,7 @@ import os
 from typing import Any
 
 import requests
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
@@ -97,6 +97,7 @@ async def register_hf_model(body: RegisterHfBody):
             db = get_db()
             db.save_model_registration(
                 model_id=model_info.model_id,
+                architecture=model_info.architecture,
                 architecture_path=model_info.architecture,
                 config_json=json.dumps({
                     "source": "huggingface",
@@ -243,6 +244,8 @@ async def download_model(
         little-endian float32 array, and returns the raw bytes. This is
         the format the ``/api/clients/{id}/delta`` and ``/api/uploads``
         endpoints expect.
+      - ``safetensors`` — loads the checkpoint and returns weights in
+        safetensors format (for HuggingFace-native clients).
     """
     fl_server = get_fl_server()
     if group_id not in fl_server.group_manager.groups:
@@ -291,31 +294,158 @@ async def download_model(
             },
         )
 
+    if format == "safetensors":
+        import torch
+
+        try:
+            from safetensors.torch import save_file as _safetensors_save
+        except ImportError:
+            raise HTTPException(
+                status_code=400,
+                detail="safetensors package not installed on server",
+            ) from None
+
+        ckpt = torch.load(file_path, map_location="cpu", weights_only=False)
+        if isinstance(ckpt, dict) and "weights" in ckpt:
+            # Flat numpy array — can't directly save as safetensors
+            # Fall back to returning raw bytes with a warning
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "This checkpoint is stored as a flat array and cannot be "
+                    "converted to safetensors. Use format=raw instead."
+                ),
+            )
+        elif isinstance(ckpt, dict):
+            # state_dict — filter to tensors only
+            tensor_dict = {}
+            for k, v in ckpt.items():
+                if isinstance(v, torch.Tensor):
+                    tensor_dict[k] = v.cpu()
+            if not tensor_dict:
+                raise HTTPException(
+                    status_code=400, detail="No tensors found in checkpoint"
+                )
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Checkpoint format not compatible with safetensors",
+            )
+
+        # Save to a temp file and return it
+        tmp_path = os.path.join(save_dir, f"_tmp_safetensors_v{version or 'latest'}.safetensors")
+        try:
+            _safetensors_save(tensor_dict, tmp_path)
+            filename = (
+                f"{group_id}_model_v{version}.safetensors"
+                if version
+                else f"{group_id}_model_latest.safetensors"
+            )
+            return FileResponse(
+                tmp_path,
+                media_type="application/octet-stream",
+                filename=filename,
+                background=None,
+            )
+        finally:
+            # Clean up temp file after response is sent
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
+
     raise HTTPException(status_code=400, detail=f"unknown format: {format!r}")
 
 
 @router.get("/api/models/{group_id}/base")
-async def download_base_model(group_id: str):
+async def download_base_model(
+    group_id: str,
+    format: str = Query("pt", pattern="^(pt|safetensors)$"),
+):
     """Download the frozen base model (non-LoRA backbone) for a group.
 
     Clients download this once and cache it locally. Only the LoRA adapter
     weights change across rounds.
+
+    ``format``:
+      - ``pt`` (default) — PyTorch .pt file.
+      - ``safetensors`` — safetensors format (for HuggingFace-native clients).
     """
     fl_server = get_fl_server()
     if group_id not in fl_server.group_manager.groups:
         raise HTTPException(status_code=404, detail="Group not found")
 
-    save_dir = os.path.join("models", "global", group_id)
-    base_path = os.path.join(save_dir, "base.pt")
+    group = fl_server.group_manager.groups[group_id]
 
-    if not os.path.exists(base_path):
+    # Try models/hf/{model_id}/ first (saved during group creation)
+    hf_dir = os.path.join("models", "hf", group.model_id)
+    # Fallback to models/global/{group_id}/
+    global_dir = os.path.join("models", "global", group_id)
+
+    # For safetensors format, prefer the HF directory
+    if format == "safetensors":
+        sf_path = os.path.join(hf_dir, "base_model.safetensors")
+        if os.path.exists(sf_path):
+            return FileResponse(
+                sf_path,
+                media_type="application/octet-stream",
+                filename=f"{group_id}_base.safetensors",
+            )
+        # Try global dir
+        sf_path_global = os.path.join(global_dir, "base_model.safetensors")
+        if os.path.exists(sf_path_global):
+            return FileResponse(
+                sf_path_global,
+                media_type="application/octet-stream",
+                filename=f"{group_id}_base.safetensors",
+            )
+        # If no safetensors file exists, try to convert from .pt
+        pt_path = os.path.join(hf_dir, "base_model.pt")
+        if not os.path.exists(pt_path):
+            pt_path = os.path.join(global_dir, "base.pt")
+        if os.path.exists(pt_path):
+            try:
+                from safetensors.torch import save_file as _safetensors_save
+
+                data = torch.load(pt_path, map_location="cpu", weights_only=False)
+                base_state = data.get("base_state_dict", data)
+                if isinstance(base_state, dict):
+                    tensor_dict = {
+                        k: v.cpu() for k, v in base_state.items()
+                        if isinstance(v, torch.Tensor)
+                    }
+                    if tensor_dict:
+                        tmp_path = os.path.join(hf_dir, "_tmp_base.safetensors")
+                        os.makedirs(hf_dir, exist_ok=True)
+                        _safetensors_save(tensor_dict, tmp_path)
+                        return FileResponse(
+                            tmp_path,
+                            media_type="application/octet-stream",
+                            filename=f"{group_id}_base.safetensors",
+                        )
+            except ImportError:
+                raise HTTPException(
+                    status_code=400,
+                    detail="safetensors package not installed on server and no safetensors file available",
+                ) from None
+        raise HTTPException(
+            status_code=404,
+            detail="Base model not found. Server must be started with PEFT enabled.",
+        )
+
+    # .pt format (default)
+    pt_path = os.path.join(hf_dir, "base_model.pt")
+    if not os.path.exists(pt_path):
+        pt_path = os.path.join(global_dir, "base.pt")
+    if not os.path.exists(pt_path):
         raise HTTPException(
             status_code=404,
             detail="Base model not found. Server must be started with PEFT enabled.",
         )
 
     return FileResponse(
-        base_path,
+        pt_path,
         media_type="application/octet-stream",
         filename=f"{group_id}_base.pt",
     )
@@ -404,4 +534,80 @@ async def get_model_history(group_id: str):
         "has_latest": os.path.exists(os.path.join(save_dir, "model_latest.pt"))
         if os.path.exists(save_dir)
         else False,
+    }
+
+
+@router.get("/api/models/{group_id}/download-info")
+async def get_download_info(group_id: str):
+    """Get metadata about available model files for a group.
+
+    Returns info about base model, adapter, and available formats.
+    Clients use this to decide what to download (base vs adapter, pt vs safetensors).
+    """
+    fl_server = get_fl_server()
+    if group_id not in fl_server.group_manager.groups:
+        raise HTTPException(status_code=404, detail="Group not found")
+
+    group = fl_server.group_manager.groups[group_id]
+
+    # Check PEFT from group config OR model registry
+    is_peft = group.config.get("peft", {}).get("enabled", False)
+    if not is_peft:
+        # Also check the model registry — PEFT info lives there when
+        # the group was created via the HuggingFace tab
+        model_info = fl_server.model_registry.get_model_info(group.model_id)
+        if model_info:
+            is_peft = model_info.get("is_peft", False)
+
+    # Check HF directory
+    hf_dir = os.path.join("models", "hf", group.model_id)
+    global_dir = os.path.join("models", "global", group_id)
+
+    # Get base model info
+    from astra.core.models.hf_models import get_download_info as _get_hf_info
+
+    hf_info = _get_hf_info(hf_dir)
+
+    # Get global model info (adapter + versioned checkpoints)
+    global_info: dict[str, Any] = {"has_adapter": False, "adapter_versions": []}
+    adapter_latest = os.path.join(global_dir, "adapter_latest.pt")
+    if os.path.exists(adapter_latest):
+        global_info["has_adapter"] = True
+        global_info["adapter_latest_size"] = os.path.getsize(adapter_latest)
+
+    if os.path.exists(global_dir):
+        for fname in os.listdir(global_dir):
+            if fname.startswith("adapter_v") and fname.endswith(".pt"):
+                try:
+                    ver = int(fname.replace("adapter_v", "").replace(".pt", ""))
+                    global_info["adapter_versions"].append(ver)
+                except ValueError:
+                    pass
+    global_info["adapter_versions"].sort()
+
+    # Check for latest global model
+    latest_path = os.path.join(global_dir, "model_latest.pt")
+    has_global_model = os.path.exists(latest_path)
+
+    return {
+        "group_id": group_id,
+        "model_id": group.model_id,
+        "is_peft": is_peft,
+        "base_model": {
+            "available": hf_info.get("has_base_model", False),
+            "formats": list(hf_info.get("formats", {}).keys()),
+            "sizes": {
+                fmt: info.get("size_bytes", 0)
+                for fmt, info in hf_info.get("formats", {}).items()
+            },
+        },
+        "adapter": {
+            "available": global_info.get("has_adapter", False),
+            "versions": global_info.get("adapter_versions", []),
+            "latest_size": global_info.get("adapter_latest_size", 0),
+        },
+        "global_model": {
+            "available": has_global_model,
+            "current_version": group.model_version,
+        },
     }

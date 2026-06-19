@@ -58,7 +58,7 @@ Admin creates group → Clients request to join → Admin approves
 | **Robustness** | Byzantine-tolerant trust scoring · Cosine-similarity anomaly detection · Soft quarantine |
 | **Privacy** | DP-SGD (server-side) · Gaussian noise · Gradient clipping |
 | **Compression** | Top-k sparsification · Quantization |
-| **Models** | Registry-driven · Any PyTorch module via dynamic import · Any HuggingFace model · Optional LoRA / PEFT |
+| **Models** | Registry-driven · Any PyTorch module via dynamic import · Any HuggingFace model · Optional LoRA / PEFT · Safetensors support |
 | **Client training** | Out of scope — clients train externally and submit pre-computed deltas |
 | **Auth** | JWT + bcrypt · Roles: `admin` \| `client` \| `observer` |
 | **Dashboard** | Next.js 14 · Admin panel (groups, join requests, metrics, logs) · Client panel (upload delta, trust, notifications) |
@@ -389,8 +389,13 @@ POST  /api/models/register/architecture     Register via Python path (e.g. Simpl
 GET   /api/models/{id}                       Model info
 GET   /api/models/{group_id}/download        Download global model weights (full)
                                            ?format=raw returns flattened float32 .bin (upload-ready)
+                                           ?format=safetensors returns safetensors format
 GET   /api/models/{group_id}/adapter        Download LoRA adapter only (PEFT)
 GET   /api/models/{group_id}/base           Download base model (PEFT)
+                                           ?format=safetensors returns safetensors format
+GET   /api/models/{group_id}/download-info  Metadata about available files (base, adapter, formats, sizes)
+GET   /api/models/{group_id}/adapter/{v}    Download specific adapter version
+GET   /api/models/{group_id}/history        Training history + available files
 ```
 
 ### System

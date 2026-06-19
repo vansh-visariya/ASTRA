@@ -12,6 +12,10 @@ All notable changes to the ASTRA project.
 - Top-k sparsification + quantization for communication compression
 - IID, Dirichlet (non-IID), and pathological data splits
 - HuggingFace model support with optional LoRA/PEFT
+- HuggingFace model download-to-disk: base models saved in .pt and safetensors formats on group creation
+- Safetensors format support for model downloads (.pt and .safetensors)
+- Download-info endpoint (`GET /api/models/{group_id}/download-info`) for clients to discover available files
+- PEFT upload validation: server rejects full model weights for PEFT groups (adapter-only enforcement)
 - FastAPI REST API + WebSocket + Socket.IO real-time transport
 - Next.js 14 dashboard with admin and client panels
 - Group-based training with hybrid async windowing (N updates OR T seconds)

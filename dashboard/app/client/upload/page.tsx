@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   Upload, Download, Key, FileUp,
-  RefreshCw, CheckCircle, AlertCircle, Copy, Layers,
+  RefreshCw, CheckCircle, AlertCircle, Copy, Layers, HardDrive, Package,
 } from 'lucide-react';
 import { useAuth } from '@/components/AuthContext';
 import { useGroups } from '@/hooks';
@@ -31,6 +31,51 @@ type UploadResult =
   | { ok: true; version: number; bytes: number; via: 'inline' | 'chunked' }
   | { ok: false; error: string };
 
+interface DownloadInfo {
+  group_id: string;
+  model_id: string;
+  is_peft: boolean;
+  base_model: {
+    available: boolean;
+    formats: string[];
+    sizes: Record<string, number>;
+  };
+  adapter: {
+    available: boolean;
+    versions: number[];
+    latest_size: number;
+  };
+  global_model: {
+    available: boolean;
+    current_version: number;
+  };
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+const STORAGE_KEY = 'astra_downloaded_bases';
+
+function getDownloadedBases(): Record<string, boolean> {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function markBaseDownloaded(groupId: string): void {
+  const bases = getDownloadedBases();
+  bases[groupId] = true;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(bases));
+}
+
 export default function ClientUploadPage() {
   const { user, token } = useAuth();
   const { isConnected } = useWS();
@@ -51,14 +96,48 @@ export default function ClientUploadPage() {
   const [copied, setCopied] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
-  const [downloading, setDownloading] = useState<'pt' | 'raw' | null>(null);
+  const [downloading, setDownloading] = useState<'pt' | 'raw' | 'safetensors' | 'base' | 'adapter' | null>(null);
   const [downloadProgress, setDownloadProgress] = useState<
     { received: number; total: number; pct: number } | null
   >(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const downloadAbortRef = useRef<AbortController | null>(null);
 
-  const downloadModel = async (fmt: 'pt' | 'raw') => {
+  // Download info for the selected group
+  const [downloadInfo, setDownloadInfo] = useState<DownloadInfo | null>(null);
+  const [downloadInfoLoading, setDownloadInfoLoading] = useState(false);
+
+  // Track which base models have been downloaded locally
+  const [downloadedBases, setDownloadedBases] = useState<Record<string, boolean>>({});
+
+  // Fetch download info when group changes
+  useEffect(() => {
+    if (!selectedGroup) {
+      setDownloadInfo(null);
+      return;
+    }
+    let cancelled = false;
+    const fetchInfo = async () => {
+      setDownloadInfoLoading(true);
+      try {
+        const info = await api.get<DownloadInfo>(`/api/models/${selectedGroup}/download-info`);
+        if (!cancelled) setDownloadInfo(info);
+      } catch {
+        if (!cancelled) setDownloadInfo(null);
+      } finally {
+        if (!cancelled) setDownloadInfoLoading(false);
+      }
+    };
+    fetchInfo();
+    return () => { cancelled = true; };
+  }, [selectedGroup]);
+
+  // Load downloaded bases from localStorage on mount
+  useEffect(() => {
+    setDownloadedBases(getDownloadedBases());
+  }, []);
+
+  const downloadModel = async (fmt: 'pt' | 'raw' | 'safetensors' | 'base' | 'adapter') => {
     if (!selectedGroup) return;
     setDownloading(fmt);
     setDownloadProgress({ received: 0, total: 0, pct: 0 });
@@ -66,16 +145,54 @@ export default function ClientUploadPage() {
     try {
       downloadAbortRef.current = new AbortController();
 
-      const initBody = await api.post<{
+      // Determine the download endpoint based on the type
+      let initBody: {
         download_id: string;
         total_size: number;
         sha256: string;
         num_chunks: number;
         chunks: { index: number; url: string }[];
-      }>('/api/downloads/init', {
-        group_id: selectedGroup,
-        format: fmt,
-      });
+      };
+
+      if (fmt === 'base') {
+        // Download base model (one-time, large)
+        initBody = await api.post<{
+          download_id: string;
+          total_size: number;
+          sha256: string;
+          num_chunks: number;
+          chunks: { index: number; url: string }[];
+        }>('/api/downloads/init', {
+          group_id: selectedGroup,
+          format: 'pt',
+          download_type: 'base',
+        });
+      } else if (fmt === 'adapter') {
+        // Download adapter (small, per-round)
+        initBody = await api.post<{
+          download_id: string;
+          total_size: number;
+          sha256: string;
+          num_chunks: number;
+          chunks: { index: number; url: string }[];
+        }>('/api/downloads/init', {
+          group_id: selectedGroup,
+          format: 'pt',
+          download_type: 'adapter',
+        });
+      } else {
+        // Legacy: download full model (pt or raw)
+        initBody = await api.post<{
+          download_id: string;
+          total_size: number;
+          sha256: string;
+          num_chunks: number;
+          chunks: { index: number; url: string }[];
+        }>('/api/downloads/init', {
+          group_id: selectedGroup,
+          format: fmt,
+        });
+      }
 
       const totalBytes = initBody.total_size;
       const chunks: Uint8Array[] = [];
@@ -119,14 +236,28 @@ export default function ClientUploadPage() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download =
-        fmt === 'raw'
-          ? `${selectedGroup}_model.bin`
-          : `${selectedGroup}_model.pt`;
+      if (fmt === 'base') {
+        a.download = `${selectedGroup}_base_model.pt`;
+      } else if (fmt === 'adapter') {
+        a.download = `${selectedGroup}_adapter.pt`;
+      } else {
+        a.download =
+          fmt === 'raw'
+            ? `${selectedGroup}_model.bin`
+            : fmt === 'safetensors'
+              ? `${selectedGroup}_model.safetensors`
+              : `${selectedGroup}_model.pt`;
+      }
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
+
+      // Mark base model as downloaded in localStorage
+      if (fmt === 'base') {
+        markBaseDownloaded(selectedGroup);
+        setDownloadedBases(getDownloadedBases());
+      }
 
       // Best-effort telemetry
       try {
@@ -231,7 +362,8 @@ export default function ClientUploadPage() {
     if (result.status === 'accepted') {
       return { ok: true, version: result.global_version, bytes: bytes.length, via: 'inline' };
     }
-    return { ok: false, error: result.status };
+    const detail = (result as any).detail || (result as any).reason || result.status;
+    return { ok: false, error: detail };
   };
 
   const uploadChunked = async (file: File): Promise<UploadResult> => {
@@ -464,26 +596,121 @@ export default function ClientUploadPage() {
           <div className="glass-card p-5 animate-fade-in">
             <div className="flex items-center gap-3 mb-4">
               <Download size={17} className="text-blue-400" />
-              <h3 className="text-white font-semibold text-sm">Download Global Model</h3>
+              <h3 className="text-white font-semibold text-sm">Download Model</h3>
+              {downloadInfo?.is_peft && (
+                <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300">
+                  PEFT Group
+                </span>
+              )}
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <button
-                onClick={() => downloadModel('raw')}
-                disabled={downloading !== null}
-                className="btn-secondary inline-flex items-center justify-center gap-2 py-2.5 text-sm disabled:opacity-50"
-              >
-                <Download size={14} />
-                {downloading === 'raw' ? 'Downloading…' : 'Weights (.bin, raw float32)'}
-              </button>
-              <button
-                onClick={() => downloadModel('pt')}
-                disabled={downloading !== null}
-                className="btn-secondary inline-flex items-center justify-center gap-2 py-2.5 text-sm disabled:opacity-50"
-              >
-                <Download size={14} />
-                {downloading === 'pt' ? 'Downloading…' : 'Full Model (.pt checkpoint)'}
-              </button>
-            </div>
+
+            {downloadInfoLoading ? (
+              <p className="text-slate-500 text-xs">Loading model info...</p>
+            ) : downloadInfo?.is_peft ? (
+              /* PEFT group: show base + adapter download */
+              <div className="space-y-3">
+                <div className="p-3 rounded-xl text-xs text-slate-400" style={{ background: 'rgba(15,23,42,0.4)' }}>
+                  <strong className="text-slate-200">PEFT workflow:</strong> Download the base model once,
+                  then download only the small adapter for each training round.
+                  Upload only adapter weights (not the full model).
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {/* Base model download */}
+                  <div className="p-3 rounded-xl" style={{ background: 'rgba(15,23,42,0.4)' }}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <HardDrive size={14} className="text-blue-400" />
+                      <span className="text-white text-xs font-medium">Base Model (one-time)</span>
+                      {downloadedBases[selectedGroup] && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300">
+                          Cached locally
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-slate-500 text-[11px] mb-2">
+                      Frozen backbone weights. Download once, reuse for all rounds.
+                    </p>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => downloadModel('base')}
+                        disabled={downloading !== null || !downloadInfo?.base_model.available}
+                        className="btn-secondary flex-1 inline-flex items-center justify-center gap-1.5 py-2 text-xs disabled:opacity-50"
+                      >
+                        <Download size={12} />
+                        {downloading === 'base' ? 'Downloading...' : 'Download .pt'}
+                      </button>
+                      {downloadInfo?.base_model.formats.includes('safetensors') && (
+                        <button
+                          onClick={() => {
+                            // Download safetensors directly via the base endpoint
+                            window.open(`${API_URL}/api/models/${selectedGroup}/base?format=safetensors`);
+                          }}
+                          disabled={downloading !== null}
+                          className="btn-secondary inline-flex items-center justify-center gap-1.5 py-2 text-xs disabled:opacity-50"
+                        >
+                          <Download size={12} />
+                          .safetensors
+                        </button>
+                      )}
+                    </div>
+                    {downloadInfo?.base_model.available && (
+                      <p className="text-slate-600 text-[10px] mt-1.5">
+                        {downloadInfo.base_model.sizes.pt
+                          ? `Size: ${formatBytes(downloadInfo.base_model.sizes.pt)}`
+                          : 'Available on server'}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Adapter download */}
+                  <div className="p-3 rounded-xl" style={{ background: 'rgba(15,23,42,0.4)' }}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <Package size={14} className="text-emerald-400" />
+                      <span className="text-white text-xs font-medium">Adapter (per round)</span>
+                    </div>
+                    <p className="text-slate-500 text-[11px] mb-2">
+                      LoRA adapter weights. Download after each aggregation round.
+                    </p>
+                    <button
+                      onClick={() => downloadModel('adapter')}
+                      disabled={downloading !== null || !downloadInfo?.adapter.available}
+                      className="btn-secondary w-full inline-flex items-center justify-center gap-1.5 py-2 text-xs disabled:opacity-50"
+                    >
+                      <Download size={12} />
+                      {downloading === 'adapter' ? 'Downloading...' : 'Download Adapter'}
+                    </button>
+                    {downloadInfo?.adapter.available && (
+                      <p className="text-slate-600 text-[10px] mt-1.5">
+                        {downloadInfo.adapter.latest_size > 0
+                          ? `Size: ${formatBytes(downloadInfo.adapter.latest_size)} | v${downloadInfo.global_model.current_version}`
+                          : `Available | v${downloadInfo.global_model.current_version}`}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              /* Non-PEFT group: show standard download buttons */
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <button
+                  onClick={() => downloadModel('raw')}
+                  disabled={downloading !== null}
+                  className="btn-secondary inline-flex items-center justify-center gap-2 py-2.5 text-sm disabled:opacity-50"
+                >
+                  <Download size={14} />
+                  {downloading === 'raw' ? 'Downloading...' : 'Weights (.bin, raw float32)'}
+                </button>
+                <button
+                  onClick={() => downloadModel('pt')}
+                  disabled={downloading !== null}
+                  className="btn-secondary inline-flex items-center justify-center gap-2 py-2.5 text-sm disabled:opacity-50"
+                >
+                  <Download size={14} />
+                  {downloading === 'pt' ? 'Downloading...' : 'Full Model (.pt checkpoint)'}
+                </button>
+              </div>
+            )}
+
             {downloadProgress && (
               <div className="mt-3 space-y-1">
                 <div className="flex items-center justify-between text-xs text-slate-400">
@@ -548,12 +775,12 @@ export default function ClientUploadPage() {
 
               <div>
                 <label className="text-slate-400 text-xs block mb-1">
-                  Delta File (.pt / .npy / .bin) — raw float32 weight bytes
+                  Delta File (.pt / .npy / .bin / .safetensors) — {downloadInfo?.is_peft ? 'adapter weights only' : 'raw float32 weight bytes'}
                 </label>
                 <input
                   ref={fileRef}
                   type="file"
-                  accept=".pt,.npy,.bin,.raw"
+                  accept=".pt,.npy,.bin,.raw,.safetensors"
                   onChange={onFileChange}
                   className="block w-full text-sm text-slate-300 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-sm file:bg-slate-800 file:text-white"
                 />
@@ -667,12 +894,17 @@ export default function ClientUploadPage() {
       <div className="glass-card p-5 animate-fade-in">
         <h3 className="text-white font-semibold text-sm mb-3">How It Works</h3>
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-          {[
+          {(downloadInfo?.is_peft ? [
+            { step: '1', title: 'Download Base Model', desc: 'Pull the frozen backbone once (.pt or .safetensors)' },
+            { step: '2', title: 'Fine-tune Locally', desc: 'Apply LoRA adapters on your data, train only adapter weights' },
+            { step: '3', title: 'Download Adapter', desc: 'Pull the latest global adapter weights each round' },
+            { step: '4', title: 'Upload Adapter', desc: 'Submit only your adapter delta (not the full model)' },
+          ] : [
             { step: '1', title: 'Train Externally', desc: 'Run your training script on your own hardware/data' },
             { step: '2', title: 'Download Global', desc: 'Pull the current global model from the group' },
             { step: '3', title: 'Compute Delta', desc: 'Subtract old weights from your new weights' },
             { step: '4', title: 'Upload Here', desc: 'Submit the delta bytes via this page or REST' },
-          ].map((item) => (
+          ]).map((item) => (
             <div key={item.step} className="p-3 rounded-xl" style={{ background: 'rgba(15,23,42,0.4)' }}>
               <span
                 className="w-6 h-6 rounded-lg flex items-center justify-center text-[11px] font-bold mb-2 inline-flex"
@@ -686,9 +918,14 @@ export default function ClientUploadPage() {
           ))}
         </div>
         <div className="mt-4 p-3 rounded-xl text-xs text-slate-400" style={{ background: 'rgba(15,23,42,0.4)' }}>
-          <strong className="text-slate-200">Upload format:</strong> raw float32 little-endian weight delta,
-          byte count = <code className="font-mono">total_params × 4</code>. Files ≤ {INLINE_LIMIT_MB} MB are sent inline;
-          larger files are uploaded via the presigned-URL flow (chunked, resumable, sha256-verified).
+          <strong className="text-slate-200">Upload format:</strong>{' '}
+          {downloadInfo?.is_peft ? (
+            <>Adapter-only delta (LoRA weights). Use <code className="font-mono">flatten_peft_params()</code> from <code className="font-mono">astra.core.models.model_zoo</code> to extract adapter parameters.</>
+          ) : (
+            <>Raw float32 little-endian weight delta,
+            byte count = <code className="font-mono">total_params × 4</code>. Files ≤ {INLINE_LIMIT_MB} MB are sent inline;
+            larger files are uploaded via the presigned-URL flow (chunked, resumable, sha256-verified).</>
+          )}
         </div>
       </div>
     </div>

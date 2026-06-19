@@ -263,6 +263,35 @@ async def _dispatch_staged_delta(record, delta_bytes: bytes) -> dict:
                 ),
             )
 
+    # PEFT validation: if the group uses PEFT, the delta should be adapter
+    # weights only (much smaller than full model).
+    is_peft = group.config.get("peft", {}).get("enabled", False)
+    if is_peft and expected_params is not None:
+        full_model_bytes = expected_params * 4
+        adapter_ratio = len(delta_bytes) / full_model_bytes if full_model_bytes > 0 else 1.0
+        if adapter_ratio > 0.5:
+            logger.warning(
+                "Client %s in PEFT group %s uploaded %.1f%% of full model size "
+                "(%d bytes vs %d expected for full model) via presigned URL flow.",
+                client_id,
+                group.group_id,
+                adapter_ratio * 100,
+                len(delta_bytes),
+                full_model_bytes,
+            )
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"PEFT group '{group.group_id}' expects adapter-only delta "
+                    f"(LoRA weights), but the uploaded payload is "
+                    f"{adapter_ratio * 100:.1f}% of the full model size "
+                    f"({len(delta_bytes):,} bytes vs {full_model_bytes:,} for full model). "
+                    f"Download the base model once, fine-tune locally, then upload "
+                    f"only the adapter weights. Use flatten_peft_params() from "
+                    f"astra.core.models.model_zoo to extract adapter parameters."
+                ),
+            )
+
     delta = np.frombuffer(delta_bytes, dtype="<f4")
     if not np.all(np.isfinite(delta)):
         raise HTTPException(status_code=400, detail="delta contains NaN or Inf values")

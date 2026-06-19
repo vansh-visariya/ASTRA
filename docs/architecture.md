@@ -100,6 +100,7 @@ This prevents straggler clients from blocking the entire pipeline.
 | `AstraDB` | `app/database.py` | SQLite persistence, WAL mode, thread-local connections |
 | `ConnectionManager` | `infra/connection_manager.py` | WebSocket registry, broadcast, per-client send |
 | `ModelRegistry` | `infra/registry.py` | Model factory registry, HF integration, dynamic architecture import + DB persistence |
+| `hf_models` | `core/models/hf_models.py` | HuggingFace model loading, PEFT application, save/load to disk (.pt + safetensors) |
 | `TrustManager` | `core/trust_manager.py` | Cosine similarity trust, quarantine logic |
 | `Config` | `core/config.py` | YAML + env config loading |
 
@@ -122,6 +123,31 @@ register → join_request → approved → activate → training ↔ aggregation
                                            │
                                      rejected (end)
 ```
+
+## HuggingFace Model Download (PEFT Groups)
+
+When an admin creates a group with a HuggingFace model and PEFT enabled, the base model is saved to disk so clients can download it efficiently:
+
+```
+Admin creates group (PEFT enabled):
+  → GroupManager._save_hf_model_to_disk()
+    → saves base_model.pt (PyTorch format)
+    → saves base_model.safetensors (if safetensors installed)
+    → saves adapter_config.json (LoRA config metadata)
+    → stored in models/hf/{model_id}/
+
+Client workflow:
+  1. GET /api/models/{group_id}/download-info → check available files
+  2. GET /api/models/{group_id}/base → download frozen backbone (one-time, large)
+  3. Fine-tune locally with LoRA adapters
+  4. GET /api/models/{group_id}/adapter → download latest adapter (per-round, small)
+  5. POST /api/clients/{client_id}/delta → upload adapter-only weights
+     → Server validates: rejects if > 50% of full model (likely full model uploaded by mistake)
+```
+
+**Upload validation**: When a PEFT group receives an upload, the server checks the delta size against the expected adapter size. If the payload is > 50% of the full model size, it's rejected with an actionable error message telling the client to upload only adapter weights.
+
+**Safetensors support**: The base model is saved in both `.pt` (PyTorch native, fast loading) and `.safetensors` (HuggingFace-native format) when the `safetensors` package is installed. Clients can choose their preferred format via the `format` query parameter.
 
 ## Database Schema
 

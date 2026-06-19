@@ -239,6 +239,42 @@ async def submit_client_delta(client_id: str, request: Request):
     if not np.all(np.isfinite(delta)):
         raise HTTPException(status_code=400, detail="delta contains NaN or Inf values")
 
+    # PEFT validation: if the group uses PEFT, the delta should be adapter
+    # weights only (much smaller than full model). Warn if the client
+    # uploaded full model weights by mistake.
+    is_peft = group.config.get("peft", {}).get("enabled", False)
+    if is_peft and expected_params is not None:
+        # For PEFT, expected_params is the full model param count.
+        # The adapter delta should be a fraction of that.
+        # Typical LoRA rank=8 on q_proj/v_proj is ~0.1-2% of total params.
+        full_model_bytes = expected_params * 4
+        adapter_ratio = len(delta_bytes) / full_model_bytes if full_model_bytes > 0 else 1.0
+
+        if adapter_ratio > 0.5:
+            # Client likely uploaded full model weights instead of adapter delta
+            logger.warning(
+                "Client %s in PEFT group %s uploaded %.1f%% of full model size "
+                "(%d bytes vs %d expected for full model). This is likely full "
+                "model weights, not an adapter delta.",
+                client_id,
+                group.group_id,
+                adapter_ratio * 100,
+                len(delta_bytes),
+                full_model_bytes,
+            )
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"PEFT group '{group.group_id}' expects adapter-only delta "
+                    f"(LoRA weights), but the uploaded payload is "
+                    f"{adapter_ratio * 100:.1f}% of the full model size "
+                    f"({len(delta_bytes):,} bytes vs {full_model_bytes:,} for full model). "
+                    f"Download the base model once, fine-tune locally, then upload "
+                    f"only the adapter weights. Use flatten_peft_params() from "
+                    f"astra.core.models.model_zoo to extract adapter parameters."
+                ),
+            )
+
     # Dispatch to FL server pipeline
     if fl_server.is_paused:
         return {"status": "rejected", "reason": "server_paused"}

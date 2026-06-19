@@ -47,7 +47,7 @@ Models registered via External/Architecture tab are persisted to `model_registry
 - `src/astra/core/server.py` — AsyncServer: async FL engine; staleness-weighted aggregation, trust scoring, momentum
 - `src/astra/core/aggregation/` — FedAvg, TrimmedMean, CoordinateMedian, Hybrid aggregation
 - `src/astra/core/models/model_zoo.py` — `flatten_all_params()`, `apply_flat_delta()`, PEFT utilities, `SimpleMLP`
-- `src/astra/core/models/hf_models.py` — HuggingFace model loading with optional LoRA/PEFT
+- `src/astra/core/models/hf_models.py` — HuggingFace model loading with optional LoRA/PEFT; `save_base_model_to_disk()` and `load_base_model_from_disk()` for persisting base models in .pt and safetensors formats; `get_download_info()` for metadata about available files
 - `src/astra/core/trust_manager.py` — Cosine-similarity trust scoring, exponential decay, quarantine at 0.35
 - `src/astra/core/privacy/privacy.py` — Server-side DP (`clip_and_noise`); the `MaliciousSimulator` was removed
 - `src/astra/core/compression.py` — Top-k sparsification and quantization
@@ -67,11 +67,28 @@ Client signs up → requests to join group → admin approves → client activat
     → JWT verified
     → size ≤ 100 MB, length % 4 == 0, no NaN/Inf
     → rate-limited (1 upload / 2 s per client)
+    → if PEFT group: validates adapter-only upload (rejects full model weights)
     → AsyncServer.handle_update(): apply server-side DP, score trust, append to buffer
     → if window full → AsyncServer._perform_aggregation() → apply delta to model → bump global_version
     → also GroupManager.process_client_update + aggregate_group (keeps group model_version in sync)
     → broadcast "client_update" / "aggregation_complete" over WebSocket
   → GET /api/models/{group_id}/download to pull the new global model
+```
+
+### HuggingFace model download flow (PEFT groups)
+```
+Admin creates group with HF model + PEFT enabled:
+  → GroupManager.create_group() saves base model to models/hf/{model_id}/
+    → base_model.pt (PyTorch format, fast loading)
+    → base_model.safetensors (HuggingFace-native format, if safetensors installed)
+    → adapter_config.json (metadata)
+
+Client download workflow:
+  → GET /api/models/{group_id}/download-info (returns available files, formats, sizes)
+  → First time: GET /api/models/{group_id}/base (downloads frozen backbone, ~large)
+  → Each round: GET /api/models/{group_id}/adapter (downloads LoRA adapter, ~small)
+  → Upload: POST /api/clients/{client_id}/delta with adapter-only weights
+    → Server validates: rejects if payload > 50% of full model size (likely full model uploaded by mistake)
 ```
 
 ### Aggregation trigger flow
@@ -124,5 +141,5 @@ GroupManager.aggregate_group():
 - **Config**: `config.yaml` for training params; env vars: `SECRET_KEY`, `ENV`, `GEMINI_API_KEY`, `ASTRA_DEFAULT_ADMIN_PASSWORD`, `ASTRA_SEED`
 
 ## Metrics / Benchmarks
-- Tests: ~210 passing (3 new test files for the upload pipeline + WebSocket cleanup; 3 old test files deleted)
+- Tests: ~283 passing (3 new test files for the upload pipeline + WebSocket cleanup + HF download; 3 old test files deleted)
 - Config defaults: 20 clients, window_size=10, MNIST/Dirichlet(0.3), hybrid robust aggregation, DP client-side (sigma=1.2, clip_norm=1.0), top-k compression (ratio=0.1)

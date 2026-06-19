@@ -67,17 +67,39 @@ class FLServer:
                 config_data = json.loads(config_row) if config_row else {}
 
                 if source == "huggingface":
-                    self.model_registry.register_hf_model(
-                        model_name=arch_path,
-                        use_peft=config_data.get("use_peft", False),
-                        peft_config={
-                            "enabled": config_data.get("use_peft", False),
-                            "method": config_data.get("peft_method", "lora"),
-                            "lora_rank": 8,
-                            "lora_alpha": 16,
-                            "target_modules": ["q_proj", "v_proj"],
-                        } if config_data.get("use_peft") else {"enabled": False},
-                    )
+                    use_peft = config_data.get("use_peft", False)
+                    peft_cfg = {
+                        "enabled": use_peft,
+                        "method": config_data.get("peft_method", "lora"),
+                        "lora_rank": 8,
+                        "lora_alpha": 16,
+                        "target_modules": ["q_proj", "v_proj"],
+                    } if use_peft else {"enabled": False}
+
+                    if model_id in self.model_registry.models:
+                        logger.debug("Model '%s' already in registry, skipping", model_id)
+                    else:
+                        from astra.infra.registry import ModelInfo
+                        from astra.core.models.hf_models import load_hf_peft_model
+
+                        model_info = ModelInfo(
+                            model_id=model_id,
+                            model_type="text",
+                            architecture=arch_path,
+                            total_params=0,
+                            trainable_params=0,
+                            is_peft=use_peft,
+                            peft_method=peft_cfg.get("method") if use_peft else None,
+                            source="huggingface",
+                            model_path=arch_path,
+                            config=peft_cfg,
+                        )
+                        self.model_registry.models[model_id] = model_info
+                        self.model_registry.model_factories[model_id] = (
+                            lambda m=arch_path, c=peft_cfg: load_hf_peft_model(
+                                m, c, device="cpu"
+                            )[0]
+                        )
                 else:
                     module_path, attr_name = arch_path.rsplit(".", 1)
                     module = importlib.import_module(module_path)

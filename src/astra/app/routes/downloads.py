@@ -48,11 +48,42 @@ def _verify_jwt(token: str | None) -> dict:
         raise HTTPException(status_code=401, detail=f"Token verification failed: {e}") from None
 
 
-def _resolve_model_file(group_id: str, version: int | None, fmt: str) -> Path:
-    """Return the on-disk path to the .pt (or .bin) for this group/version/format."""
+def _resolve_model_file(group_id: str, version: int | None, fmt: str, download_type: str | None = None) -> Path:
+    """Return the on-disk path to the model file for this group/version/format/type."""
     fl_server = get_fl_server()
     if group_id not in fl_server.group_manager.groups:
         raise HTTPException(status_code=404, detail="Group not found")
+
+    group = fl_server.group_manager.groups[group_id]
+
+    # For base model downloads (PEFT groups)
+    if download_type == "base":
+        hf_dir = Path("models") / "hf" / group.model_id
+        global_dir = Path("models") / "global" / group_id
+
+        pt_path = hf_dir / "base_model.pt"
+        if pt_path.exists():
+            return pt_path
+        pt_path = global_dir / "base.pt"
+        if pt_path.exists():
+            return pt_path
+        raise HTTPException(
+            status_code=404,
+            detail="Base model not found. The group may not have PEFT enabled.",
+        )
+
+    # For adapter downloads (PEFT groups)
+    if download_type == "adapter":
+        save_dir = Path("models") / "global" / group_id
+        adapter_path = save_dir / "adapter_latest.pt"
+        if adapter_path.exists():
+            return adapter_path
+        raise HTTPException(
+            status_code=404,
+            detail="No adapter weights available. No training has completed yet.",
+        )
+
+    # Standard model download (global model)
     save_dir = Path("models") / "global" / group_id
     if not save_dir.exists():
         raise HTTPException(status_code=404, detail="Group has no saved models yet")
@@ -80,6 +111,7 @@ async def init_download(request: Request, authorization: str = Header(None)):
     group_id = body.get("group_id")
     version = body.get("version")
     fmt = body.get("format", "pt")
+    download_type = body.get("download_type")  # "base" or "adapter" for PEFT groups
     if not group_id:
         raise HTTPException(status_code=400, detail="group_id is required")
     if fmt not in ("pt", "raw"):
@@ -87,7 +119,7 @@ async def init_download(request: Request, authorization: str = Header(None)):
     if version is not None and not isinstance(version, int):
         raise HTTPException(status_code=400, detail="version must be an integer")
 
-    source_path = _resolve_model_file(group_id, version, fmt)
+    source_path = _resolve_model_file(group_id, version, fmt, download_type=download_type)
 
     uploads_cfg = DEFAULT_CONFIG.get("uploads", {})
     chunk_size = int(uploads_cfg.get("chunk_size", 8 * 1024 * 1024))

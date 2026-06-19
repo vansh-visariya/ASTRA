@@ -214,6 +214,16 @@ class UploadManager:
                 if rec.status != "completed" and rec.expires_at < time.time():
                     self.store.discard(rec.upload_id)
                     continue
+                # Expire in-progress uploads older than 1 hour — abandoned
+                # chunks, server crashes, etc. prevent the client from ever
+                # completing.  On Windows leftover .bin.tmp files can hold
+                # file handles that cause WinError 5 on new uploads for the
+                # same upload_id.
+                if rec.status in ("initiated", "receiving") and (
+                    time.time() - rec.created_at > 3600
+                ):
+                    self.store.discard(rec.upload_id)
+                    continue
                 self._records[rec.upload_id] = rec
             except Exception:
                 continue

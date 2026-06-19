@@ -414,7 +414,76 @@ class GroupManager:
             except Exception as e:
                 self.logger.warning(f"Could not persist group {group_id} to DB: {e}")
 
+            # If PEFT is enabled, save the base model to disk for client downloads
+            self._save_hf_model_to_disk(group_id, model_id, config)
+
             return group
+
+    def _save_hf_model_to_disk(
+        self, group_id: str, model_id: str, config: dict[str, Any]
+    ) -> None:
+        """Save HuggingFace base model to disk so clients can download it.
+
+        Called after group creation when PEFT is enabled. Saves both .pt and
+        safetensors formats to ``models/hf/{model_id}/``.
+        """
+        is_peft = config.get("peft", {}).get("enabled", False)
+
+        # Also check the model registry — PEFT info lives there when
+        # the group was created via the HuggingFace tab
+        if not is_peft:
+            try:
+                from astra.infra.registry import get_registry as _get_reg
+
+                _reg = _get_reg()
+                _info = _reg.get_model_info(model_id)
+                if _info:
+                    is_peft = _info.get("is_peft", False)
+            except Exception:
+                pass
+
+        if not is_peft:
+            return
+
+        try:
+            from astra.infra.registry import get_registry
+
+            registry = get_registry()
+            if model_id not in registry.model_instances:
+                self.logger.debug(
+                    "No model instance for '%s' — deferring disk save to first aggregation",
+                    model_id,
+                )
+                return
+
+            model = registry.model_instances[model_id]
+            peft_config = config.get("peft", {})
+
+            save_dir = os.path.join("models", "hf", model_id)
+            from astra.core.models.hf_models import save_base_model_to_disk
+
+            saved = save_base_model_to_disk(
+                model=model,
+                save_dir=save_dir,
+                model_name=model_id,
+                peft_config=peft_config,
+            )
+            self.log_event(
+                "hf_model_saved",
+                f"Saved HuggingFace base model for group {group_id} to disk",
+                group_id,
+                {"files": {k: os.path.basename(v) for k, v in saved.items()}, "save_dir": save_dir},
+            )
+            self.logger.info(
+                "Saved HF base model for group %s -> %s (%s)",
+                group_id,
+                save_dir,
+                list(saved.keys()),
+            )
+        except Exception as e:
+            self.logger.warning(
+                "Could not save HF model to disk for group %s: %s", group_id, e
+            )
 
     def delete_group(self, group_id: str) -> bool:
         with self.lock:
@@ -507,6 +576,21 @@ class GroupManager:
     # Updates & aggregation
     # ------------------------------------------------------------------
 
+    def _is_peft_group(self, group: TrainingGroup) -> bool:
+        """Check if a group uses PEFT — from group config or model registry."""
+        if group.config.get("peft", {}).get("enabled", False):
+            return True
+        try:
+            from astra.infra.registry import get_registry as _get_reg
+
+            _reg = _get_reg()
+            _info = _reg.get_model_info(group.model_id)
+            if _info:
+                return _info.get("is_peft", False)
+        except Exception:
+            pass
+        return False
+
     def add_client_update(self, client_id: str, update: dict) -> dict | None:
         """Add update and check if aggregation triggered (hybrid windowing)."""
         with self.lock:
@@ -572,7 +656,7 @@ class GroupManager:
 
             # Apply aggregated delta to the live server model
             if self.server_model is not None and len(aggregated) > 0:
-                is_peft = self.config.get("peft", {}).get("enabled", False)
+                is_peft = self._is_peft_group(group)
                 if is_peft:
                     from astra.core.models.model_zoo import apply_peft_delta as _apply
                 else:
@@ -731,10 +815,11 @@ class GroupManager:
                 latest_path,
             )
 
-            if self.server_model is not None and self.config.get("peft", {}).get("enabled", False):
+            if self.server_model is not None and self._is_peft_group(group):
                 from astra.core.models.hf_models import (
                     get_base_model_state_dict,
                     get_lora_state_dict,
+                    save_base_model_to_disk,
                 )
 
                 base_path = os.path.join(save_dir, "base.pt")
@@ -742,6 +827,19 @@ class GroupManager:
                     base_state = get_base_model_state_dict(self.server_model)
                     torch.save({"base_state_dict": base_state}, base_path)
                     self.logger.info(f"Saved base model → {base_path}")
+
+                # Also save to models/hf/{model_id}/ for client downloads (if not already there)
+                hf_save_dir = os.path.join("models", "hf", group.model_id)
+                if not os.path.exists(os.path.join(hf_save_dir, "base_model.pt")):
+                    try:
+                        save_base_model_to_disk(
+                            model=self.server_model,
+                            save_dir=hf_save_dir,
+                            model_name=group.model_id,
+                            peft_config=group.config.get("peft", self.config.get("peft", {})),
+                        )
+                    except Exception as e:
+                        self.logger.debug("Could not save HF base model to disk: %s", e)
 
                 adapter_state = get_lora_state_dict(self.server_model)
                 adapter_path = os.path.join(save_dir, f"adapter_v{model_version}.pt")
