@@ -37,7 +37,6 @@ import os
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi_socketio import SocketManager
 
 import astra.app.state as state
 from astra.app.fl_server import FLServer
@@ -45,7 +44,7 @@ from astra.app.fl_server import FLServer
 # Route modules
 from astra.app.routes import clients, experiments, groups, models, system
 from astra.core.config import load_config
-from astra.infra.websocket_handler import register_socketio_handlers, websocket_endpoint
+from astra.infra.websocket_handler import websocket_endpoint
 
 # ============================================================================
 # Lifespan
@@ -138,10 +137,6 @@ app.include_router(downloads_routes.router)
 
 # WebSocket endpoint
 app.websocket("/ws")(websocket_endpoint)
-
-# Socket.IO support
-socket_manager = SocketManager(app, cors_allowed_origins="*")
-register_socketio_handlers(socket_manager)
 
 
 # ============================================================================

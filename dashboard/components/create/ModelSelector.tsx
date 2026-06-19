@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Search, Plus, Cpu, Database, Box } from 'lucide-react';
+import { Search, Plus, Cpu, Box } from 'lucide-react';
 import type { Model } from '@/lib/api/types';
 
 interface ModelSelectorProps {
@@ -32,7 +32,6 @@ export function ModelSelector({
 
   const [extId, setExtId] = useState('');
   const [extPath, setExtPath] = useState('');
-  const [extModelType, setExtModelType] = useState('vision');
 
   const handleHfSearch = async () => {
     if (!hfSearch.trim()) return;
@@ -158,15 +157,6 @@ export function ModelSelector({
             placeholder="Python import path (e.g., torchvision.models.resnet18)"
             className="input-field font-mono text-xs"
           />
-          <select
-            value={extModelType}
-            onChange={(e) => setExtModelType(e.target.value)}
-            className="input-field"
-          >
-            <option value="vision">Vision</option>
-            <option value="text">Text</option>
-            <option value="multimodal">Multimodal</option>
-          </select>
           <button
             onClick={() => onRegisterExternal(extId, extPath, {})}
             disabled={!extId.trim() || !extPath.trim()}

@@ -72,21 +72,8 @@ async def submit_client_delta(client_id: str, request: Request):
     fl_server = get_fl_server()
 
     # Auth
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="No authorization token")
-    token = auth_header.replace("Bearer ", "")
-    try:
-        from astra.app.integration import get_platform_integration
-
-        platform = get_platform_integration()
-        payload = platform.verify_token(token)
-        if not payload:
-            raise HTTPException(status_code=401, detail="Invalid token")
-    except HTTPException:
-        raise
-    except Exception:
-        raise HTTPException(status_code=401, detail="Token verification failed") from None
+    from astra.app.routes._auth import verify_request_jwt
+    payload = verify_request_jwt(request.headers.get("Authorization"))
 
     # Rate limit
     now = time.monotonic()
@@ -378,23 +365,10 @@ async def join_group_as_client(group_id: str, request: Request):
     """
     fl_server = get_fl_server()
 
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="No authorization token")
-
-    token = auth_header.replace("Bearer ", "")
-
-    try:
-        from astra.app.integration import get_platform_integration
-
-        platform = get_platform_integration()
-        payload = platform.verify_token(token)
-        if not payload:
-            raise HTTPException(status_code=401, detail="Invalid token")
-    except HTTPException:
-        raise
-    except Exception:
-        raise HTTPException(status_code=401, detail="Token verification failed") from None
+    from astra.app.routes._auth import verify_request_jwt
+    from astra.app.integration import get_platform_integration
+    payload = verify_request_jwt(request.headers.get("Authorization"))
+    platform = get_platform_integration()
 
     user_id = payload.get("user_id")
     if not isinstance(user_id, int):
@@ -473,21 +447,8 @@ async def get_client_status(client_id: str, request: Request):
     """
     fl_server = get_fl_server()
 
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="No authorization token")
-    token = auth_header.replace("Bearer ", "")
-    try:
-        from astra.app.integration import get_platform_integration
-
-        platform = get_platform_integration()
-        payload = platform.verify_token(token)
-        if not payload:
-            raise HTTPException(status_code=401, detail="Invalid token")
-    except HTTPException:
-        raise
-    except Exception:
-        raise HTTPException(status_code=401, detail="Token verification failed") from None
+    from astra.app.routes._auth import verify_request_jwt
+    verify_request_jwt(request.headers.get("Authorization"))
 
     group = fl_server.group_manager.get_client_group(client_id)
     if not group:

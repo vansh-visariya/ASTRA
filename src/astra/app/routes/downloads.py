@@ -20,32 +20,12 @@ from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import Response
 
 from astra.app.downloads import get_download_manager
+from astra.app.routes._auth import verify_request_jwt
 from astra.app.state import get_fl_server
 from astra.core.config import DEFAULT_CONFIG
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
-
-def _verify_jwt(token: str | None) -> dict:
-    if not token:
-        raise HTTPException(status_code=401, detail="Missing Authorization header")
-    token = token.strip()
-    if token.lower().startswith("bearer "):
-        token = token[7:].strip()
-    try:
-        from astra.app.integration import get_platform_integration
-
-        platform = get_platform_integration()
-        payload = platform.verify_token(token)
-        if not payload:
-            raise HTTPException(status_code=401, detail="Invalid token")
-        return payload
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.warning("JWT verify failed: %s", e)
-        raise HTTPException(status_code=401, detail=f"Token verification failed: {e}") from None
 
 
 def _resolve_model_file(group_id: str, version: int | None, fmt: str, download_type: str | None = None) -> Path:
@@ -98,7 +78,7 @@ def _resolve_model_file(group_id: str, version: int | None, fmt: str, download_t
 @router.post("/api/downloads/init")
 async def init_download(request: Request, authorization: str = Header(None)):
     """Allocate a chunked download slot. Returns a manifest with signed URLs."""
-    payload = _verify_jwt(authorization)
+    payload = verify_request_jwt(authorization)
     user_id = payload.get("user_id")
     if not isinstance(user_id, int):
         raise HTTPException(status_code=401, detail="Invalid user_id in token")
@@ -211,7 +191,7 @@ async def get_chunk(download_id: str, chunk_index: int, expires: float, sig: str
 @router.post("/api/downloads/{download_id}/complete")
 async def complete_download(download_id: str, authorization: str = Header(None)):
     """Mark a download as finished. Purely for server-side telemetry."""
-    payload = _verify_jwt(authorization)
+    payload = verify_request_jwt(authorization)
     user_id = payload.get("user_id")
     manager = get_download_manager()
     rec = manager.get(download_id)
@@ -232,7 +212,7 @@ async def complete_download(download_id: str, authorization: str = Header(None))
 @router.delete("/api/downloads/{download_id}")
 async def abort_download(download_id: str, authorization: str = Header(None)):
     """Abort a download and free its slot."""
-    payload = _verify_jwt(authorization)
+    payload = verify_request_jwt(authorization)
     user_id = payload.get("user_id")
     manager = get_download_manager()
     rec = manager.get(download_id)
@@ -247,7 +227,7 @@ async def abort_download(download_id: str, authorization: str = Header(None)):
 @router.get("/api/downloads/{download_id}")
 async def get_download_info(download_id: str, authorization: str = Header(None)):
     """Inspect a download slot's state."""
-    payload = _verify_jwt(authorization)
+    payload = verify_request_jwt(authorization)
     user_id = payload.get("user_id")
     manager = get_download_manager()
     rec = manager.get(download_id)

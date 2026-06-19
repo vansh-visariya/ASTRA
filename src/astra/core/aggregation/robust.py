@@ -1,14 +1,9 @@
 """
 Robust Aggregation Implementations.
 
-Implements Byzantine-resilient aggregation methods including:
-- Coordinate-wise median
-- Trimmed mean
-- Hybrid robust pipeline with trust scoring
-
-References:
-- Yin et al., "Byzantine-Robust Distributed Learning"
-- Chen et al., "Distributed Learning with Heterogeneous Data"
+Byzantine-resilient aggregation: trimmed mean, coordinate-wise median,
+and a hybrid pipeline with norm clipping, anomaly/similarity filtering,
+and trust + staleness weighting.
 """
 
 from typing import Any
@@ -17,88 +12,89 @@ import numpy as np
 
 
 def trimmed_mean(updates: list[np.ndarray], trim_ratio: float) -> np.ndarray:
-    """
-    Compute coordinate-wise trimmed mean.
-
-    For each coordinate, remove trim_ratio fraction from both ends
-    and compute mean of remaining values.
-
-    Args:
-        updates: List of client update vectors.
-        trim_ratio: Fraction to trim from each end (0 to 0.5).
-
-    Returns:
-        Aggregated vector.
-    """
     if not updates:
         return np.array([])
-
     if len(updates) == 1:
         return updates[0].copy()
 
-    updates_array = np.array(updates)
-
-    updates_array = np.nan_to_num(updates_array, nan=0.0, posinf=1e6, neginf=-1e6)
-
-    n_clients, dim = updates_array.shape
-
+    arr = np.nan_to_num(np.array(updates), nan=0.0, posinf=1e6, neginf=-1e6)
+    n_clients, dim = arr.shape
     trim_count = int(n_clients * trim_ratio)
-
     if trim_count == 0:
-        return np.mean(updates_array, axis=0)
+        return np.mean(arr, axis=0)
 
-    sorted_indices = np.argsort(updates_array, axis=0)
-
-    trimmed = updates_array.copy()
+    sorted_indices = np.argsort(arr, axis=0)
+    trimmed = arr.copy()
     for d in range(dim):
-        lower_indices = sorted_indices[:trim_count, d]
-        upper_indices = sorted_indices[-(trim_count):, d]
-
         mask = np.ones(n_clients, dtype=bool)
-        mask[lower_indices] = False
-        mask[upper_indices] = False
+        mask[sorted_indices[:trim_count, d]] = False
+        mask[sorted_indices[-trim_count:, d]] = False
+        trimmed[:, d] = np.where(mask, arr[:, d], np.nan)
 
-        trimmed[:, d] = np.where(mask, updates_array[:, d], np.nan)
-
-    result = np.nanmean(trimmed, axis=0)
-
-    result = np.nan_to_num(result, nan=0.0)
-
-    return result
+    return np.nan_to_num(np.nanmean(trimmed, axis=0), nan=0.0)
 
 
 def coordinate_median(updates: list[np.ndarray]) -> np.ndarray:
-    """
-    Compute coordinate-wise median.
-
-    Args:
-        updates: List of client update vectors.
-
-    Returns:
-        Aggregated vector using coordinate-wise median.
-    """
     if not updates:
         return np.array([])
-
     if len(updates) == 1:
         return updates[0].copy()
+    return np.median(np.array(updates), axis=0)
 
-    updates_array = np.array(updates)
 
-    result = np.median(updates_array, axis=0)
+def _clip_norms(updates: list[np.ndarray], norm_clip: float) -> list[np.ndarray]:
+    """Clip each update to norm_clip and return (clipped_updates, norms)."""
+    norms = []
+    clipped = []
+    for u in updates:
+        n = np.linalg.norm(u)
+        norms.append(n)
+        clipped.append(u / n * norm_clip if n > norm_clip else u)
+    return clipped, norms
 
+
+def _filter_anomalies(
+    clipped: list[np.ndarray], norms: list[float], anomaly_k: float
+) -> tuple[list[np.ndarray], list[int]]:
+    """Remove norm-based outliers. Returns (filtered_updates, surviving_indices)."""
+    norms_arr = np.array(norms)
+    mean, std = np.mean(norms_arr), np.std(norms_arr)
+    threshold = mean + anomaly_k * std if std > 0 else float("inf")
+    indices = [i for i, n in enumerate(norms) if n <= threshold]
+    filtered = [clipped[i] for i in indices]
+    if not filtered:
+        return [clipped[0]], [0]
+    return filtered, indices
+
+
+def _filter_by_similarity(
+    updates: list[np.ndarray], sim_threshold: float
+) -> tuple[list[np.ndarray], list[int]]:
+    """Keep updates similar to the coordinate-wise median."""
+    baseline = coordinate_median(updates)
+    baseline_norm = np.linalg.norm(baseline)
+    scores = []
+    for u in updates:
+        if baseline_norm > 1e-8:
+            cos = np.dot(u, baseline) / (np.linalg.norm(u) * baseline_norm)
+        else:
+            cos = 1.0
+        scores.append(max(cos, 0))
+    indices = [i for i, s in enumerate(scores) if s >= sim_threshold]
+    filtered = [updates[i] for i in indices]
+    if not filtered:
+        return [updates[0]], [0]
+    return filtered, indices
+
+
+def _weighted_sum(
+    updates: list[np.ndarray], weights: np.ndarray
+) -> np.ndarray:
+    """Compute weighted sum of updates."""
+    result = np.zeros_like(updates[0])
+    for i, u in enumerate(updates):
+        result += weights[i] * np.nan_to_num(u, nan=0.0, posinf=1e6, neginf=-1e6)
     return result
-
-
-def compute_trust_weights(trust_scores: list[float], trust_power: float) -> np.ndarray:
-    """Compute normalized trust weights."""
-    if not trust_scores:
-        return np.array([])
-
-    weights = np.array(trust_scores) ** trust_power
-    weights = weights / np.sum(weights)
-
-    return weights
 
 
 def hybrid_aggregator(
@@ -108,122 +104,44 @@ def hybrid_aggregator(
     config: dict[str, Any],
     dataset_sizes: list[int] | None = None,
 ) -> np.ndarray:
-    """
-    Hybrid robust aggregator with multiple filtering stages.
-
-    Implements:
-    1. L2 norm clipping
-    2. Anomaly detection (norm-based)
-    3. Similarity filtering
-    4. Robust operator (trimmed mean or median)
-    5. Trust + staleness weighting
-
-    Args:
-        updates: List of client update vectors.
-        trust_scores: List of trust scores for each client.
-        staleness_weights: List of staleness weights.
-        config: Configuration dictionary.
-
-    Returns:
-        Final aggregated delta.
-    """
     if not updates:
         return np.array([])
-
     if len(updates) == 1:
         return updates[0].copy()
 
     if dataset_sizes is None:
         dataset_sizes = [1] * len(updates)
 
-    robust_config = config.get("robust", {})
-    config.get("trust", {})
+    rc = config.get("robust", {})
+    norm_clip = rc.get("norm_clip", 5.0)
+    anomaly_k = rc.get("anomaly_k", 3.0)
+    sim_threshold = rc.get("sim_threshold", 0.2)
+    trim_ratio = rc.get("trim_ratio", 0.1)
+    trust_power = rc.get("trust_power", 1.0)
 
-    norm_clip = robust_config.get("norm_clip", 5.0)
-    anomaly_k = robust_config.get("anomaly_k", 3.0)
-    sim_threshold = robust_config.get("sim_threshold", 0.2)
-    trim_ratio = robust_config.get("trim_ratio", 0.1)
-    trust_power = robust_config.get("trust_power", 1.0)
+    # Stage 1: norm clipping
+    clipped, norms = _clip_norms(updates, norm_clip)
 
-    n_clients = len(updates)
+    # Stage 2: anomaly filtering
+    filtered, indices = _filter_anomalies(clipped, norms, anomaly_k)
+    filtered_trust = [trust_scores[i] for i in indices]
 
-    clipped_updates = []
-    norms = []
-    for update in updates:
-        norm = np.linalg.norm(update)
-        norms.append(norm)
+    # Stage 3: similarity filtering
+    filtered, sim_indices = _filter_by_similarity(filtered, sim_threshold)
+    final_trust = [filtered_trust[i] for i in sim_indices]
+    final_staleness = [staleness_weights[indices[i]] for i in sim_indices]
+    final_sizes = [dataset_sizes[indices[i]] for i in sim_indices]
 
-        clipped = update / norm * norm_clip if norm > norm_clip else update
-
-        clipped_updates.append(clipped)
-
-    norms_arr = np.array(norms)
-    mean_norm = np.mean(norms_arr)
-    std_norm = np.std(norms_arr)
-
-    suspicious_mask = np.ones(n_clients, dtype=bool)
-    if std_norm > 0:
-        threshold = mean_norm + anomaly_k * std_norm
-        suspicious_mask = norms_arr <= threshold
-
-    filtered_updates: list[np.ndarray] = [
-        clipped_updates[i] for i in range(n_clients) if suspicious_mask[i]
-    ]
-    filtered_trust: list[float] = [
-        trust_scores[i]
-        for i in range(n_clients)
-        if suspicious_mask[i]
-    ]
-
-    if not filtered_updates:
-        filtered_updates = [clipped_updates[0]]
-        filtered_trust = [trust_scores[0]]
-
-    baseline_median = coordinate_median(filtered_updates)
-
-    similarity_scores = []
-    for update in filtered_updates:
-        if np.linalg.norm(baseline_median) > 1e-8:
-            cos_sim = np.dot(update, baseline_median) / (
-                np.linalg.norm(update) * np.linalg.norm(baseline_median)
-            )
-        else:
-            cos_sim = 1.0
-        similarity_scores.append(max(cos_sim, 0))
-
-    similarity_scores_arr = np.array(similarity_scores)
-    similarity_mask = similarity_scores_arr >= sim_threshold
-
-    final_indices = [i for i in range(len(filtered_updates)) if similarity_mask[i]]
-    final_updates = [filtered_updates[i] for i in final_indices]
-    final_trust = [filtered_trust[i] for i in final_indices]
-    final_staleness = [staleness_weights[i] for i in final_indices]
-    final_dataset_sizes = [dataset_sizes[i] for i in final_indices] if dataset_sizes else None
-
-    if not final_updates:
-        final_updates = [filtered_updates[0]]
-        final_trust = [filtered_trust[0]]
-        final_staleness = [1.0]
-        final_dataset_sizes = [1]
-
-    robust_delta = trimmed_mean(final_updates, trim_ratio)
-
+    # Stage 4: robust aggregation
+    robust_delta = trimmed_mean(filtered, trim_ratio)
     robust_delta = np.nan_to_num(robust_delta, nan=0.0, posinf=1e6, neginf=-1e6)
 
-    trust_weights = compute_trust_weights(final_trust, trust_power)
-    staleness_w = np.array(final_staleness)
+    # Stage 5: trust + staleness + data weighting
+    weights = np.array(final_trust) ** trust_power * np.array(final_staleness)
+    if final_sizes:
+        data_w = np.array(final_sizes) / sum(final_sizes)
+        weights *= data_w
+    weights = np.nan_to_num(weights, nan=0.0)
+    weights = weights / (np.sum(weights) + 1e-8)
 
-    if final_dataset_sizes is not None and len(final_dataset_sizes) == len(final_updates):
-        data_weights = np.array(final_dataset_sizes) / sum(final_dataset_sizes)
-        combined_weights = trust_weights * staleness_w * data_weights
-    else:
-        combined_weights = trust_weights * staleness_w
-    combined_weights = np.nan_to_num(combined_weights, nan=0.0)
-    combined_weights = combined_weights / (np.sum(combined_weights) + 1e-8)
-
-    weighted_delta = np.zeros_like(robust_delta)
-    for i, update in enumerate(final_updates):
-        update_clean = np.nan_to_num(update, nan=0.0, posinf=1e6, neginf=-1e6)
-        weighted_delta += combined_weights[i] * update_clean
-
-    return weighted_delta
+    return _weighted_sum(filtered, weights)

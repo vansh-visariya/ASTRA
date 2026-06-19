@@ -83,10 +83,6 @@ class TrainingGroup:
                 **(client_info or {}),
             }
 
-    def remove_client(self, client_id: str) -> None:
-        if client_id in self.clients:
-            self.clients[client_id]["status"] = "disconnected"
-
     def add_update(self, client_id: str, update: dict) -> bool:
         """Add client update to buffer. Returns True if aggregation triggered."""
         import logging

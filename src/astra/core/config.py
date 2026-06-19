@@ -57,24 +57,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "quarantine_threshold": 0.35,
         "soft_decay": 0.8,
     },
-    "malicious": {
-        "enabled": False,
-        "ratio": 0.0,
-        "behaviors": [],
-    },
     "privacy": {
         "dp_enabled": False,
         "dp_mode": "client",
         "clip_norm": 1.0,
         "sigma": 1.2,
         "epsilon": 8.0,
-        "epsilon_target": None,
-        "noise_multiplier": 1.2,
-        "max_grad_norm": 1.0,
-    },
-    "communication": {
-        "compression": "none",
-        "topk_ratio": 0.1,
     },
     "training": {
         "total_steps": 1000,

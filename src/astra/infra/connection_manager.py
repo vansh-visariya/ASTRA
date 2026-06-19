@@ -66,9 +66,3 @@ class ConnectionManager:
             client_id,
             len(self.client_sockets),
         )
-
-    def unregister_client(self, client_id: str):
-        ws = self.client_sockets.pop(client_id, None)
-        if ws is not None:
-            self._websocket_to_client.pop(id(ws), None)
-        logger.info("Client unregistered: %s (remaining: %s)", client_id, len(self.client_sockets))

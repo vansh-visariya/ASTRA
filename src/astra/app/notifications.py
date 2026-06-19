@@ -241,77 +241,12 @@ class NotificationDatabase:
             return cursor.rowcount
 
 
-class WebSocketNotifier:
-    """Real-time WebSocket notification delivery."""
-
-    def __init__(self):
-        self.logger = logging.getLogger(__name__)
-        self._connections: dict[int, asyncio.Queue] = defaultdict(asyncio.Queue)
-        self._broadcast_queue: asyncio.Queue = asyncio.Queue()
-        self._running = False
-        self._task: asyncio.Task | None = None
-
-    def register_connection(self, user_id: int, queue: asyncio.Queue):
-        """Register a WebSocket connection for a user."""
-        self._connections[user_id] = queue
-
-    def unregister_connection(self, user_id: int):
-        """Unregister a WebSocket connection."""
-        if user_id in self._connections:
-            del self._connections[user_id]
-
-    async def send_to_user(self, user_id: int, notification: Notification):
-        """Send notification to a specific user."""
-        if user_id in self._connections:
-            await self._connections[user_id].put(notification)
-
-    async def broadcast(self, notification: Notification):
-        """Broadcast notification to all connected users."""
-        for user_id in self._connections:
-            await self._send_to_user(user_id, notification)
-
-    async def _send_to_user(self, user_id: int, notification: Notification):
-        """Internal method to send to user."""
-        if user_id in self._connections:
-            await self._connections[user_id].put(
-                {
-                    "type": "notification",
-                    "notification_type": notification.notification_type.value,
-                    "priority": notification.priority.value,
-                    "title": notification.title,
-                    "message": notification.message,
-                    "group_id": notification.group_id,
-                    "data": notification.data,
-                    "created_at": notification.created_at.isoformat(),
-                }
-            )
-
-    def start(self):
-        """Start the broadcast task."""
-        if not self._running:
-            self._running = True
-
-    def stop(self):
-        """Stop the broadcast task."""
-        self._running = False
-        if self._task:
-            self._task.cancel()
-
-
 class NotificationService:
     """Main notification service combining all notification channels."""
 
     def __init__(self, db=None):
         self.db = NotificationDatabase(db=db)
-        self.ws_notifier = WebSocketNotifier()
         self.logger = logging.getLogger(__name__)
-
-        # Event callbacks for external integrations
-        self._event_handlers: dict[NotificationType, list[Callable]] = defaultdict(list)
-
-    def register_handler(self, notification_type: NotificationType, handler: Callable):
-        """Register an event handler for a notification type."""
-        self._event_handlers[notification_type].append(handler)
 
     def notify(
         self,
@@ -345,51 +280,7 @@ class NotificationService:
         if persist:
             notification.id = self.db.create(notification)
 
-        # Send via WebSocket
-        if send_websocket:
-            if user_id:
-                asyncio.create_task(self.ws_notifier.send_to_user(user_id, notification))
-            else:
-                asyncio.create_task(self.ws_notifier.broadcast(notification))
-
-        # Trigger event handlers
-        for handler in self._event_handlers[notification_type]:
-            try:
-                handler(notification)
-            except Exception as e:
-                self.logger.error(f"Event handler error: {e}")
-
         return notification
-
-    # Convenience methods for common events
-
-    def notify_group_created(self, group_id: str, admin_user_id: int):
-        """Notify about group creation."""
-        return self.notify(
-            NotificationType.GROUP_CREATED,
-            title="Group Created",
-            message=f"Group '{group_id}' has been created",
-            user_id=admin_user_id,
-            group_id=group_id,
-        )
-
-    def notify_group_started(self, group_id: str):
-        """Notify about training start."""
-        return self.notify(
-            NotificationType.GROUP_STARTED,
-            title="Training Started",
-            message=f"Training has started for group '{group_id}'",
-            group_id=group_id,
-        )
-
-    def notify_group_completed(self, group_id: str, final_accuracy: float):
-        """Notify about training completion."""
-        return self.notify(
-            NotificationType.GROUP_COMPLETED,
-            title="Training Completed",
-            message=f"Training completed for group '{group_id}' with accuracy {final_accuracy:.2%}",
-            group_id=group_id,
-        )
 
     def notify_join_request(self, group_id: str, admin_user_id: int, request_data: dict):
         """Notify admin about new join request."""
@@ -425,39 +316,6 @@ class NotificationService:
             message=message,
             user_id=user_id,
             group_id=group_id,
-        )
-
-    def notify_client_joined(self, group_id: str, client_username: str):
-        """Notify about client joining."""
-        return self.notify(
-            NotificationType.CLIENT_JOINED,
-            title="Client Joined",
-            message=f"Client '{client_username}' joined group '{group_id}'",
-            group_id=group_id,
-            data={"username": client_username},
-        )
-
-    def notify_training_round(self, group_id: str, round_num: int, accuracy: float):
-        """Notify about training round completion."""
-        return self.notify(
-            NotificationType.TRAINING_ROUND_COMPLETE,
-            title="Round Complete",
-            message=f"Round {round_num} completed with accuracy {accuracy:.2%}",
-            group_id=group_id,
-            data={"round": round_num, "accuracy": accuracy},
-        )
-
-    def notify_error(
-        self, title: str, message: str, user_id: int | None = None, group_id: str | None = None
-    ):
-        """Notify about an error."""
-        return self.notify(
-            NotificationType.TRAINING_FAILED,
-            title=title,
-            message=message,
-            user_id=user_id,
-            group_id=group_id,
-            priority=NotificationPriority.ERROR,
         )
 
     # Query methods

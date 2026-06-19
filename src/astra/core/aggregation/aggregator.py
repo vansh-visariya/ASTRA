@@ -1,13 +1,9 @@
 """
 Aggregator Interface and Implementations.
-
-Provides the base Aggregator class and factory method for creating
-different aggregation strategies.
 """
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 from typing import Any
 
 import numpy as np
@@ -17,7 +13,6 @@ from astra.core.aggregation.robust import (
     hybrid_aggregator,
     trimmed_mean,
 )
-from astra.core.exceptions import AggregationError, ConfigurationError
 
 __all__ = [
     "Aggregator",
@@ -27,29 +22,11 @@ __all__ = [
 ]
 
 
-class Aggregator(ABC):
+class Aggregator:
     """Base class for federated learning aggregators."""
 
-    @abstractmethod
     def aggregate(self, buffer: list[dict[str, Any]]) -> np.ndarray:
-        """
-        Aggregate client updates.
-
-        Args:
-            buffer: List of client updates, each containing:
-                - client_id: str
-                - delta: np.ndarray of weight changes
-                - staleness_weight: float
-                - trust: float
-                - local_dataset_size: int
-
-        Returns:
-            Aggregated weight delta as numpy array.
-
-        Raises:
-            AggregationError: If aggregation fails.
-        """
-        pass
+        raise NotImplementedError
 
 
 class FedAvgAggregator(Aggregator):
@@ -66,24 +43,12 @@ class FedAvgAggregator(Aggregator):
             ConfigurationError: If configuration is invalid.
         """
         if not isinstance(config, dict):
-            raise ConfigurationError("Config must be a dictionary")
+            raise ValueError("Config must be a dictionary")
         self.config = config
 
     def aggregate(self, buffer: list[dict[str, Any]]) -> np.ndarray:
-        """
-        Perform weighted FedAvg aggregation.
-
-        Args:
-            buffer: List of client updates.
-
-        Returns:
-            Aggregated weight delta.
-
-        Raises:
-            AggregationError: If buffer is empty or aggregation fails.
-        """
         if not buffer:
-            raise AggregationError("Cannot aggregate empty buffer")
+            raise ValueError("Cannot aggregate empty buffer")
 
         total_weight: float = 0.0
         aggregated: np.ndarray | None = None
@@ -120,11 +85,11 @@ class RobustAggregator(Aggregator):
             ConfigurationError: If configuration is invalid.
         """
         if not isinstance(config, dict):
-            raise ConfigurationError("Config must be a dictionary")
+            raise ValueError("Config must be a dictionary")
 
         robust_config = config.get("robust", {})
         if not isinstance(robust_config, dict):
-            raise ConfigurationError("robust config must be a dictionary")
+            raise ValueError("robust config must be a dictionary")
 
         self.config = config
         self.method = robust_config.get("method", "median")
@@ -143,7 +108,7 @@ class RobustAggregator(Aggregator):
             AggregationError: If buffer is empty or method is unknown.
         """
         if not buffer:
-            raise AggregationError("Cannot aggregate empty buffer")
+            raise ValueError("Cannot aggregate empty buffer")
 
         deltas = [update["delta"] for update in buffer]
         trust_scores = [update.get("trust", 1.0) for update in buffer]
@@ -166,7 +131,7 @@ class RobustAggregator(Aggregator):
                 dataset_sizes,
             )
 
-        raise AggregationError(f"Unknown robust method: {self.method}")
+        raise ValueError(f"Unknown robust method: {self.method}")
 
 
 def create_aggregator(config: dict[str, Any]) -> Aggregator:
@@ -183,7 +148,7 @@ def create_aggregator(config: dict[str, Any]) -> Aggregator:
         ConfigurationError: If configuration is invalid.
     """
     if not isinstance(config, dict):
-        raise ConfigurationError("Config must be a dictionary")
+        raise ValueError("Config must be a dictionary")
 
     robust_method = config.get("robust", {}).get("method")
 

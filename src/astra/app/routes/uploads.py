@@ -38,6 +38,7 @@ from collections import deque
 import numpy as np
 from fastapi import APIRouter, Header, HTTPException, Request
 
+from astra.app.routes._auth import verify_request_jwt
 from astra.app.state import get_fl_server
 from astra.app.uploads import get_upload_manager
 
@@ -45,33 +46,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def _verify_jwt(token: str | None) -> dict:
-    """Validate JWT and return payload. Raises 401 on failure."""
-    if not token:
-        raise HTTPException(status_code=401, detail="Missing Authorization header")
-    # Strip optional "Bearer " prefix and whitespace
-    token = token.strip()
-    if token.lower().startswith("bearer "):
-        token = token[7:].strip()
-    try:
-        from astra.app.integration import get_platform_integration
-
-        platform = get_platform_integration()
-        payload = platform.verify_token(token)
-        if not payload:
-            raise HTTPException(status_code=401, detail="Invalid token")
-        return payload
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.warning("JWT verify failed: %s", e)
-        raise HTTPException(status_code=401, detail=f"Token verification failed: {e}") from None
-
-
 @router.post("/api/uploads/init")
 async def init_upload(request: Request, authorization: str = Header(None)):
     """Allocate a new upload slot. Returns a presigned PUT URL."""
-    payload = _verify_jwt(authorization)
+    payload = verify_request_jwt(authorization)
     user_id = payload.get("user_id")
     if not isinstance(user_id, int):
         raise HTTPException(status_code=401, detail="Invalid user_id in token")
@@ -172,7 +150,7 @@ async def upload_blob(
 @router.post("/api/uploads/{upload_id}/complete")
 async def complete_upload(upload_id: str, request: Request, authorization: str = Header(None)):
     """Verify sha256 + dispatch the staged delta into the FLServer pipeline."""
-    _verify_jwt(authorization)
+    verify_request_jwt(authorization)
     try:
         body = await request.json()
     except Exception as e:
@@ -207,7 +185,7 @@ async def get_upload(upload_id: str, authorization: str = Header(None)):
     so the only privilege an attacker gains by reading the record is
     metadata leakage. Tighten if that becomes a concern.)
     """
-    _verify_jwt(authorization)
+    verify_request_jwt(authorization)
     manager = get_upload_manager()
     record = manager.get(upload_id)
     if record is None:
@@ -218,7 +196,7 @@ async def get_upload(upload_id: str, authorization: str = Header(None)):
 @router.delete("/api/uploads/{upload_id}")
 async def abort_upload(upload_id: str, authorization: str = Header(None)):
     """Abort an in-progress upload. Same auth model as GET."""
-    _verify_jwt(authorization)
+    verify_request_jwt(authorization)
     manager = get_upload_manager()
     record = manager.get(upload_id)
     if record is None:

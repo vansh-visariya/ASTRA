@@ -111,21 +111,6 @@ class TestUserDatabase:
         admins = user_db.get_all_users(role="admin")
         assert all(u.role == "admin" for u in admins)
 
-    def test_update_user(self, user_db):
-        created = user_db.create_user("update_me", "p", "client")
-        success = user_db.update_user(created.id, email="new@email.com", full_name="New Name")
-        assert success is True
-        updated = user_db.get_user_by_id(created.id)
-        assert updated.email == "new@email.com"
-        assert updated.full_name == "New Name"
-
-    def test_delete_user(self, user_db):
-        created = user_db.create_user("delete_me", "p", "client")
-        assert user_db.get_user("delete_me") is not None
-        success = user_db.delete_user(created.id)
-        assert success is True
-        assert user_db.get_user("delete_me") is None
-
 
 class TestTokenManager:
     def test_create_and_verify_token(self, token_manager, user_db):
@@ -292,14 +277,6 @@ class TestAuthManager:
         data, _ = auth_manager.login("client_denied", "password123")
         payload = auth_manager.require_role(data["token"], ["admin"])
         assert payload is None
-
-    def test_role_checks(self, auth_manager):
-        auth_manager.signup("admin_user", "password123", role="admin")
-        data, _ = auth_manager.login("admin_user", "password123")
-        token = data["token"]
-        assert auth_manager.is_admin(token) is True
-        assert auth_manager.is_client(token) is False
-        assert auth_manager.is_admin_or_client(token) is True
 
 
 class TestGlobalAuthManager:

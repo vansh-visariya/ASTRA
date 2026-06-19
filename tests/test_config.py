@@ -58,8 +58,8 @@ class TestLoadConfig:
             config = load_config(None)
             expected_keys = [
                 "seed", "dataset", "model", "client", "server",
-                "robust", "trust", "malicious", "privacy",
-                "communication", "training",
+                "robust", "trust", "privacy",
+                "training",
             ]
             for key in expected_keys:
                 assert key in config
@@ -102,10 +102,6 @@ class TestDefaultConfig:
     def test_trust_defaults(self):
         assert DEFAULT_CONFIG["trust"]["init"] == 1.0
         assert DEFAULT_CONFIG["trust"]["quarantine_threshold"] == 0.35
-
-    def test_communication_defaults(self):
-        assert DEFAULT_CONFIG["communication"]["compression"] in ("none", "topk")
-        assert 0.0 < DEFAULT_CONFIG["communication"]["topk_ratio"] <= 1.0
 
     def test_training_defaults(self):
         assert isinstance(DEFAULT_CONFIG["training"]["total_steps"], int)

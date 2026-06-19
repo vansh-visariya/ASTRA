@@ -2,8 +2,6 @@ import { useCallback } from 'react';
 import {
   getGroups,
   getGroup,
-  createGroup,
-  controlGroup,
 } from '@/lib/api/endpoints';
 import type { Group, ApiListResponse } from '@/lib/api/types';
 import { useApi } from './useApi';
@@ -21,9 +19,6 @@ export function useGroups(wsConnected: boolean) {
     loading: result.loading,
     error: result.error,
     refetch: apiResult.refetch,
-    getGroup,
-    createGroup,
-    controlGroup,
   };
 }
 

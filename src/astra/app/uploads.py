@@ -162,33 +162,6 @@ class LocalDiskObjectStore:
                     with contextlib.suppress(OSError):
                         p.unlink()
 
-    def cleanup_expired(self, max_age_seconds: int) -> int:
-        cutoff = time.time() - max_age_seconds
-        removed = 0
-        for meta_file in self.disk_path.glob("*.meta.json"):
-            try:
-                data = json.loads(meta_file.read_text())
-                completed_at = data.get("completed_at")
-                created_at = data.get("created_at")
-                is_expired_completed = bool(completed_at and completed_at < cutoff)
-                is_stale_unfinished = bool(
-                    created_at
-                    and created_at < cutoff
-                    and data.get("status") != "completed"
-                )
-                if is_expired_completed or is_stale_unfinished:
-                    self.discard(data["upload_id"])
-                    removed += 1
-            except Exception:
-                continue
-        return removed
-
-    def free_disk_bytes(self) -> int:
-        try:
-            return shutil.disk_usage(self.disk_path).free
-        except OSError:
-            return 0
-
 
 class UploadManager:
     """Coordinates the lifecycle of staged uploads."""
@@ -356,9 +329,6 @@ class UploadManager:
 
     def get(self, upload_id: str) -> UploadRecord | None:
         return self._records.get(upload_id)
-
-    def list_for_client(self, client_id: str) -> list[UploadRecord]:
-        return [r for r in self._records.values() if r.client_id == client_id]
 
     def _require(self, upload_id: str) -> UploadRecord:
         rec = self._records.get(upload_id)

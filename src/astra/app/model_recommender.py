@@ -268,7 +268,6 @@ Return: {{"model_type":"cnn|mlp|transformer|efficientnet","model_size":"small|me
         if self.api_key:
             prompt = self._build_prompt(metadata)
             response = self._call_api(prompt)
-            print(response)
 
             if response:
                 recommendation = self._parse_response(response)
@@ -643,14 +642,6 @@ class ModelRecommendationService:
                 "training_config": recommendation.config,
             },
         }
-
-    def reject_recommendation(
-        self, recommendation: ModelRecommendation, admin_user_id: int, reason: str
-    ) -> dict[str, Any]:
-        """Admin rejects a recommendation."""
-        self.logger.info(f"Admin {admin_user_id} rejected recommendation: {reason}")
-
-        return {"status": "rejected", "reason": reason}
 
     def get_history(self, limit: int = 50) -> list[dict[str, Any]]:
         """Get recommendation history."""

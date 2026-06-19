@@ -126,15 +126,6 @@ def get_lora_state_dict(model: nn.Module) -> dict[str, torch.Tensor]:
     }
 
 
-def load_lora_state_dict(model: nn.Module, lora_state: dict[str, torch.Tensor]) -> None:
-    """Load LoRA adapter weights into model (in-place)."""
-    for name, tensor in lora_state.items():
-        for target_name, param in model.named_parameters():
-            if target_name == name:
-                param.data.copy_(tensor.to(param.device))
-                break
-
-
 def get_base_model_state_dict(model: nn.Module) -> dict[str, torch.Tensor]:
     """Extract non-LoRA (backbone) weights as a state_dict."""
     return {
@@ -218,54 +209,6 @@ def save_base_model_to_disk(
         _json.dump(config_data, f, indent=2)
 
     return saved
-
-
-def load_base_model_from_disk(
-    save_dir: str,
-    preferred_format: str = "pt",
-) -> dict[str, Any] | None:
-    """Load base model state dict from disk.
-
-    Args:
-        save_dir: Directory containing base_model.pt or base_model.safetensors.
-        preferred_format: "pt" or "safetensors". Falls back to the other if unavailable.
-
-    Returns:
-        Dict with "base_state_dict", "model_name", "peft_config" keys, or None if not found.
-    """
-    import json as _json
-
-    pt_path = os.path.join(save_dir, "base_model.pt")
-    sf_path = os.path.join(save_dir, "base_model.safetensors")
-
-    config_path = os.path.join(save_dir, "adapter_config.json")
-    metadata = {}
-    if os.path.exists(config_path):
-        with open(config_path) as f:
-            metadata = _json.load(f)
-
-    if preferred_format == "safetensors" and os.path.exists(sf_path):
-        try:
-            from safetensors.torch import load_file as _safetensors_load
-
-            tensor_dict = _safetensors_load(sf_path)
-            return {
-                "base_state_dict": tensor_dict,
-                "model_name": metadata.get("model_name", "unknown"),
-                "peft_config": metadata.get("peft_config", {}),
-            }
-        except ImportError:
-            pass  # Fall through to .pt
-
-    if os.path.exists(pt_path):
-        data = torch.load(pt_path, map_location="cpu", weights_only=False)
-        return {
-            "base_state_dict": data.get("base_state_dict", {}),
-            "model_name": data.get("model_name", metadata.get("model_name", "unknown")),
-            "peft_config": data.get("peft_config", metadata.get("peft_config", {})),
-        }
-
-    return None
 
 
 def get_download_info(save_dir: str) -> dict[str, Any]:

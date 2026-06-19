@@ -76,17 +76,7 @@ class InferenceRequest(BaseModel):
     method: str = "server_side"
 
 
-class ModelRecommendationRequest(BaseModel):
-    dataset_size: int = 1000
-    num_classes: int = 10
-    class_distribution: dict[int, float] = {}
-    has_gpu: bool = False
-    gpu_memory_mb: int | None = None
-    cpu_cores: int | None = None
-    memory_mb: int | None = None
-    network_bandwidth_mbps: float | None = None
-    preferred_model_type: str | None = None
-    data_type: str | None = None
+ModelRecommendationRequest = ClientMetadataRequest
 
 
 class AddHuggingFaceModelRequest(BaseModel):

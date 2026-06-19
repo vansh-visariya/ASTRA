@@ -9,7 +9,6 @@ References:
 """
 
 import logging
-import queue
 import threading
 import time
 from collections import deque
@@ -23,7 +22,6 @@ from torch.utils.data import DataLoader
 from astra.core.aggregation.aggregator import Aggregator
 from astra.core.privacy.privacy import clip_and_noise
 from astra.core.trust_manager import TrustManager
-from astra.core.utils.metrics import compute_accuracy, compute_loss
 
 
 class AsyncServer:
@@ -68,41 +66,9 @@ class AsyncServer:
 
         self.trust_manager = TrustManager(config)
 
-        self.update_queue: queue.Queue = queue.Queue()
-        self.running = False
         self.lock = threading.Lock()
 
         self.current_lr = config["server"]["server_lr"]
-
-        self._init_optimizer()
-
-    def _init_optimizer(self):
-        """Initialize server optimizer."""
-        if self.config["server"]["optimizer"].lower() == "sgd":
-            self.optimizer = torch.optim.SGD(
-                self.model.parameters(),
-                lr=self.config["server"]["server_lr"],
-                momentum=self.config["server"].get("momentum", 0.9),
-            )
-        else:
-            self.optimizer = torch.optim.Adam(
-                self.model.parameters(), lr=self.config["server"]["server_lr"]
-            )
-        self.logger.debug(
-            "Server optimizer init: %s, lr=%s",
-            self.optimizer.__class__.__name__,
-            self.current_lr,
-        )
-
-    def start(self) -> None:
-        """Start the server (simplified for demo)."""
-        self.running = True
-        self.logger.info("AsyncServer started (v%s)", self.global_version)
-
-    def stop(self) -> None:
-        """Stop the server."""
-        self.running = False
-        self.logger.info("AsyncServer stopped at v%s", self.global_version)
 
     def handle_update(self, client_update: dict[str, Any]) -> None:
         """Process a single client update immediately."""
@@ -248,36 +214,3 @@ class AsyncServer:
             ):
                 self.current_lr *= self.config["server"].get("lr_decay_factor", 0.5)
                 self.logger.warning(f"Instability detected. Reducing LR to {self.current_lr}")
-
-    def evaluate(self) -> dict[str, float]:
-        """Evaluate global model on validation set."""
-        if self.val_loader is None:
-            return {"accuracy": 0.0, "loss": 0.0}
-
-        self.model.eval()
-        accuracy = compute_accuracy(self.model, self.val_loader)
-        loss = compute_loss(self.model, self.val_loader)
-
-        return {
-            "accuracy": accuracy,
-            "loss": loss,
-            "global_version": self.global_version,
-            "trust_stats": str(self.trust_manager.get_stats()),  # type: ignore[dict-item]
-        }
-
-    def save_checkpoint(self, path: str) -> None:
-        """Save model checkpoint."""
-        checkpoint = {
-            "model_state_dict": self.model.state_dict(),
-            "global_version": self.global_version,
-            "config": self.config,
-        }
-        torch.save(checkpoint, path)
-        self.logger.info(f"Checkpoint saved to {path}")
-
-    def load_checkpoint(self, path: str) -> None:
-        """Load model checkpoint."""
-        checkpoint = torch.load(path, map_location="cpu")
-        self.model.load_state_dict(checkpoint["model_state_dict"])
-        self.global_version = checkpoint["global_version"]
-        self.logger.info(f"Checkpoint loaded from {path}")

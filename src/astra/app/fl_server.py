@@ -229,13 +229,6 @@ class FLServer:
 
         return {"status": "accepted", "global_version": self.server.global_version}
 
-    async def get_global_model(self) -> dict:
-        """Get global model state (simplified)."""
-        if not self.server:
-            return {}
-
-        return {"global_version": self.server.global_version, "model_type": "custom"}
-
     def start_experiment(self, experiment_id: str, config: dict) -> None:
         """Start a new experiment."""
         self.experiment_id = experiment_id

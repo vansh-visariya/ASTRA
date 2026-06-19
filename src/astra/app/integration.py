@@ -45,7 +45,6 @@ class FLPlatformIntegration:
         self._init_auth()
         self._init_notifications()
         self._init_recommendations()
-        self._init_aggregation()
         self._init_inference()
 
         self.logger.info("Platform integration initialized")
@@ -65,15 +64,7 @@ class FLPlatformIntegration:
         db = get_db()
         self.notification_service: NotificationService = init_notification_service(db=db)
 
-        # Register notification handlers
-        self._register_notification_handlers()
-
         self.logger.info("Notification system initialized with unified AstraDB")
-
-    def _register_notification_handlers(self):
-        """Register handlers for notification events."""
-        # Could add custom handlers here
-        pass
 
     def _init_recommendations(self):
         """Initialize model recommendation service."""
@@ -89,10 +80,6 @@ class FLPlatformIntegration:
         else:
             self.recommendation_service = get_recommendation_service()
             self.logger.warning("No Gemini API key - using fallback recommendations")
-
-    def _init_aggregation(self):
-        """Initialize aggregation components."""
-        self.logger.info("Aggregation initialized")
 
     def _init_inference(self):
         """Initialize inference module."""
@@ -403,13 +390,6 @@ class FLPlatformIntegration:
             }
         except Exception as e:
             return {"success": False, "error": str(e)}
-
-    def register_inference_method(self, model: Any, method_name: str):
-        """Register an inference method with a model."""
-        if method_name == "server_side":
-            self.inference_module.create_server_side(model)
-        elif method_name == "client_side":
-            self.inference_module.create_client_side(model)
 
 
 # Global integration instance

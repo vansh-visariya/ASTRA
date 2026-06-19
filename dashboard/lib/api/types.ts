@@ -136,9 +136,3 @@ export interface ApiListResponse<T> {
   count?: number;
   [key: string]: unknown;
 }
-
-export interface WindowStatus {
-  current_size: number;
-  max_size: number;
-  time_remaining?: number;
-}

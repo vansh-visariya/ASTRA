@@ -591,26 +591,6 @@ class GroupManager:
             pass
         return False
 
-    def add_client_update(self, client_id: str, update: dict) -> dict | None:
-        """Add update and check if aggregation triggered (hybrid windowing)."""
-        with self.lock:
-            group = self.get_client_group(client_id)
-            if not group:
-                return None
-
-            normalized = self.normalize_update(update)
-            triggered = group.add_update(client_id, normalized)
-
-            result = {
-                "group_id": group.group_id,
-                "triggered": triggered,
-                "window_status": group.get_window_status(),
-            }
-
-            if triggered:
-                result["aggregate"] = True
-
-            return result
 
     def aggregate_group(self, group_id: str) -> dict | None:
         """Aggregate updates in a group's buffer."""

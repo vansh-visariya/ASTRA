@@ -213,31 +213,6 @@ class UserDatabase:
                 for row in cursor.fetchall()
             ]
 
-    def update_user(self, user_id: int, **kwargs) -> bool:
-        """Update user fields."""
-        allowed_fields = {"email", "full_name", "is_active", "role"}
-        kwargs = {k: v for k, v in kwargs.items() if k in allowed_fields}
-
-        if not kwargs:
-            return False
-
-        set_clause = ", ".join(f"{k} = ?" for k in kwargs)
-        values = list(kwargs.values()) + [user_id]
-
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(f"UPDATE users SET {set_clause} WHERE id = ?", values)
-            conn.commit()
-            return cursor.rowcount > 0
-
-    def delete_user(self, user_id: int) -> bool:
-        """Delete a user."""
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM users WHERE id = ?", (user_id,))
-            conn.commit()
-            return cursor.rowcount > 0
-
 
 class TokenManager:
     """Manages JWT tokens and secure token lifecycle for group joining."""
@@ -315,18 +290,6 @@ class TokenManager:
             conn.commit()
 
             return True
-
-    def cleanup_expired_tokens(self):
-        """Clean up expired tokens."""
-        with self.user_db._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "DELETE FROM used_tokens WHERE expires_at < ?", (datetime.utcnow().isoformat(),)
-            )
-            deleted = cursor.rowcount
-            conn.commit()
-            if deleted > 0:
-                self.logger.info(f"Cleaned up {deleted} expired tokens")
 
 
 class JoinRequestManager:
@@ -692,27 +655,6 @@ class AuthManager:
     def get_all_users(self, role: str | None = None) -> list[User]:
         """Get all users."""
         return self.user_db.get_all_users(role)
-
-    # Role check helpers
-    def is_admin(self, token: str) -> bool:
-        """Check if token belongs to admin."""
-        payload = self.verify_token(token)
-        return payload is not None and payload.get("role") == "admin"
-
-    def is_client(self, token: str) -> bool:
-        """Check if token belongs to client."""
-        payload = self.verify_token(token)
-        return payload is not None and payload.get("role") == "client"
-
-    def is_observer(self, token: str) -> bool:
-        """Check if token belongs to observer."""
-        payload = self.verify_token(token)
-        return payload is not None and payload.get("role") == "observer"
-
-    def is_admin_or_client(self, token: str) -> bool:
-        """Check if token belongs to admin or client."""
-        payload = self.verify_token(token)
-        return payload is not None and payload.get("role") in ("admin", "client")
 
 
 # Global instance (will be initialized by server)

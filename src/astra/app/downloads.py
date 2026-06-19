@@ -148,20 +148,6 @@ class DownloadManager:
         with self._lock:
             self._records.pop(download_id, None)
 
-    def cleanup_expired(self, max_age_seconds: int) -> int:
-        cutoff = time.time() - max_age_seconds
-        removed = 0
-        with self._lock:
-            stale = [
-                did
-                for did, rec in self._records.items()
-                if rec.created_at < cutoff
-            ]
-            for did in stale:
-                self._records.pop(did, None)
-                removed += 1
-        return removed
-
 
 _download_manager: DownloadManager | None = None
 

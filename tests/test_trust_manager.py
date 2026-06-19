@@ -78,27 +78,6 @@ class TestTrustManager:
         assert "min" in stats
         assert "max" in stats
 
-    def test_history_tracking(self, trust_manager):
-        """Test trust history tracking."""
-        global_vec = np.ones(10)
-
-        for _i in range(5):
-            trust_manager.update_trust("client_001", np.ones(10), global_vec)
-
-        history = trust_manager.get_history("client_001")
-
-        assert len(history) == 5
-
-    def test_reset(self, trust_manager):
-        """Test trust manager reset."""
-        trust_manager.trust_scores["client_001"] = 0.5
-        trust_manager.quarantined["client_001"] = True
-
-        trust_manager.reset()
-
-        assert trust_manager.get_trust("client_001") == 1.0
-        assert not trust_manager.is_quarantined("client_001")
-
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

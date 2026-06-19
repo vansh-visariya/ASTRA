@@ -146,7 +146,7 @@ def tiny_model_factory():
 @pytest.fixture(scope="session", autouse=True)
 def _redirect_db_to_temp_file():
     """Point the global AstraDB at a fresh per-session temp file."""
-    from astra.app.database import init_db
+    from astra.app.database import AstraDB
 
     tmp_dir = Path(tempfile.gettempdir()) / "astra_tests"
     tmp_dir.mkdir(exist_ok=True)
@@ -154,7 +154,7 @@ def _redirect_db_to_temp_file():
     if test_db_path.exists():
         test_db_path.unlink()
     os.environ["ASTRA_DB_PATH"] = str(test_db_path)
-    init_db(str(test_db_path))
+    AstraDB(str(test_db_path))
     yield
     # Best-effort cleanup of the temp file
     with contextlib.suppress(OSError):

@@ -10,15 +10,6 @@ from astra.app.state import get_fl_server
 router = APIRouter()
 
 
-def _get_optional_user(authorization: str = Header(None)):
-    """Get current user if token present, otherwise return None. Does NOT fail for missing token."""
-    if not authorization:
-        return None
-    token = authorization.replace("Bearer ", "")
-    platform = get_platform_integration()
-    return platform.verify_token(token)
-
-
 def _get_any_user(authorization: str = Header(None)):
     """Require valid JWT token (any role)."""
     if not authorization:

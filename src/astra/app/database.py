@@ -104,22 +104,6 @@ class AstraDB:
             """)
 
             c.execute("""
-                CREATE TABLE IF NOT EXISTS secure_messages (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    from_user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-                    to_user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-                    group_id TEXT,
-                    message_type TEXT NOT NULL,
-                    encrypted_content BLOB NOT NULL,
-                    nonce BLOB NOT NULL,
-                    signature BLOB,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    read_at TIMESTAMP,
-                    UNIQUE(from_user_id, to_user_id, group_id, message_type)
-                )
-            """)
-
-            c.execute("""
                 CREATE TABLE IF NOT EXISTS used_tokens (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     token_hash TEXT UNIQUE NOT NULL,
@@ -587,16 +571,6 @@ class AstraDB:
             })
         return result[::-1]
 
-    def cleanup_old_logs(self, days: int = 30) -> int:
-        """Delete event logs older than specified days. Returns count deleted."""
-        with self.connection() as conn:
-            cursor = conn.execute(
-                "DELETE FROM event_logs WHERE created_at < datetime('now', '-' || ? || ' days')",
-                (days,),
-            )
-            conn.commit()
-            return cursor.rowcount
-
     # ====================================================================================
     # FL Client methods (replaces ExperimentDB client methods)
     # ====================================================================================
@@ -614,15 +588,6 @@ class AstraDB:
                    (client_id, user_id, group_id, experiment_id, status, trust_score, last_seen)
                    VALUES (?, ?, ?, ?, 'active', 1.0, ?)""",
                 (client_id, user_id, group_id, experiment_id, datetime.now().isoformat()),
-            )
-            conn.commit()
-
-    def update_fl_client(self, client_id: str, trust_score: float, status: str = "active") -> None:
-        with self.connection() as conn:
-            conn.execute(
-                "UPDATE fl_clients SET trust_score = ?,"
-                " status = ?, last_seen = ? WHERE client_id = ?",
-                (trust_score, status, datetime.now().isoformat(), client_id),
             )
             conn.commit()
 
@@ -867,11 +832,4 @@ def get_db() -> AstraDB:
         # for a different one — re-init. This happens when tests redirect
         # the DB after `get_db()` has already been called.
         _db = AstraDB(env_path)
-    return _db
-
-
-def init_db(db_path: str = "./astra.db") -> AstraDB:
-    """Initialize the global AstraDB instance."""
-    global _db
-    _db = AstraDB(db_path)
     return _db
