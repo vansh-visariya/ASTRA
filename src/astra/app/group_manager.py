@@ -682,7 +682,7 @@ class GroupManager:
             try:
                 db = get_db()
                 db.log_metrics(
-                    experiment_id=group_id,
+                    experiment_id=self.experiment_id or "default",
                     step=group.model_version,
                     metrics={
                         "version": group.model_version,
@@ -815,7 +815,8 @@ class GroupManager:
                 latest_path,
             )
 
-            if self.server_model is not None and self._is_peft_group(group):
+            group_obj = self.groups.get(group_id)
+            if self.server_model is not None and group_obj and self._is_peft_group(group_obj):
                 from astra.core.models.hf_models import (
                     get_base_model_state_dict,
                     get_lora_state_dict,
@@ -829,14 +830,14 @@ class GroupManager:
                     self.logger.info(f"Saved base model → {base_path}")
 
                 # Also save to models/hf/{model_id}/ for client downloads (if not already there)
-                hf_save_dir = os.path.join("models", "hf", group.model_id)
+                hf_save_dir = os.path.join("models", "hf", group_obj.model_id)
                 if not os.path.exists(os.path.join(hf_save_dir, "base_model.pt")):
                     try:
                         save_base_model_to_disk(
                             model=self.server_model,
                             save_dir=hf_save_dir,
-                            model_name=group.model_id,
-                            peft_config=group.config.get("peft", self.config.get("peft", {})),
+                            model_name=group_obj.model_id,
+                            peft_config=group_obj.config.get("peft", self.config.get("peft", {})),
                         )
                     except Exception as e:
                         self.logger.debug("Could not save HF base model to disk: %s", e)

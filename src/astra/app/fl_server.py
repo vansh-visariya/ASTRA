@@ -127,6 +127,12 @@ class FLServer:
 
     def _setup_server(self):
         """Initialize the FL server components."""
+        # Ensure default experiment exists (needed for metrics FK)
+        try:
+            self.db.create_experiment("default", {"auto": True})
+        except Exception:
+            pass
+
         # Reload externally registered models from DB
         self._reload_models_from_db()
 

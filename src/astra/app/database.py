@@ -778,6 +778,8 @@ class AstraDB:
 
     def delete_group(self, group_id: str) -> bool:
         with self.connection() as conn:
+            conn.execute("DELETE FROM join_requests WHERE group_id = ?", (group_id,))
+            conn.execute("DELETE FROM fl_clients WHERE group_id = ?", (group_id,))
             cursor = conn.execute("DELETE FROM groups WHERE group_id = ?", (group_id,))
             conn.commit()
             return cursor.rowcount > 0

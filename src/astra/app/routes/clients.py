@@ -197,9 +197,16 @@ async def submit_client_delta(client_id: str, request: Request):
             detail=f"delta payload too large ({len(delta_bytes)} bytes); max is {MAX_DELTA_BYTES}",
         )
 
-    if expected_f32_bytes is not None:
-        # We know the expected size — be strict and tell the user exactly
-        # what's wrong.
+    # Check PEFT from group config OR model registry
+    is_peft = group.config.get("peft", {}).get("enabled", False)
+    if not is_peft:
+        model_info = fl_server.model_registry.get_model_info(group.model_id)
+        if model_info:
+            is_peft = model_info.get("is_peft", False)
+
+    if expected_f32_bytes is not None and not is_peft:
+        # Strict size check for non-PEFT models only.
+        # PEFT groups upload adapter-only deltas (much smaller than full model).
         if len(delta_bytes) not in (expected_f32_bytes, expected_f64_bytes):
             raise HTTPException(
                 status_code=400,
@@ -216,7 +223,7 @@ async def submit_client_delta(client_id: str, request: Request):
                     f"cast to float32 (.astype('<f4')), and call .tobytes()."
                 ),
             )
-    else:
+    elif not is_peft:
         # Model param count unknown — fall back to the lenient % 4 check.
         if len(delta_bytes) % 4 != 0:
             raise HTTPException(
@@ -228,6 +235,13 @@ async def submit_client_delta(client_id: str, request: Request):
                     f"upload a serialized state_dict or PyTorch checkpoint?"
                 ),
             )
+
+    # For PEFT groups, at least check % 4 (must be float32 bytes)
+    if is_peft and len(delta_bytes) % 4 != 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"adapter delta byte length ({len(delta_bytes)}) is not a multiple of 4 (float32)",
+        )
 
     # Validate payload before dispatching — NaN/Inf always rejected.
     import numpy as np
@@ -242,7 +256,6 @@ async def submit_client_delta(client_id: str, request: Request):
     # PEFT validation: if the group uses PEFT, the delta should be adapter
     # weights only (much smaller than full model). Warn if the client
     # uploaded full model weights by mistake.
-    is_peft = group.config.get("peft", {}).get("enabled", False)
     if is_peft and expected_params is not None:
         # For PEFT, expected_params is the full model param count.
         # The adapter delta should be a fraction of that.
