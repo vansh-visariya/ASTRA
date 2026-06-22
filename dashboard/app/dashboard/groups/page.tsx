@@ -78,7 +78,7 @@ export default function GroupsPage() {
           }
         />
       ) : (
-        <div className="glass-card overflow-hidden animate-fade-in">
+        <div className="instrument-card overflow-hidden animate-fade-in">
           <GroupTable groups={groups} onAction={handleControl} onDelete={handleDelete} onDetail={(id) => router.push(`/dashboard/groups/${id}`)} />
         </div>
       )}

@@ -58,47 +58,47 @@ export default function DashboardPage() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="stat-card accent-success p-5 animate-fade-in" style={{ animationDelay: '0.35s', opacity: 0 }}>
-          <span className="text-slate-400 text-xs font-medium uppercase tracking-wider">Latest Accuracy</span>
-          <p className="text-3xl font-bold text-white tracking-tight mt-3">{formatPercent(metrics?.latest_accuracy)}</p>
-          <p className="text-slate-500 text-xs mt-2">{metrics?.latest_group_id ? `Group: ${metrics.latest_group_id}` : 'No data'}</p>
+        <div className="stat-card signal-emerald animate-fade-in" style={{ animationDelay: '0.35s', opacity: 0 }}>
+          <span className="section-label">Latest Accuracy</span>
+          <p className="data-value text-2xl text-white mt-3">{formatPercent(metrics?.latest_accuracy)}</p>
+          <p className="text-xs mt-2" style={{ color: 'var(--text-muted)' }}>{metrics?.latest_group_id ? `Group: ${metrics.latest_group_id}` : 'No data'}</p>
         </div>
-        <div className="stat-card accent-info p-5 animate-fade-in" style={{ animationDelay: '0.4s', opacity: 0 }}>
-          <span className="text-slate-400 text-xs font-medium uppercase tracking-wider">Latest Loss</span>
-          <p className="text-3xl font-bold text-white tracking-tight mt-3">{formatLoss(metrics?.latest_loss)}</p>
-          <p className="text-slate-500 text-xs mt-2">Round v{metrics?.latest_version || 0}</p>
+        <div className="stat-card signal-blue animate-fade-in" style={{ animationDelay: '0.4s', opacity: 0 }}>
+          <span className="section-label">Latest Loss</span>
+          <p className="data-value text-2xl text-white mt-3">{formatLoss(metrics?.latest_loss)}</p>
+          <p className="text-xs mt-2" style={{ color: 'var(--text-muted)' }}>Round v{metrics?.latest_version || 0}</p>
         </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-fade-in" style={{ animationDelay: '0.45s', opacity: 0 }}>
-        <Link href="/dashboard/groups" className="glass-card p-5 group cursor-pointer">
+        <Link href="/dashboard/groups" className="instrument-card p-5 group cursor-pointer">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
-              <div className="w-11 h-11 rounded-xl flex items-center justify-center transition-all duration-300 group-hover:scale-110"
-                style={{ background: 'rgba(255,255,255,0.06)' }}>
-                <Layers size={20} className="text-gray-300" />
+              <div className="w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-300 group-hover:scale-110"
+                style={{ background: 'rgba(55,80,130,0.1)' }}>
+                <Layers size={18} className="text-slate-400" />
               </div>
               <div>
-                <h3 className="text-white font-semibold text-sm">Manage Groups</h3>
-                <p className="text-slate-500 text-xs mt-0.5">View and control federated groups</p>
+                <h3 className="text-white font-medium text-sm">Manage Groups</h3>
+                <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>View and control federated groups</p>
               </div>
             </div>
-            <ArrowUpRight size={16} className="text-slate-600 group-hover:text-white transition-colors" />
+            <ArrowUpRight size={14} className="text-slate-600 group-hover:text-white transition-colors" />
           </div>
         </Link>
-        <Link href="/dashboard/create" className="glass-card p-5 group cursor-pointer">
+        <Link href="/dashboard/create" className="instrument-card p-5 group cursor-pointer">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
-              <div className="w-11 h-11 rounded-xl flex items-center justify-center transition-all duration-300 group-hover:scale-110"
-                style={{ background: 'rgba(255,255,255,0.06)' }}>
-                <Plus size={20} className="text-gray-300" />
+              <div className="w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-300 group-hover:scale-110"
+                style={{ background: 'rgba(55,80,130,0.1)' }}>
+                <Plus size={18} className="text-slate-400" />
               </div>
               <div>
-                <h3 className="text-white font-semibold text-sm">Create New Group</h3>
-                <p className="text-slate-500 text-xs mt-0.5">Start a new federated learning experiment</p>
+                <h3 className="text-white font-medium text-sm">Create New Group</h3>
+                <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>Start a new federated learning experiment</p>
               </div>
             </div>
-            <ArrowUpRight size={16} className="text-slate-600 group-hover:text-white transition-colors" />
+            <ArrowUpRight size={14} className="text-slate-600 group-hover:text-white transition-colors" />
           </div>
         </Link>
       </div>

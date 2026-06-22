@@ -50,21 +50,22 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="min-h-screen flex" style={{ background: 'var(--bg-primary)' }}>
-      <aside className="w-[260px] glass-sidebar flex flex-col shrink-0">
+      {/* Sidebar */}
+      <aside className="w-[260px] sidebar-panel flex flex-col shrink-0">
         <div className="p-5 pb-4">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: '#ffffff' }}>
-              <Layers size={18} className="text-black" />
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'rgba(6,182,212,0.12)' }}>
+              <span className="font-mono font-bold text-sm" style={{ color: 'var(--signal-cyan)' }}>A</span>
             </div>
             <div>
-              <h1 className="text-white font-bold text-[15px] tracking-tight">ASTRA</h1>
-              <p className="text-slate-500 text-[11px] font-medium">Admin Console</p>
+              <h1 className="font-display font-bold text-[15px] text-white">astra</h1>
+              <p className="section-label mt-0.5">Admin Console</p>
             </div>
           </div>
         </div>
 
         <nav className="flex-1 px-3 space-y-0.5">
-          <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest px-4 mb-2">Navigation</p>
+          <p className="section-label px-4 mb-2">Navigation</p>
           {adminNav.map((item) => {
             const isActive = pathname === item.href ||
               (item.href !== '/dashboard' && pathname.startsWith(item.href));
@@ -74,53 +75,58 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 href={item.href}
                 className={`nav-item ${isActive ? 'active' : ''}`}
               >
-                <item.icon size={17} />
+                <item.icon size={16} />
                 <span>{item.label}</span>
-                {isActive && <ChevronRight size={14} className="ml-auto opacity-60" />}
+                {isActive && <ChevronRight size={12} className="ml-auto opacity-40" />}
               </Link>
             );
           })}
         </nav>
 
-        <div className="p-4 mx-3 mb-3 rounded-xl" style={{ background: 'rgba(30, 41, 59, 0.4)' }}>
+        <div className="p-4 mx-3 mb-3 rounded-lg surface">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg flex items-center justify-center text-xs font-bold text-gray-300"
-              style={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.06), rgba(255,255,255,0.04))' }}>
+            <div className="w-8 h-8 rounded-md flex items-center justify-center text-xs font-bold text-slate-400 surface">
               {initials}
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-white text-sm font-medium truncate">{user.name || user.username}</p>
-              <p className="text-slate-500 text-[11px] capitalize">{user.role}</p>
+              <p className="section-label mt-0.5 capitalize">{user.role}</p>
             </div>
             <button
               onClick={logout}
-              className="p-2 text-slate-500 hover:text-white hover:bg-slate-800/50 rounded-lg transition"
+              className="p-1.5 text-slate-500 hover:text-white rounded-md transition"
               title="Sign out"
             >
-              <LogOut size={16} />
+              <LogOut size={14} />
             </button>
           </div>
         </div>
       </aside>
 
+      {/* Main area */}
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="h-14 glass-header flex items-center justify-between px-6 shrink-0">
+        {/* Header with signal trace */}
+        <header className="h-14 header-bar flex items-center justify-between px-6 shrink-0 relative">
+          <div className="signal-trace" />
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2">
               <div
-                className="w-2 h-2 rounded-full pulse-dot green"
-                style={{ background: isConnected ? 'var(--color-success)' : 'var(--color-muted)' }}
+                className="w-2 h-2 rounded-full pulse-dot"
+                style={{
+                  background: isConnected ? 'var(--signal-cyan)' : 'var(--text-muted)',
+                  boxShadow: isConnected ? '0 0 6px var(--signal-cyan)' : 'none',
+                }}
               />
-              <span className="text-slate-500 text-xs font-medium">
-                {isConnected ? 'Live' : 'Polling'}
+              <span className="font-mono text-[11px]" style={{ color: isConnected ? 'var(--signal-cyan)' : 'var(--text-muted)' }}>
+                {isConnected ? 'LIVE' : 'POLL'}
               </span>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Link href="/dashboard/notifications" className="relative p-2 text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg transition">
-              <Bell size={17} />
+            <Link href="/dashboard/notifications" className="relative p-2 text-slate-500 hover:text-slate-300 rounded-lg transition">
+              <Bell size={16} />
               {unreadCount > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] flex items-center justify-center text-white text-[10px] font-bold rounded-full px-1"
+                <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] flex items-center justify-center text-white text-[10px] font-bold rounded-md px-1"
                   style={{ background: 'var(--color-error)' }}>
                   {unreadCount > 99 ? '99+' : unreadCount}
                 </span>

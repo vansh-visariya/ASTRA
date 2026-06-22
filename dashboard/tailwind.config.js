@@ -6,6 +6,10 @@ module.exports = {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        display: ['Space Grotesk', 'sans-serif'],
+        mono: ['JetBrains Mono', 'monospace'],
+      },
       colors: {
         success: { 400: '#34d399', 500: '#10b981', 600: '#059669', DEFAULT: '#10b981' },
         error: { 400: '#fb7185', 500: '#f43f5e', 600: '#e11d48', DEFAULT: '#f43f5e' },

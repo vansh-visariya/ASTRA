@@ -1,4 +1,5 @@
 :root {
+  /* ─── Semantic Colors —────────────────────────────── */
   --color-success: #10b981;
   --color-success-bg: rgba(16, 185, 129, 0.12);
   --color-success-border: rgba(16, 185, 129, 0.3);
@@ -19,10 +20,17 @@
   --color-muted-bg: rgba(100, 116, 139, 0.1);
   --color-muted-border: rgba(100, 116, 139, 0.2);
 
-  --color-accent-indigo: #818cf8;
-  --color-accent-emerald: #34d399;
-  --color-accent-blue: #60a5fa;
-  --color-accent-amber: #fbbf24;
-  --color-accent-rose: #fb7185;
-  --color-accent-violet: #a78bfa;
+  /* ─── Signal Accents —─────────────────────────────── */
+  --signal-cyan: #06b6d4;
+  --signal-cyan-bg: rgba(6, 182, 212, 0.1);
+  --signal-violet: #a78bfa;
+  --signal-violet-bg: rgba(167, 139, 250, 0.1);
+  --signal-amber: #f59e0b;
+  --signal-amber-bg: rgba(245, 158, 11, 0.1);
+  --signal-emerald: #10b981;
+  --signal-emerald-bg: rgba(16, 185, 129, 0.1);
+  --signal-rose: #f43f5e;
+  --signal-rose-bg: rgba(244, 63, 94, 0.1);
+  --signal-blue: #3b82f6;
+  --signal-blue-bg: rgba(59, 130, 246, 0.1);
 }
