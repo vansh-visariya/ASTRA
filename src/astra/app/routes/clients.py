@@ -12,6 +12,7 @@ import contextlib
 import logging
 import os
 import time
+from collections import OrderedDict
 
 from fastapi import APIRouter, HTTPException, Request
 
@@ -25,8 +26,33 @@ MAX_DELTA_BYTES = int(
     os.environ.get("ASTRA_DELTA_CAP_BYTES", str(100 * 1024 * 1024))
 )  # default 100 MB cap on decoded delta
 MIN_DELTA_INTERVAL_S = 2.0  # per-client rate limit
+RATE_LIMITER_TTL = 300.0  # evict idle entries after 5 minutes
 
-_last_delta_at: dict[str, float] = {}
+# Bounded rate-limiter: OrderedDict so we can pop stale entries.
+_last_delta_at: OrderedDict[str, float] = OrderedDict()
+
+
+def _check_rate_limit(client_id: str) -> None:
+    """Enforce per-client rate limit and evict stale entries."""
+    now = time.monotonic()
+
+    # Evict entries older than TTL to prevent unbounded growth
+    while _last_delta_at:
+        oldest_id, oldest_ts = next(iter(_last_delta_at.items()))
+        if now - oldest_ts > RATE_LIMITER_TTL:
+            _last_delta_at.popitem(last=False)
+        else:
+            break
+
+    last = _last_delta_at.get(client_id, 0.0)
+    if now - last < MIN_DELTA_INTERVAL_S:
+        wait = MIN_DELTA_INTERVAL_S - (now - last)
+        raise HTTPException(
+            status_code=429,
+            detail=f"Rate limit: wait {wait:.1f}s before next upload",
+        )
+    _last_delta_at[client_id] = now
+    _last_delta_at.move_to_end(client_id)
 
 
 def _get_expected_param_count(fl_server, model_id: str) -> int | None:
@@ -75,16 +101,8 @@ async def submit_client_delta(client_id: str, request: Request):
     from astra.app.routes._auth import verify_request_jwt
     payload = verify_request_jwt(request.headers.get("Authorization"))
 
-    # Rate limit
-    now = time.monotonic()
-    last = _last_delta_at.get(client_id, 0.0)
-    if now - last < MIN_DELTA_INTERVAL_S:
-        wait = MIN_DELTA_INTERVAL_S - (now - last)
-        raise HTTPException(
-            status_code=429,
-            detail=f"Rate limit: wait {wait:.1f}s before next upload",
-        )
-    _last_delta_at[client_id] = now
+    # Rate limit (bounded, auto-evicts stale entries)
+    _check_rate_limit(client_id)
 
     # Parse body
     try:
@@ -309,31 +327,49 @@ async def submit_client_delta(client_id: str, request: Request):
         "meta": update.meta,
     }
 
-    # Dispatch via the AsyncServer (applies DP if configured, updates trust,
-    # and triggers aggregation when the window fills).
-    fl_server.server.handle_update(client_update)
-    new_version = fl_server.server.global_version
+    # Step 1: AsyncServer applies DP + trust scoring to the vector.
+    # The returned dict contains the DP'd local_updates (bytes).
+    # This is the ONLY place DP is applied — GroupManager receives
+    # the identical processed vector from this dict.
+    processed = fl_server.server.handle_update(client_update)
+
+    # Sync trust score from TrustManager back to group.clients so the
+    # dashboard and DB reflect the actual score used during aggregation.
+    trust_score = fl_server.server.trust_manager.get_trust(client_id)
+    if client_id in group.clients:
+        group.clients[client_id]["trust_score"] = trust_score
+
+    # Step 2: GroupManager is the sole aggregator. It receives the
+    # DP'd vector (via processed["local_updates"]) and handles
+    # per-group buffering, window-checking, aggregation, and model
+    # update. No double-application.
+    result = fl_server.group_manager.process_client_update(
+        client_id, processed
+    )
+    if result.get("triggered") or result.get("aggregate"):
+        agg_result = fl_server.group_manager.aggregate_group(group.group_id)
+        new_version = agg_result["version"] if agg_result else 0
+    else:
+        new_version = fl_server.server.global_version
 
     # Auto-mark server as running once it has accepted at least one update
     if not fl_server.is_running:
         fl_server.is_running = True
 
-    # Also let the GroupManager aggregate so the group-level model_version
-    # and metrics stay in sync with the AsyncServer's global_version.
-    # The aggregator is the same one used by the WebSocket path.
-    triggered = fl_server.group_manager.process_client_update(
-        client_id, client_update
-    )
-    if triggered.get("aggregate"):
-        fl_server.group_manager.aggregate_group(group.group_id)
-
     # Bump client's update counter / last_update
+    last_update_ts = time.time()
+    if client_id in group.clients:
+        group.clients[client_id]["last_update"] = last_update_ts
+        group.clients[client_id]["updates_count"] = (
+            group.clients[client_id].get("updates_count", 0) + 1
+        )
     try:
         fl_server.db.update_fl_client_metrics(
             client_id=client_id,
             local_accuracy=update.meta.get("train_accuracy", 0.0),
             local_loss=update.meta.get("train_loss", 0.0),
             updates_count=group.clients.get(client_id, {}).get("updates_count", 0),
+            trust_score=trust_score,
             status="active",
         )
     except Exception as e:
@@ -409,6 +445,8 @@ async def join_group_as_client(group_id: str, request: Request):
         platform.auth_manager.join_request_manager.mark_user_activated(user_id, group_id)
     except Exception as e:
         logger.warning("Failed to mark user %s activated in group %s: %s", user_id, group_id, e)
+        # Non-fatal: client is already registered in-memory, but log the
+        # warning so admins can see it in event logs.
 
     fl_server.group_manager.log_event(
         "client_joined",

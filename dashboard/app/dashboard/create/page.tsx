@@ -115,6 +115,7 @@ export default function CreateGroupPage() {
                 className="input-field"
               >
                 <option value="fedavg">FedAvg</option>
+                <option value="hybrid">Hybrid (Recommended)</option>
                 <option value="robust">Robust Aggregation</option>
                 <option value="trimmed_mean">Trimmed Mean</option>
                 <option value="median">Coordinate Median</option>

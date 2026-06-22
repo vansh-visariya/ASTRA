@@ -183,7 +183,7 @@ export default function GroupDetailPage() {
                   <div key={req.id} className="flex items-center justify-between p-4 rounded-xl" style={{ background: 'rgba(30,41,59,0.4)' }}>
                     <div>
                       <p className="text-white text-sm font-medium">{req.username || `User ${req.user_id}`}</p>
-                      <p className="text-slate-500 text-xs">{new Date(req.created_at).toLocaleString()}</p>
+                      <p className="text-slate-500 text-xs">{new Date(req.requested_at || req.created_at).toLocaleString()}</p>
                     </div>
                     <div className="flex gap-2">
                       <button onClick={() => handleApprove(req.id)} className="btn-success !px-3 !py-1.5 text-xs">Approve</button>

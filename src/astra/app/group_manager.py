@@ -125,6 +125,7 @@ class GroupManager:
                                     "device": "cpu",
                                     "data_metadata": {},
                                     "connection": "none",
+                                    "user_id": cr["user_id"],
                                     "last_update": cr["last_update"],
                                     "updates_count": cr["updates_count"] or 0,
                                     "local_accuracy": cr["local_accuracy"] or 0,
@@ -186,6 +187,15 @@ class GroupManager:
                     )
 
                 self.logger.info(f"Loaded {len(db_groups)} groups from database")
+
+                # Restart watchdog tasks for groups that were training
+                for gid, group in self.groups.items():
+                    if group.is_training:
+                        try:
+                            self._start_training_watchdog(gid)
+                            self.logger.info(f"Restarted watchdog for training group {gid}")
+                        except Exception as e:
+                            self.logger.warning(f"Could not restart watchdog for group {gid}: {e}")
             else:
                 self.logger.info("No groups found in database — create groups via the dashboard")
         except Exception as e:
@@ -274,7 +284,7 @@ class GroupManager:
         if local_updates is None:
             return np.array([], dtype=np.float32)
         if isinstance(local_updates, bytes):
-            result = np.frombuffer(local_updates, dtype=np.float32)
+            result = np.frombuffer(local_updates, dtype="<f4")
             self.logger.debug("Decoded bytes update: %s elements", len(result))
             return result
         if isinstance(local_updates, str):
@@ -282,7 +292,7 @@ class GroupManager:
                 import base64
 
                 decoded = base64.b64decode(local_updates)
-                result = np.frombuffer(decoded, dtype=np.float32)
+                result = np.frombuffer(decoded, dtype="<f4")
                 self.logger.debug("Decoded base64 update: %s elements", len(result))
                 return result
             except Exception as e:
@@ -361,7 +371,17 @@ class GroupManager:
                 )
 
                 if group and group.is_training and group.config.get("auto_continue", False):
-                    await self.trigger_clients_training(group_id)
+                    await self.broadcast_to_group(
+                        group_id,
+                        {
+                            "type": "model_update",
+                            "group_id": group_id,
+                            "version": agg_result["version"],
+                            "accuracy": agg_result.get("accuracy", 0),
+                            "loss": agg_result.get("loss", 0),
+                            "message": "New model available. Download and train again.",
+                        },
+                    )
         except asyncio.CancelledError:
             return
 
@@ -376,6 +396,7 @@ class GroupManager:
         config: dict[str, Any],
         window_size: int = 3,
         time_limit: float = 20.0,
+        created_by: int | None = None,
     ) -> TrainingGroup:
         """Create a new training group."""
         with self.lock:
@@ -416,6 +437,7 @@ class GroupManager:
                     join_token=join_token,
                     window_size=window_size,
                     time_limit=int(time_limit),
+                    created_by=created_by,
                 )
             except Exception as e:
                 self.logger.warning(f"Could not persist group {group_id} to DB: {e}")
@@ -676,7 +698,7 @@ class GroupManager:
             try:
                 db = get_db()
                 db.log_metrics(
-                    experiment_id=self.experiment_id or "default",
+                    experiment_id=group_id,
                     step=group.model_version,
                     metrics={
                         "version": group.model_version,

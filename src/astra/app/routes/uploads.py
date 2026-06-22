@@ -157,6 +157,11 @@ async def complete_upload(upload_id: str, request: Request, authorization: str =
         raise HTTPException(status_code=400, detail=f"Invalid JSON body: {e}") from None
 
     expected_sha = (body.get("sha256") or "").lower() or None
+    # Accept metadata from the frontend so chunked uploads don't lose
+    # client_version, local_dataset_size, accuracy, loss, etc.
+    meta = body.get("meta", {})
+    client_version = body.get("client_version", 0)
+    local_dataset_size = body.get("local_dataset_size", 1)
 
     manager = get_upload_manager()
     try:
@@ -173,7 +178,12 @@ async def complete_upload(upload_id: str, request: Request, authorization: str =
     delta_bytes = blob_path.read_bytes()
 
     # Reuse the validation + dispatch logic from /api/clients/{id}/delta
-    return await _dispatch_staged_delta(record, delta_bytes)
+    return await _dispatch_staged_delta(
+        record, delta_bytes,
+        meta=meta,
+        client_version=client_version,
+        local_dataset_size=local_dataset_size,
+    )
 
 
 @router.get("/api/uploads/{upload_id}")
@@ -205,7 +215,12 @@ async def abort_upload(upload_id: str, authorization: str = Header(None)):
     return {"status": "aborted", "upload_id": upload_id}
 
 
-async def _dispatch_staged_delta(record, delta_bytes: bytes) -> dict:
+async def _dispatch_staged_delta(
+    record, delta_bytes: bytes,
+    meta: dict | None = None,
+    client_version: int = 0,
+    local_dataset_size: int = 1,
+) -> dict:
     """Validate the staged bytes and push them into the AsyncServer.
 
     Mirrors the validation+dispatch logic from /api/clients/{id}/delta
@@ -311,19 +326,23 @@ async def _dispatch_staged_delta(record, delta_bytes: bytes) -> dict:
 
     client_update = {
         "client_id": client_id,
-        "client_version": 0,
+        "client_version": client_version,
         "local_updates": delta.tobytes(),
         "update_type": "delta",
-        "local_dataset_size": 1,
+        "local_dataset_size": local_dataset_size,
         "timestamp": 0,
-        "meta": {},
+        "meta": meta or {},
     }
-    fl_server.server.handle_update(client_update)
-    new_version = fl_server.server.global_version
+    # Step 1: AsyncServer applies DP + trust to the vector.
+    processed = fl_server.server.handle_update(client_update)
 
-    triggered = fl_server.group_manager.process_client_update(client_id, client_update)
-    if triggered.get("aggregate"):
-        fl_server.group_manager.aggregate_group(group.group_id)
+    # Step 2: GroupManager is the sole aggregator.
+    result = fl_server.group_manager.process_client_update(client_id, processed)
+    if result.get("triggered") or result.get("aggregate"):
+        agg_result = fl_server.group_manager.aggregate_group(group.group_id)
+        new_version = agg_result["version"] if agg_result else 0
+    else:
+        new_version = fl_server.server.global_version
 
     # Best-effort: free disk once dispatched
     import contextlib as _cl

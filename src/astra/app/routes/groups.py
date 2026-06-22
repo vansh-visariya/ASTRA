@@ -31,7 +31,7 @@ async def list_groups(current_user=Depends(_get_any_user)):
 
 
 @router.post("/api/groups")
-async def create_group(group_data: dict):
+async def create_group(group_data: dict, current_user=Depends(_get_any_user)):
     """Create a new training group."""
     fl_server = get_fl_server()
     group_id = group_data.get("group_id")
@@ -55,14 +55,21 @@ async def create_group(group_data: dict):
     custom_token = group_data.get("join_token")
 
     # Build config with training parameters
+    aggregator_name = group_data.get("aggregator", "fedavg")
     config = {
         "join_token": custom_token if custom_token else "GENERATE_NEW",
         "local_epochs": group_data.get("local_epochs", 2),
         "batch_size": group_data.get("batch_size", 32),
         "lr": group_data.get("lr", 0.01),
-        "aggregator": group_data.get("aggregator", "fedavg"),
+        "aggregator": aggregator_name,
         "dp_enabled": group_data.get("dp_enabled", False),
     }
+
+    # Map the flat aggregator name to the nested robust.method key that
+    # create_aggregator() reads.  Without this, the UI dropdown has no
+    # effect on actual aggregation behavior.
+    if aggregator_name not in ("fedavg", ""):
+        config.setdefault("robust", {})["method"] = aggregator_name
 
     group = fl_server.group_manager.create_group(
         group_id=group_id,
@@ -70,6 +77,7 @@ async def create_group(group_data: dict):
         config=config,
         window_size=window_size,
         time_limit=time_limit,
+        created_by=current_user.get("user_id"),
     )
 
     # For create we still return the real token once, for the admin caller.

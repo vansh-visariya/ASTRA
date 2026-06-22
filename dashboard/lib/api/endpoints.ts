@@ -44,14 +44,14 @@ export const getJoinRequests = (groupId?: string) => {
   return api.get<ApiListResponse<JoinRequest>>(path);
 };
 
-export const requestJoin = (body: { group_id: string; message?: string }) =>
+export const requestJoin = (body: { group_id: string; metadata?: Record<string, unknown> }) =>
   api.post<{ status: string }>('/api/join/join-request', body);
 
 export const approveJoin = (body: { request_id: number }) =>
-  api.post<{ status: string }>('/api/join/join-requests/approve', body);
+  api.post<{ success: boolean; token?: string; error?: string }>('/api/join/join-requests/approve', body);
 
 export const rejectJoin = (body: { request_id: number }) =>
-  api.post<{ status: string }>('/api/join/join-requests/reject', body);
+  api.post<{ success: boolean; error?: string }>('/api/join/join-requests/reject', body);
 
 export const getMyJoinStatus = (groupId: string) =>
   api.get<{ status: string }>(`/api/join/my-requests/${groupId}`);

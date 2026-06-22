@@ -78,7 +78,7 @@ function markBaseDownloaded(groupId: string): void {
 
 export default function ClientUploadPage() {
   const { user, token } = useAuth();
-  const { isConnected } = useWS();
+  const { isConnected, onMessage } = useWS();
   const { data: groupsData, loading, error, refetch } = useGroups(!isConnected);
 
   const [joinStatuses, setJoinStatuses] = useState<Record<string, string>>({});
@@ -328,6 +328,22 @@ export default function ClientUploadPage() {
     return () => { cancelled = true; };
   }, [selectedGroup]);
 
+  // Subscribe to WebSocket messages for real-time version updates
+  useEffect(() => {
+    if (!onMessage || !selectedGroup) return;
+    const unsub = onMessage((msg) => {
+      if (msg.type === 'aggregation_complete' && msg.group_id === selectedGroup) {
+        const v = msg.version;
+        if (typeof v === 'number') setGlobalVersion(v);
+      }
+      if (msg.type === 'model_update' && msg.group_id === selectedGroup) {
+        const v = msg.version;
+        if (typeof v === 'number') setGlobalVersion(v);
+      }
+    });
+    return unsub;
+  }, [onMessage, selectedGroup]);
+
   const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (!f) return setFile(null);
@@ -426,6 +442,8 @@ export default function ClientUploadPage() {
       message?: string;
     }>(`/api/uploads/${initBody.upload_id}/complete`, {
       sha256: sha,
+      client_version: globalVersion,
+      local_dataset_size: datasetSize,
       meta: {
         dataset_size: datasetSize,
         ...(trainAccuracy !== '' ? { train_accuracy: Number(trainAccuracy) } : {}),

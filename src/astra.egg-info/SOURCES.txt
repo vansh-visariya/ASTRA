@@ -22,6 +22,7 @@ src/astra/app/state.py
 src/astra/app/training_group.py
 src/astra/app/uploads.py
 src/astra/app/routes/__init__.py
+src/astra/app/routes/_auth.py
 src/astra/app/routes/clients.py
 src/astra/app/routes/downloads.py
 src/astra/app/routes/experiments.py
@@ -30,9 +31,7 @@ src/astra/app/routes/models.py
 src/astra/app/routes/system.py
 src/astra/app/routes/uploads.py
 src/astra/core/__init__.py
-src/astra/core/compression.py
 src/astra/core/config.py
-src/astra/core/exceptions.py
 src/astra/core/inference.py
 src/astra/core/server.py
 src/astra/core/trust_manager.py
@@ -45,7 +44,6 @@ src/astra/core/models/model_zoo.py
 src/astra/core/privacy/__init__.py
 src/astra/core/privacy/privacy.py
 src/astra/core/utils/__init__.py
-src/astra/core/utils/logging_utils.py
 src/astra/core/utils/metrics.py
 src/astra/core/utils/seed.py
 src/astra/infra/__init__.py
@@ -58,11 +56,11 @@ src/astra/infra/security/auth.py
 tests/test_aggregator.py
 tests/test_approve_join.py
 tests/test_auth.py
-tests/test_compression.py
 tests/test_config.py
 tests/test_database.py
 tests/test_downloads_endpoint.py
 tests/test_external_client_flow.py
+tests/test_hf_download.py
 tests/test_hf_models.py
 tests/test_metrics.py
 tests/test_model_zoo.py

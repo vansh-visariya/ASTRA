@@ -126,7 +126,7 @@ class TestGroupEndpoints:
             "group_id": "no_auth",
             "model_id": "",
         })
-        assert resp.status_code == 400
+        assert resp.status_code == 401
 
     def test_create_and_get_group(self, fresh_client, auth_headers):
         mid = f"info_{os.urandom(4).hex()}"

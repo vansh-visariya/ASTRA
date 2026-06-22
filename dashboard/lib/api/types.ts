@@ -100,11 +100,12 @@ export interface TrustData {
 
 export interface Model {
   model_id: string;
-  type: string;
+  model_type: string;
   architecture?: string;
   dataset?: string;
   source?: string;
   created_at?: string;
+  is_peft?: boolean;
 }
 
 export interface Recommendation {
@@ -132,6 +133,7 @@ export interface ApiListResponse<T> {
   logs?: T[];
   models?: T[];
   join_requests?: T[];
+  requests?: T[];
   clients?: T[];
   count?: number;
   [key: string]: unknown;

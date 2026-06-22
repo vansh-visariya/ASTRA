@@ -7,6 +7,7 @@ the core state of a federated learning training group.
 
 import time
 import uuid
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -46,8 +47,8 @@ class TrainingGroup:
     model_version: int = 0
     model: Any = None
 
-    # Update buffer for hybrid windowing
-    pending_updates: list[dict] = field(default_factory=list)
+    # Update buffer for hybrid windowing (bounded to prevent unbounded growth)
+    pending_updates: deque = field(default_factory=lambda: deque(maxlen=500))
     last_aggregation_time: float = field(default_factory=time.time)
 
     # Client tracking

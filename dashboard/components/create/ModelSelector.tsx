@@ -89,7 +89,7 @@ export function ModelSelector({
                   <Cpu size={16} className="text-slate-500" />
                   <div>
                     <p className="text-white text-sm font-medium">{m.model_id}</p>
-                    <p className="text-slate-500 text-xs">{m.architecture || m.type} — {m.dataset || 'N/A'}</p>
+                    <p className="text-slate-500 text-xs">{m.architecture || m.model_type} — {m.dataset || 'N/A'}</p>
                   </div>
                 </div>
               </button>

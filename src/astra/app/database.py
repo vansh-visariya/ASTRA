@@ -199,8 +199,8 @@ class AstraDB:
                     status TEXT DEFAULT 'IDLE',
                     join_token TEXT,
                     config_json TEXT,
-                    window_size INTEGER DEFAULT 5,
-                    time_limit INTEGER DEFAULT 300,
+                    window_size INTEGER DEFAULT 3,
+                    time_limit INTEGER DEFAULT 20,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     created_by INTEGER REFERENCES users(id)
@@ -598,6 +598,7 @@ class AstraDB:
         local_loss: float | None = None,
         updates_count: int | None = None,
         gradient_norm: float | None = None,
+        trust_score: float | None = None,
         status: str | None = None,
     ) -> None:
         with self.connection() as conn:
@@ -618,6 +619,9 @@ class AstraDB:
             if gradient_norm is not None:
                 updates.append("gradient_norm = ?")
                 values.append(gradient_norm)
+            if trust_score is not None:
+                updates.append("trust_score = ?")
+                values.append(trust_score)
             if status is not None:
                 updates.append("status = ?")
                 values.append(status)

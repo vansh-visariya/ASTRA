@@ -1,11 +1,12 @@
 """
 Async Federated Learning Server.
 
-Implements an asynchronous server that processes client updates immediately
-upon arrival without global synchronization barriers.
+Pre-processes incoming client updates (DP, trust, buffer) and hands
+the processed update back to the caller. The caller (route or
+GroupManager) is responsible for actual aggregation and model update.
 
-References:
-- Xie et al., "Asynchronous Federated Optimization"
+This avoids the double-aggregation bug where both AsyncServer and
+GroupManager applied the same deltas to the shared model object.
 """
 
 import logging
@@ -25,7 +26,12 @@ from astra.core.trust_manager import TrustManager
 
 
 class AsyncServer:
-    """Asynchronous federated learning server."""
+    """Pre-processes client updates: DP, trust scoring, buffer management.
+
+    This class does NOT aggregate or update the model — that is handled
+    by GroupManager, which receives the processed (DP'd) update vector
+    and aggregates per-group buffers.
+    """
 
     def __init__(
         self,
@@ -70,8 +76,19 @@ class AsyncServer:
 
         self.current_lr = config["server"]["server_lr"]
 
-    def handle_update(self, client_update: dict[str, Any]) -> None:
-        """Process a single client update immediately."""
+        # Last aggregation results for the route to sync from
+        self.last_aggregation_result: dict | None = None
+
+    def handle_update(self, client_update: dict[str, Any]) -> dict[str, Any]:
+        """Apply DP + trust scoring to a client update.
+
+        The processed (DP'd) update vector is stored in
+        ``client_update["local_updates"]`` as bytes. The caller should
+        pass this same dict to GroupManager so both paths use the
+        identical DP'd vector.
+
+        Returns the (mutated) client_update dict for chaining.
+        """
         client_id = client_update.get("client_id", "unknown")
         staleness = self.global_version - client_update.get("client_version", 0)
         staleness_weight = np.exp(-self.config["server"]["async_lambda"] * staleness)
@@ -87,6 +104,7 @@ class AsyncServer:
         with self.lock:
             update_vector = self._decode_update(client_update.get("local_updates"))
 
+            # Server-side DP: clip + noise
             dp_enabled = self.config["privacy"]["dp_enabled"]
             dp_server = self.config["privacy"]["dp_mode"] == "server"
             if dp_enabled and dp_server:
@@ -95,14 +113,18 @@ class AsyncServer:
                     self.config["privacy"]["clip_norm"],
                     self.config["privacy"]["sigma"],
                 )
-                self.logger.debug("Server-side DP applied: clip=%.2f sigma=%.2f",
-                                  self.config["privacy"]["clip_norm"],
-                                  self.config["privacy"]["sigma"])
+                self.logger.debug(
+                    "Server-side DP applied: clip=%.2f sigma=%.2f",
+                    self.config["privacy"]["clip_norm"],
+                    self.config["privacy"]["sigma"],
+                )
 
+            # Trust scoring
             trust_score = self.trust_manager.update_trust(
                 client_id, update_vector, self.running_global_estimate
             )
 
+            # Buffer (used only for running_global_estimate / diagnostics now)
             self.aggregator_buffer.append(
                 {
                     "client_id": client_id,
@@ -121,7 +143,18 @@ class AsyncServer:
                 trust_score,
             )
 
-            self._maybe_aggregate()
+            # Update running estimate with the processed vector
+            if self.running_global_estimate is None:
+                self.running_global_estimate = update_vector
+            else:
+                self.running_global_estimate = (
+                    0.9 * self.running_global_estimate + 0.1 * update_vector
+                )
+
+        # Write the DP'd vector back so the caller (route) can pass it
+        # to GroupManager for aggregation.
+        client_update["local_updates"] = update_vector.tobytes()
+        return client_update
 
     def _decode_update(self, encoded_update: Any) -> np.ndarray:
         """Decode client update from transport format."""
@@ -130,87 +163,8 @@ class AsyncServer:
             return np.array([], dtype=np.float32)
 
         if isinstance(encoded_update, bytes):
-            return np.frombuffer(encoded_update, dtype=np.float32)
+            return np.frombuffer(encoded_update, dtype="<f4")
         elif isinstance(encoded_update, np.ndarray):
             return encoded_update
         else:
             return np.array(encoded_update, dtype=np.float32)
-
-    def _maybe_aggregate(self) -> bool:
-        """Check if aggregation should occur and execute if ready."""
-        min_window = self.config["server"]["aggregator_window"]
-
-        if len(self.aggregator_buffer) >= min_window:
-            self._perform_aggregation()
-            return True
-        return False
-
-    def _perform_aggregation(self) -> None:
-        """Execute robust aggregation and update global model."""
-        buffer_list = list(self.aggregator_buffer)
-        self.logger.info(
-            "Aggregating %s updates (v%s -> v%s) with %s",
-            len(buffer_list),
-            self.global_version,
-            self.global_version + 1,
-            self.aggregator.__class__.__name__,
-        )
-
-        aggregated_delta = self.aggregator.aggregate(buffer_list)
-        self.logger.debug("Aggregated delta shape=%s norm=%.4f", aggregated_delta.shape,
-                          float(np.linalg.norm(aggregated_delta)))
-
-        if self.running_momentum is None:
-            self.running_momentum = aggregated_delta
-        else:
-            momentum = self.config["server"].get("momentum", 0.9)
-            self.running_momentum = momentum * self.running_momentum + aggregated_delta
-
-        self._apply_update(self.running_momentum)
-
-        self.global_version += 1
-        self.logger.info("Global model updated to v%s (mode=%s)", self.global_version,
-                         "peft" if self.is_peft else "full")
-
-        if self.running_global_estimate is None:
-            self.running_global_estimate = aggregated_delta
-        else:
-            self.running_global_estimate = (
-                0.9 * self.running_global_estimate + 0.1 * aggregated_delta
-            )
-
-        self._check_adaptive_lr(buffer_list)
-
-        self.aggregator_buffer.clear()
-
-    def _apply_update(self, delta: np.ndarray) -> None:
-        """Apply aggregated delta to model parameters.
-
-        In PEFT mode, only LoRA/adapter parameters are updated.
-        In non-PEFT mode, all parameters are updated in sorted-name order.
-        """
-        if self.is_peft:
-            from astra.core.models.model_zoo import apply_peft_delta as _apply
-
-            _apply(self.model, delta)
-            return
-
-        from astra.core.models.model_zoo import apply_flat_delta as _apply
-
-        _apply(self.model, delta)
-
-    def _check_adaptive_lr(self, buffer_snapshot: list[dict[str, Any]]) -> None:
-        """Adaptively adjust learning rate based on instability."""
-        if not self.config["server"].get("adaptive_lr", False):
-            return
-
-        recent_deltas = [b["delta"] for b in buffer_snapshot[-5:]]
-        if len(recent_deltas) > 1:
-            variance = np.var([np.linalg.norm(d) for d in recent_deltas])
-            mean_norm = np.mean([np.linalg.norm(d) for d in recent_deltas])
-
-            if mean_norm > 0 and variance / mean_norm > self.config["server"].get(
-                "instability_threshold", 0.15
-            ):
-                self.current_lr *= self.config["server"].get("lr_decay_factor", 0.5)
-                self.logger.warning(f"Instability detected. Reducing LR to {self.current_lr}")
