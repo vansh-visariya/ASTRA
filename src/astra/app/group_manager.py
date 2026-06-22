@@ -96,6 +96,12 @@ class GroupManager:
                         max_rounds=config.get("max_rounds"),
                     )
                     group.status = g.get("status", "IDLE")
+                    # Sync is_training/is_locked from persisted status so state survives restarts
+                    if group.status == "TRAINING":
+                        group.is_training = True
+                        group.is_locked = True
+                    elif group.status in ("PAUSED",):
+                        group.is_locked = True
 
                     self.groups[gid] = group
 
@@ -539,6 +545,14 @@ class GroupManager:
                 group.is_training = True
                 group.status = "TRAINING"
                 group.completed_rounds = 0
+
+                # Persist to DB
+                try:
+                    db = get_db()
+                    db.update_group_status(group_id, "TRAINING")
+                except Exception as e:
+                    self.logger.warning(f"Could not persist status for group {group_id}: {e}")
+
                 self._start_training_watchdog(group_id)
                 self.log_event(
                     "training_started",
@@ -875,6 +889,13 @@ class GroupManager:
             group.status = "TRAINING"
             group.completed_rounds = 0
 
+            # Persist to DB
+            try:
+                db = get_db()
+                db.update_group_status(group_id, "TRAINING")
+            except Exception as e:
+                self.logger.warning(f"Could not persist status for group {group_id}: {e}")
+
             self._start_training_watchdog(group_id)
 
             self.log_event("training_started", f"Group {group_id} ready to accept deltas", group_id)
@@ -950,6 +971,14 @@ class GroupManager:
             group = self.groups[group_id]
             group.is_training = False
             group.status = "PAUSED"
+
+            # Persist to DB
+            try:
+                db = get_db()
+                db.update_group_status(group_id, "PAUSED")
+            except Exception as e:
+                self.logger.warning(f"Could not persist status for group {group_id}: {e}")
+
             self._stop_training_watchdog(group_id)
             return True
 
@@ -961,6 +990,14 @@ class GroupManager:
             group = self.groups[group_id]
             group.is_training = True
             group.status = "TRAINING"
+
+            # Persist to DB
+            try:
+                db = get_db()
+                db.update_group_status(group_id, "TRAINING")
+            except Exception as e:
+                self.logger.warning(f"Could not persist status for group {group_id}: {e}")
+
             self._start_training_watchdog(group_id)
             return True
 
@@ -972,6 +1009,14 @@ class GroupManager:
             group = self.groups[group_id]
             group.is_training = False
             group.status = "COMPLETED"
+
+            # Persist to DB
+            try:
+                db = get_db()
+                db.update_group_status(group_id, "COMPLETED")
+            except Exception as e:
+                self.logger.warning(f"Could not persist status for group {group_id}: {e}")
+
             self._stop_training_watchdog(group_id)
             return True
 
