@@ -14,8 +14,9 @@ import os
 import time
 from collections import OrderedDict
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 
+from astra.app.integration import get_platform_integration
 from astra.app.state import get_fl_server
 from astra.infra.models import ClientRegister, ClientUpdate
 
@@ -30,6 +31,18 @@ RATE_LIMITER_TTL = 300.0  # evict idle entries after 5 minutes
 
 # Bounded rate-limiter: OrderedDict so we can pop stale entries.
 _last_delta_at: OrderedDict[str, float] = OrderedDict()
+
+
+def _get_any_user(authorization: str = Header(None)):
+    """Require valid JWT token (any role)."""
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Authorization required")
+    token = authorization.replace("Bearer ", "")
+    platform = get_platform_integration()
+    payload = platform.verify_token(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    return payload
 
 
 def _check_rate_limit(client_id: str) -> None:
@@ -69,16 +82,16 @@ def _get_expected_param_count(fl_server, model_id: str) -> int | None:
 
 
 @router.get("/api/clients/connected")
-async def list_connected_clients():
-    """List currently connected client IDs."""
+async def list_connected_clients(current_user=Depends(_get_any_user)):
+    """List currently connected client IDs (authenticated users)."""
     fl_server = get_fl_server()
     clients = list(fl_server.connection_manager.client_sockets.keys())
     return {"clients": clients, "count": len(clients)}
 
 
 @router.post("/api/clients/register")
-async def register_client(client: ClientRegister):
-    """Register a client via REST."""
+async def register_client(client: ClientRegister, current_user=Depends(_get_any_user)):
+    """Register a client via REST (authenticated users)."""
     fl_server = get_fl_server()
     client_id = client.client_id
 
@@ -480,8 +493,8 @@ async def join_group_as_client(group_id: str, request: Request):
 
 
 @router.get("/api/clients")
-async def list_clients():
-    """List all known FL clients across groups."""
+async def list_clients(current_user=Depends(_get_any_user)):
+    """List all known FL clients across groups (authenticated users)."""
     fl_server = get_fl_server()
     clients = fl_server.group_manager.get_all_client_status()
     return {"clients": clients, "count": len(clients)}

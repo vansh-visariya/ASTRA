@@ -14,8 +14,8 @@ import type { Group } from '@/lib/api/types';
 
 export default function ClientGroupsPage() {
   const { isConnected } = useWS();
-  const { data: groupsData, loading, error, refetch } = useGroups(!isConnected);
-  const { requestJoin, activateJoin, getMyJoinStatus } = useJoinRequests(!isConnected);
+  const { data: groupsData, loading, error, refetch } = useGroups(isConnected);
+  const { requestJoin, activateJoin, getMyJoinStatus } = useJoinRequests(isConnected);
 
   const [joinStatuses, setJoinStatuses] = useState<Record<string, string>>({});
   const [joining, setJoining] = useState<string | null>(null);

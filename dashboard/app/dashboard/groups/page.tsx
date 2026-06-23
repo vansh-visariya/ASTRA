@@ -18,7 +18,7 @@ import type { Group } from '@/lib/api/types';
 export default function GroupsPage() {
   const { token, user } = useAuth();
   const { isConnected } = useWS();
-  const { data, loading, error, refetch } = useGroups(!isConnected);
+  const { data, loading, error, refetch } = useGroups(isConnected);
   const [showToken, setShowToken] = useState<Record<string, boolean>>({});
   const router = useRouter();
 

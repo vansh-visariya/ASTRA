@@ -8,14 +8,35 @@ import os
 from typing import Any
 
 import requests
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
 from astra.app.database import get_db
+from astra.app.integration import get_platform_integration
 from astra.app.state import get_fl_server
 
 router = APIRouter()
+
+
+def _get_any_user(authorization: str = Header(None)):
+    """Require valid JWT token (any role)."""
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Authorization required")
+    token = authorization.replace("Bearer ", "")
+    platform = get_platform_integration()
+    payload = platform.verify_token(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    return payload
+
+
+def _require_admin(authorization: str = Header(None)):
+    """Require valid JWT token with admin role."""
+    payload = _get_any_user(authorization)
+    if payload.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return payload
 
 
 class RegisterArchitectureBody(BaseModel):
@@ -32,8 +53,8 @@ class RegisterHfBody(BaseModel):
 
 
 @router.get("/api/models")
-async def list_models():
-    """List all available models."""
+async def list_models(current_user=Depends(_get_any_user)):
+    """List all available models (authenticated users)."""
     fl_server = get_fl_server()
     models = fl_server.model_registry.list_models()
     return {"models": models, "count": len(models)}
@@ -52,8 +73,8 @@ def _fetch_hf_model_metadata(model_name: str) -> dict[str, Any]:
 
 
 @router.post("/api/models/register/hf")
-async def register_hf_model(body: RegisterHfBody):
-    """Register a HuggingFace model."""
+async def register_hf_model(body: RegisterHfBody, current_user=Depends(_require_admin)):
+    """Register a HuggingFace model (admin only)."""
     fl_server = get_fl_server()
     try:
         peft_config = (
@@ -120,8 +141,8 @@ async def register_hf_model(body: RegisterHfBody):
 
 
 @router.post("/api/models/register/architecture")
-async def register_architecture(body: RegisterArchitectureBody):
-    """Register an arbitrary PyTorch model architecture by import path.
+async def register_architecture(body: RegisterArchitectureBody, current_user=Depends(_require_admin)):
+    """Register an arbitrary PyTorch model architecture by import path (admin only).
 
     Accepts a dotted Python path like ``torchvision.models.resnet18``
     and registers it as a callable factory in the model registry.
@@ -211,8 +232,8 @@ async def register_architecture(body: RegisterArchitectureBody):
     }
 
 @router.get("/api/models/{model_id}")
-async def get_model(model_id: str):
-    """Get model details."""
+async def get_model(model_id: str, current_user=Depends(_get_any_user)):
+    """Get model details (authenticated users)."""
     fl_server = get_fl_server()
     model_info = fl_server.model_registry.get_model_info(model_id)
     if not model_info:
@@ -221,8 +242,8 @@ async def get_model(model_id: str):
 
 
 @router.get("/api/models/validate/{model_id}")
-async def validate_model(model_id: str):
-    """Validate model compatibility."""
+async def validate_model(model_id: str, current_user=Depends(_get_any_user)):
+    """Validate model compatibility (authenticated users)."""
     fl_server = get_fl_server()
     is_valid, message = fl_server.model_registry.validate_model(model_id)
     return {"model_id": model_id, "is_valid": is_valid, "message": message}
@@ -233,6 +254,7 @@ async def download_model(
     group_id: str,
     version: int | None = None,
     format: str = "pt",
+    current_user=Depends(_get_any_user),
 ):
     """Download the global model weights for a group.
 
@@ -362,6 +384,7 @@ async def download_model(
 async def download_base_model(
     group_id: str,
     format: str = Query("pt", pattern="^(pt|safetensors)$"),
+    current_user=Depends(_get_any_user),
 ):
     """Download the frozen base model (non-LoRA backbone) for a group.
 
@@ -452,8 +475,8 @@ async def download_base_model(
 
 
 @router.get("/api/models/{group_id}/adapter")
-async def download_latest_adapter(group_id: str):
-    """Download the latest LoRA adapter weights for a group."""
+async def download_latest_adapter(group_id: str, current_user=Depends(_get_any_user)):
+    """Download the latest LoRA adapter weights for a group (authenticated users)."""
     fl_server = get_fl_server()
     if group_id not in fl_server.group_manager.groups:
         raise HTTPException(status_code=404, detail="Group not found")
@@ -475,8 +498,8 @@ async def download_latest_adapter(group_id: str):
 
 
 @router.get("/api/models/{group_id}/adapter/{version}")
-async def download_adapter_version(group_id: str, version: int):
-    """Download a specific version of LoRA adapter weights."""
+async def download_adapter_version(group_id: str, version: int, current_user=Depends(_get_any_user)):
+    """Download a specific version of LoRA adapter weights (authenticated users)."""
     fl_server = get_fl_server()
     if group_id not in fl_server.group_manager.groups:
         raise HTTPException(status_code=404, detail="Group not found")
@@ -498,8 +521,8 @@ async def download_adapter_version(group_id: str, version: int):
 
 
 @router.get("/api/models/{group_id}/history")
-async def get_model_history(group_id: str):
-    """Get the full training history for a group.
+async def get_model_history(group_id: str, current_user=Depends(_get_any_user)):
+    """Get the full training history for a group (authenticated users).
 
     Returns model versions with accuracy, loss, timestamp, and number of
     contributing clients per round. Also returns the in-memory metrics.
@@ -538,8 +561,8 @@ async def get_model_history(group_id: str):
 
 
 @router.get("/api/models/{group_id}/download-info")
-async def get_download_info(group_id: str):
-    """Get metadata about available model files for a group.
+async def get_download_info(group_id: str, current_user=Depends(_get_any_user)):
+    """Get metadata about available model files for a group (authenticated users).
 
     Returns info about base model, adapter, and available formats.
     Clients use this to decide what to download (base vs adapter, pt vs safetensors).

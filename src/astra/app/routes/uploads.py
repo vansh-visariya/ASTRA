@@ -33,6 +33,7 @@ Endpoints:
 """
 
 import logging
+import time
 from collections import deque
 
 import numpy as np
@@ -346,11 +347,16 @@ async def _dispatch_staged_delta(
         "local_updates": delta.tobytes(),
         "update_type": "delta",
         "local_dataset_size": local_dataset_size,
-        "timestamp": 0,
+        "timestamp": time.time(),
         "meta": meta or {},
     }
     # Step 1: AsyncServer applies DP + trust to the vector.
     processed = fl_server.server.handle_update(client_update)
+
+    # Sync trust score from TrustManager back to group.clients
+    trust_score = fl_server.server.trust_manager.get_trust(client_id)
+    if client_id in group.clients:
+        group.clients[client_id]["trust_score"] = trust_score
 
     # Step 2: GroupManager is the sole aggregator.
     result = fl_server.group_manager.process_client_update(client_id, processed)
@@ -359,6 +365,24 @@ async def _dispatch_staged_delta(
         new_version = agg_result["version"] if agg_result else 0
     else:
         new_version = fl_server.server.global_version
+
+    # Auto-mark server as running once it has accepted at least one update
+    if not fl_server.is_running:
+        fl_server.is_running = True
+
+    # Persist client metrics to DB
+    last_update_ts = time.time()
+    if client_id in group.clients:
+        group.clients[client_id]["last_update"] = last_update_ts
+    try:
+        fl_server.db.update_fl_client_metrics(
+            client_id=client_id,
+            updates_count=group.clients.get(client_id, {}).get("updates_count", 0),
+            trust_score=trust_score,
+            status="active",
+        )
+    except Exception as e:
+        logger.warning("Could not persist client metrics for %s: %s", client_id, e)
 
     # Best-effort: free disk once dispatched
     import contextlib as _cl

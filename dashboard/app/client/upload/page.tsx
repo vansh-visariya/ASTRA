@@ -79,7 +79,7 @@ function markBaseDownloaded(groupId: string): void {
 export default function ClientUploadPage() {
   const { user, token } = useAuth();
   const { isConnected, onMessage } = useWS();
-  const { data: groupsData, loading, error, refetch } = useGroups(!isConnected);
+  const { data: groupsData, loading, error, refetch } = useGroups(isConnected);
 
   const [joinStatuses, setJoinStatuses] = useState<Record<string, string>>({});
   const [statusLoading, setStatusLoading] = useState(true);
@@ -840,10 +840,10 @@ export default function ClientUploadPage() {
                         <span className="text-slate-300 font-mono">{manifest.target_modules.join(', ')}</span>
                       </div>
                     )}
-                    {manifest.epochs != null && (
+                    {manifest.local_epochs != null && (
                       <div>
-                        <span className="text-slate-500">Epochs:</span>{' '}
-                        <span className="text-slate-300 font-mono">{manifest.epochs}</span>
+                        <span className="text-slate-500">Local epochs:</span>{' '}
+                        <span className="text-slate-300 font-mono">{manifest.local_epochs}</span>
                       </div>
                     )}
                     {manifest.batch_size != null && (

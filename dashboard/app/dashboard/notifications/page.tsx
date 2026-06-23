@@ -32,7 +32,7 @@ export default function AdminNotificationsPage() {
     refetch,
     markRead,
     markAllRead,
-  } = useNotifications(!isConnected, { limit: 50, unread_only: filter === 'unread' });
+  } = useNotifications(isConnected, { limit: 50, unread_only: filter === 'unread' });
 
   const notifications: Notification[] = (data as any)?.notifications || [];
   const unreadCount = notifications.filter((n) => !n.read).length;

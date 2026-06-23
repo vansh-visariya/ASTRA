@@ -5,6 +5,7 @@ import { useWS } from '@/components/WebSocketProvider';
 import { useTrustScores } from '@/hooks';
 import { MetricBar } from '@/components/ui/MetricBar';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
+import { ErrorState } from '@/components/ui/ErrorState';
 import { useAuth } from '@/components/AuthContext';
 import type { TrustData } from '@/lib/api/types';
 
@@ -25,12 +26,13 @@ function getTrustBarColor(score: number): string {
 export default function ClientTrustPage() {
   const { user } = useAuth();
   const { isConnected } = useWS();
-  const { data: trustData, loading } = useTrustScores(!isConnected, user?.id);
+  const { data: trustData, loading, error } = useTrustScores(isConnected, user?.id);
 
   const score = (trustData as TrustData | null)?.score ?? 1.0;
   const quarantined = score < 0.35;
 
   if (loading) return <LoadingSpinner message="Loading trust score..." />;
+  if (error) return <ErrorState message={error} />;
 
   return (
     <div className="space-y-6">

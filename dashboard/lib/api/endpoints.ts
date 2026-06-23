@@ -19,7 +19,7 @@ export const getGroups = () => api.get<ApiListResponse<Group>>('/api/groups');
 export const getGroup = (id: string) => api.get<{ group: Group }>(`/api/groups/${id}`);
 
 export const createGroup = (body: Record<string, unknown>) =>
-  api.post<{ group_id: string }>('/api/groups', body);
+  api.post<{ status: string; group: { group_id: string } }>('/api/groups', body);
 
 export const controlGroup = (id: string, action: 'start' | 'pause' | 'resume' | 'stop') =>
   api.post<{ status: string }>(`/api/groups/${id}/${action}`);
@@ -30,7 +30,7 @@ export const deleteGroup = (id: string) =>
 export const getModels = () => api.get<ApiListResponse<Model>>('/api/models');
 
 export const registerHfModel = (body: Record<string, unknown>) =>
-  api.post<{ model_id: string }>('/api/models/register/hf', body);
+  api.post<{ status: string; model: { model_id: string } }>('/api/models/register/hf', body);
 
 export const registerArchitecture = (body: {
   model_id: string;
@@ -106,6 +106,6 @@ export const signup = (body: {
   username: string;
   password: string;
   role: string;
-  name: string;
+  full_name: string;
   email?: string;
 }) => api.post<AuthResponse>('/api/auth/signup', body);

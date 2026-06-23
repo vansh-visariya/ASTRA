@@ -17,9 +17,9 @@ import type { Notification, TrustData, ApiListResponse } from '@/lib/api/types';
 export default function ClientDashboard() {
   const { user } = useAuth();
   const { isConnected } = useWS();
-  const { data: groupsData, loading: groupsLoading, error: groupsError, refetch: refetchGroups } = useGroups(!isConnected);
-  const { data: trustData, loading: trustLoading } = useTrustScores(!isConnected, user?.id);
-  const { data: notifData } = useNotifications(!isConnected, { limit: 5 });
+  const { data: groupsData, loading: groupsLoading, error: groupsError, refetch: refetchGroups } = useGroups(isConnected);
+  const { data: trustData, loading: trustLoading } = useTrustScores(isConnected, user?.id);
+  const { data: notifData } = useNotifications(isConnected, { limit: 5 });
 
   const groups = (groupsData as any)?.groups || [];
   const trustScore = (trustData as TrustData | null)?.score ?? 1.0;
@@ -41,7 +41,7 @@ export default function ClientDashboard() {
   return (
     <div className="space-y-6">
       <div className="animate-fade-in">
-        <h1 className="text-2xl font-bold text-white">{getGreeting()}, {user?.name || 'Client'}</h1>
+        <h1 className="text-2xl font-bold text-white">{getGreeting()}, {user?.full_name || 'Client'}</h1>
         <p className="text-slate-400 text-sm mt-1">Here's your federated learning overview</p>
       </div>
 

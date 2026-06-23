@@ -28,7 +28,7 @@ const TYPE_LABEL_COLOR: Record<string, string> = {
 export default function LogsPage() {
   const [filter, setFilter] = useState<string | null>(null);
   const { isConnected } = useWS();
-  const { data, loading, error, refetch } = useLogs(!isConnected, undefined, filter || undefined);
+  const { data, loading, error, refetch } = useLogs(isConnected, undefined, filter || undefined);
 
   const logs: LogEntry[] = (data as any)?.logs || [];
 

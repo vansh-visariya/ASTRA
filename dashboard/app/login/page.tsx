@@ -36,7 +36,7 @@ function LoginForm() {
           password,
           role,
           email: email || undefined,
-          name: fullName || username,
+          full_name: fullName || username,
         });
 
         await login(username, password);

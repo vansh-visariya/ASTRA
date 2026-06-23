@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useAuth } from '@/components/AuthContext';
+import { API_URL } from '@/lib/config';
 import {
   Layers, ArrowLeft, Play, Pause, Square, Clock, Users,
   Shield, Activity, TrendingUp, ScrollText, RefreshCw,
@@ -27,27 +28,33 @@ export default function GroupDetailPage() {
   const [logFilter, setLogFilter] = useState<string | null>(null);
   const { isConnected } = useWS();
 
-  const { data: groupData, loading, error, refetch } = useGetGroup(id, !isConnected);
-  const { data: logsData } = useLogs(!isConnected, id, logFilter || undefined);
-  const { data: joinData, approveJoin: doApprove, rejectJoin: doReject } = useJoinRequests(!isConnected, id);
+  const { data: groupData, loading, error, refetch } = useGetGroup(id, isConnected);
+  const { data: logsData } = useLogs(isConnected, id, logFilter || undefined);
+  const { data: joinData, approveJoin: doApprove, rejectJoin: doReject } = useJoinRequests(isConnected, id);
 
   const group: Group | null = (groupData as any)?.group || null;
   const logs: LogEntry[] = (logsData as any)?.logs || [];
   const joinRequests: any[] = (joinData as any)?.requests || [];
 
   const handleApprove = async (requestId: number) => {
-    await doApprove({ request_id: requestId });
-    refetch();
+    try {
+      await doApprove({ request_id: requestId });
+      refetch();
+    } catch { /* error shown via refetch */ }
   };
 
   const handleReject = async (requestId: number) => {
-    await doReject({ request_id: requestId });
-    refetch();
+    try {
+      await doReject({ request_id: requestId });
+      refetch();
+    } catch { /* error shown via refetch */ }
   };
 
   const handleControl = async (action: 'start' | 'pause' | 'resume' | 'stop') => {
-    await controlGroup(id, action);
-    refetch();
+    try {
+      await controlGroup(id, action);
+      refetch();
+    } catch { /* error shown via refetch */ }
   };
 
   if (loading) return <LoadingSpinner message="Loading group..." />;
@@ -58,7 +65,7 @@ export default function GroupDetailPage() {
     group_id: group.group_id,
     status: info.status || 'unknown',
     last_update: (info.last_update as number) || 0,
-    update_count: info.update_count || 0,
+    updates_count: info.updates_count || 0,
     trust_score: info.trust_score || 0,
     joined_at: info.joined_at || '',
   }));
@@ -185,7 +192,7 @@ export default function GroupDetailPage() {
                 {group.training_manifest.expected_delta_bytes != null && (
                   <div>
                     <p className="text-slate-500">Expected delta</p>
-                    <p className="text-white font-mono mt-0.5">{group.training_manifest.expected_delta_bytes.toLocaleString()} bytes</p>
+                    <p className="text-white font-mono mt-0.5">{Number(group.training_manifest.expected_delta_bytes).toLocaleString()} bytes</p>
                   </div>
                 )}
                 {group.training_manifest.is_peft != null && (
@@ -199,37 +206,37 @@ export default function GroupDetailPage() {
                 {group.training_manifest.lr != null && (
                   <div>
                     <p className="text-slate-500">Learning rate</p>
-                    <p className="text-white font-mono mt-0.5">{group.training_manifest.lr}</p>
+                    <p className="text-white font-mono mt-0.5">{String(group.training_manifest.lr)}</p>
                   </div>
                 )}
-                {group.training_manifest.epochs != null && (
+                {group.training_manifest.local_epochs != null && (
                   <div>
-                    <p className="text-slate-500">Epochs</p>
-                    <p className="text-white font-mono mt-0.5">{group.training_manifest.epochs}</p>
+                    <p className="text-slate-500">Local epochs</p>
+                    <p className="text-white font-mono mt-0.5">{String(group.training_manifest.local_epochs)}</p>
                   </div>
                 )}
                 {group.training_manifest.batch_size != null && (
                   <div>
                     <p className="text-slate-500">Batch size</p>
-                    <p className="text-white font-mono mt-0.5">{group.training_manifest.batch_size}</p>
+                    <p className="text-white font-mono mt-0.5">{String(group.training_manifest.batch_size)}</p>
                   </div>
                 )}
                 {group.training_manifest.target_modules != null && (
                   <div className="col-span-2">
                     <p className="text-slate-500">Target modules</p>
-                    <p className="text-white font-mono mt-0.5">{group.training_manifest.target_modules.join(', ')}</p>
+                    <p className="text-white font-mono mt-0.5">{String(group.training_manifest.target_modules)}</p>
                   </div>
                 )}
                 {group.training_manifest.val_dataset != null && (
                   <div>
                     <p className="text-slate-500">Val dataset</p>
-                    <p className="text-white font-mono mt-0.5">{group.training_manifest.val_dataset}</p>
+                    <p className="text-white font-mono mt-0.5">{String(group.training_manifest.val_dataset)}</p>
                   </div>
                 )}
                 {group.training_manifest.lora_rank != null && (
                   <div>
                     <p className="text-slate-500">LoRA rank</p>
-                    <p className="text-white font-mono mt-0.5">{group.training_manifest.lora_rank}</p>
+                    <p className="text-white font-mono mt-0.5">{String(group.training_manifest.lora_rank)}</p>
                   </div>
                 )}
               </div>
@@ -278,7 +285,7 @@ export default function GroupDetailPage() {
                     <tr key={client.client_id} className="border-t hover:bg-white/[0.02] transition-colors" style={{ borderColor: 'rgba(51,65,85,0.3)' }}>
                       <td className="p-4 text-white font-mono text-sm">{client.client_id}</td>
                       <td className="p-4"><StatusBadge status={client.status} /></td>
-                      <td className="p-4 text-slate-300 text-sm">{client.update_count || 0}</td>
+                      <td className="p-4 text-slate-300 text-sm">{client.updates_count || 0}</td>
                       <td className="p-4"><MetricBar value={client.trust_score || 0} max={1} colorMode="trust" /></td>
                     </tr>
                   ))}
@@ -380,7 +387,7 @@ export default function GroupDetailPage() {
                 <h3 className="text-sm font-semibold text-white">Global Model</h3>
               </div>
               <button
-                onClick={() => window.open(`http://localhost:8000/api/models/${group.group_id}/download`, '_blank')}
+                onClick={() => window.open(`${API_URL}/api/models/${group.group_id}/download`, '_blank')}
                 className="btn-secondary inline-flex items-center gap-1.5 !px-3 !py-1.5 text-xs"
               >
                 <Download size={13} /> Download v{group.model_version || 0}

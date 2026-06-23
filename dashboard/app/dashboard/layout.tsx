@@ -46,7 +46,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   if (!token || !user) return null;
 
-  const initials = (user.name || user.username || 'U').slice(0, 2).toUpperCase();
+  const initials = (user.full_name || user.username || 'U').slice(0, 2).toUpperCase();
 
   return (
     <div className="min-h-screen flex" style={{ background: 'var(--bg-primary)' }}>
@@ -89,7 +89,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               {initials}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-white text-sm font-medium truncate">{user.name || user.username}</p>
+              <p className="text-white text-sm font-medium truncate">{user.full_name || user.username}</p>
               <p className="section-label mt-0.5 capitalize">{user.role}</p>
             </div>
             <button

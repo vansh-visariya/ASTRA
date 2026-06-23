@@ -23,6 +23,14 @@ def _get_any_user(authorization: str = Header(None)):
     return payload
 
 
+def _require_admin(authorization: str = Header(None)):
+    """Require valid JWT token with admin role."""
+    payload = _get_any_user(authorization)
+    if payload.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return payload
+
+
 @router.get("/api/groups")
 async def list_groups(current_user=Depends(_get_any_user)):
     """List all training groups with their async window status (authenticated users only)."""
@@ -101,13 +109,14 @@ async def create_group(group_data: dict, current_user=Depends(_get_any_user)):
 
 
 @router.get("/api/groups/{group_id}")
-async def get_group(group_id: str):
-    """Get specific group details (admin view with token)."""
+async def get_group(group_id: str, current_user=Depends(_get_any_user)):
+    """Get specific group details. Join token only visible to admins."""
     fl_server = get_fl_server()
     group = fl_server.group_manager.groups.get(group_id)
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
-    return {"group": group.to_dict(include_secret=True)}
+    is_admin = current_user.get("role") == "admin"
+    return {"group": group.to_dict(include_secret=is_admin)}
 
 
 @router.get("/api/groups/{group_id}/manifest")
@@ -137,8 +146,8 @@ async def get_group_manifest(group_id: str):
 
 
 @router.post("/api/groups/{group_id}/start")
-async def start_group_training(group_id: str):
-    """Start accepting deltas for a group."""
+async def start_group_training(group_id: str, current_user=Depends(_require_admin)):
+    """Start accepting deltas for a group (admin only)."""
     fl_server = get_fl_server()
     success = fl_server.group_manager.start_group_training(group_id)
     if not success:
@@ -150,8 +159,8 @@ async def start_group_training(group_id: str):
 
 
 @router.post("/api/groups/{group_id}/pause")
-async def pause_group_training(group_id: str):
-    """Pause accepting deltas for a group."""
+async def pause_group_training(group_id: str, current_user=Depends(_require_admin)):
+    """Pause accepting deltas for a group (admin only)."""
     fl_server = get_fl_server()
     success = fl_server.group_manager.pause_group_training(group_id)
     if not success:
@@ -160,8 +169,8 @@ async def pause_group_training(group_id: str):
 
 
 @router.post("/api/groups/{group_id}/resume")
-async def resume_group_training(group_id: str):
-    """Resume accepting deltas for a group."""
+async def resume_group_training(group_id: str, current_user=Depends(_require_admin)):
+    """Resume accepting deltas for a group (admin only)."""
     fl_server = get_fl_server()
     success = fl_server.group_manager.resume_group_training(group_id)
     if not success:
@@ -171,8 +180,8 @@ async def resume_group_training(group_id: str):
 
 
 @router.post("/api/groups/{group_id}/stop")
-async def stop_group_training(group_id: str):
-    """Stop accepting deltas for a group."""
+async def stop_group_training(group_id: str, current_user=Depends(_require_admin)):
+    """Stop accepting deltas for a group (admin only)."""
     fl_server = get_fl_server()
     success = fl_server.group_manager.stop_group_training(group_id)
     if not success:
@@ -181,8 +190,8 @@ async def stop_group_training(group_id: str):
 
 
 @router.delete("/api/groups/{group_id}")
-async def delete_group(group_id: str):
-    """Delete a training group and all associated data."""
+async def delete_group(group_id: str, current_user=Depends(_require_admin)):
+    """Delete a training group and all associated data (admin only)."""
     fl_server = get_fl_server()
     success = fl_server.group_manager.delete_group(group_id)
     if not success:

@@ -152,8 +152,11 @@ class AsyncServer:
                 )
 
         # Write the DP'd vector back so the caller (route) can pass it
-        # to GroupManager for aggregation.
+        # to GroupManager for aggregation. Also propagate staleness and trust
+        # so the aggregators can weight updates properly.
         client_update["local_updates"] = update_vector.tobytes()
+        client_update["staleness_weight"] = float(staleness_weight)
+        client_update["trust"] = float(trust_score)
         return client_update
 
     def _decode_update(self, encoded_update: Any) -> np.ndarray:

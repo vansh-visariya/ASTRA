@@ -2,11 +2,32 @@
 System-level REST endpoints: root, health, metrics, status, logs.
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, Header, HTTPException
 
+from astra.app.integration import get_platform_integration
 from astra.app.state import get_fl_server
 
 router = APIRouter()
+
+
+def _get_any_user(authorization: str = Header(None)):
+    """Require valid JWT token (any role)."""
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Authorization required")
+    token = authorization.replace("Bearer ", "")
+    platform = get_platform_integration()
+    payload = platform.verify_token(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    return payload
+
+
+def _require_admin(authorization: str = Header(None)):
+    """Require valid JWT token with admin role."""
+    payload = _get_any_user(authorization)
+    if payload.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return payload
 
 
 @router.get("/")
@@ -25,8 +46,8 @@ async def health():
 
 
 @router.get("/api/system/metrics")
-async def get_system_metrics():
-    """Get system-wide metrics for dashboard."""
+async def get_system_metrics(current_user=Depends(_get_any_user)):
+    """Get system-wide metrics for dashboard (authenticated users)."""
     fl_server = get_fl_server()
     groups = fl_server.group_manager.get_all_groups()
     clients = fl_server.group_manager.get_all_client_status()
@@ -61,8 +82,8 @@ async def get_system_metrics():
 
 
 @router.get("/api/server/status")
-async def get_server_status():
-    """Get server status."""
+async def get_server_status(current_user=Depends(_get_any_user)):
+    """Get server status (authenticated users)."""
     fl_server = get_fl_server()
     return {
         "running": fl_server.is_running,
@@ -74,8 +95,8 @@ async def get_server_status():
 
 
 @router.get("/api/logs")
-async def get_logs(limit: int = 100, event_type: str | None = None, group_id: str | None = None):
-    """Get server event logs."""
+async def get_logs(limit: int = 100, event_type: str | None = None, group_id: str | None = None, current_user=Depends(_require_admin)):
+    """Get server event logs (admin only)."""
     fl_server = get_fl_server()
     logs = fl_server.group_manager.get_logs(limit, event_type or "", group_id or "")  # type: ignore[arg-type]
     return {"logs": logs, "count": len(logs)}

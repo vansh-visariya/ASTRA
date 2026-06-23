@@ -18,7 +18,7 @@ export default function CreateGroupPage() {
   const { token, user } = useAuth();
   const router = useRouter();
   const { isConnected } = useWS();
-  const { data: modelsData, refetch: refetchModels } = useModels(!isConnected);
+  const { data: modelsData, refetch: refetchModels } = useModels(isConnected);
 
   const models: Model[] = (modelsData as any)?.models || [];
 
@@ -34,7 +34,7 @@ export default function CreateGroupPage() {
 
   const handleRegisterHf = async (modelName: string, peftRank?: number) => {
     const result = await registerHfModel({ model_name: modelName, use_peft: !!peftRank });
-    setSelectedModelId(result.model_id);
+    setSelectedModelId(result.model?.model_id);
     setModelChoice('registry');
     refetchModels();
   };

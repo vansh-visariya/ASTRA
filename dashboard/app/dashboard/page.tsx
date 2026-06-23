@@ -13,7 +13,7 @@ import { useAuth } from '@/components/AuthContext';
 export default function DashboardPage() {
   const { user } = useAuth();
   const { isConnected } = useWS();
-  const { data: metrics, loading, error, refetch } = useMetrics(!isConnected);
+  const { data: metrics, loading, error, refetch } = useMetrics(isConnected);
 
   const getGreeting = () => {
     const hour = new Date().getHours();
@@ -40,7 +40,7 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6">
       <div className="animate-fade-in">
-        <h1 className="text-2xl font-bold text-white">{getGreeting()}, {user?.name || 'Admin'}</h1>
+        <h1 className="text-2xl font-bold text-white">{getGreeting()}, {user?.full_name || 'Admin'}</h1>
         <p className="text-slate-400 text-sm mt-1">Here's your federated learning overview</p>
       </div>
 

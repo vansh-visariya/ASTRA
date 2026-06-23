@@ -269,6 +269,13 @@ class AstraDB:
             """)
 
             conn.commit()
+
+            # Performance indexes for frequent queries
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_fl_clients_group_id ON fl_clients(group_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_metrics_group_id ON metrics(group_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_join_requests_group_id ON join_requests(group_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_event_logs_group_id ON event_logs(group_id)")
+
             logger.info("[DB] Schema initialized in %s", self.db_path)
 
         # Forward-compat migrations: extend CHECK constraints that newer
@@ -276,6 +283,7 @@ class AstraDB:
         # CREATE TABLE IF NOT EXISTS only runs on first init, so existing
         # databases need explicit ALTER TABLE.
         self._migrate_join_requests_status()
+        self._migrate_metrics_drop_fk()
 
     def _migrate_join_requests_status(self):
         """Allow 'activated' as a join_requests.status value.
@@ -338,6 +346,50 @@ class AstraDB:
                 logger.info("[DB] Migrated join_requests.status to allow 'activated'")
             except sqlite3.OperationalError as e:
                 logger.warning("[DB] join_requests migration skipped: %s", e)
+
+    def _migrate_metrics_drop_fk(self):
+        """Remove FK constraint from metrics table.
+
+        The original schema has FOREIGN KEY (experiment_id) REFERENCES experiments(experiment_id),
+        but metrics are logged with group_id as experiment_id, which doesn't exist in the
+        experiments table. This causes silent FK violations.
+        """
+        import sqlite3
+
+        with self.connection() as conn:
+            row = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='metrics'"
+            ).fetchone()
+            if not row:
+                return
+            create_sql = row[0] or ""
+            if "FOREIGN KEY" not in create_sql:
+                return  # already migrated or never had FK
+
+            try:
+                conn.execute("PRAGMA foreign_keys=OFF")
+                conn.execute("ALTER TABLE metrics RENAME TO _metrics__old")
+                conn.execute("""
+                    CREATE TABLE metrics (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        experiment_id TEXT,
+                        group_id TEXT,
+                        step INTEGER,
+                        timestamp TEXT,
+                        metrics_json TEXT
+                    )
+                """)
+                # Copy existing data
+                conn.execute(
+                    "INSERT INTO metrics (id, experiment_id, group_id, step, timestamp, metrics_json) "
+                    "SELECT id, experiment_id, group_id, step, timestamp, metrics_json FROM _metrics__old"
+                )
+                conn.execute("DROP TABLE _metrics__old")
+                conn.execute("PRAGMA foreign_keys=ON")
+                conn.commit()
+                logger.info("[DB] Removed FK constraint from metrics table")
+            except sqlite3.OperationalError as e:
+                logger.warning("[DB] metrics FK migration skipped: %s", e)
 
     # ========================================================================
     # Migration from legacy databases
@@ -584,9 +636,15 @@ class AstraDB:
     ) -> None:
         with self.connection() as conn:
             conn.execute(
-                """INSERT OR REPLACE INTO fl_clients
+                """INSERT INTO fl_clients
                    (client_id, user_id, group_id, experiment_id, status, trust_score, last_seen)
-                   VALUES (?, ?, ?, ?, 'active', 1.0, ?)""",
+                   VALUES (?, ?, ?, ?, 'active', 1.0, ?)
+                   ON CONFLICT(client_id) DO UPDATE SET
+                     user_id = excluded.user_id,
+                     group_id = excluded.group_id,
+                     experiment_id = excluded.experiment_id,
+                     status = 'active',
+                     last_seen = excluded.last_seen""",
                 (client_id, user_id, group_id, experiment_id, datetime.now().isoformat()),
             )
             conn.commit()
@@ -749,6 +807,9 @@ class AstraDB:
         with self.connection() as conn:
             conn.execute("DELETE FROM join_requests WHERE group_id = ?", (group_id,))
             conn.execute("DELETE FROM fl_clients WHERE group_id = ?", (group_id,))
+            conn.execute("DELETE FROM metrics WHERE group_id = ?", (group_id,))
+            conn.execute("DELETE FROM trained_models WHERE group_id = ?", (group_id,))
+            conn.execute("DELETE FROM event_logs WHERE group_id = ?", (group_id,))
             cursor = conn.execute("DELETE FROM groups WHERE group_id = ?", (group_id,))
             conn.commit()
             return cursor.rowcount > 0

@@ -54,19 +54,12 @@ def test_health(client):
 
 def test_server_status(client):
     resp = client.get("/api/server/status")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert "running" in data
-    assert "connected_clients" in data
+    assert resp.status_code == 401  # requires auth now
 
 
 def test_system_metrics(client):
     resp = client.get("/api/system/metrics")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert "total_groups" in data
-    assert "active_groups" in data
-    assert "total_participants" in data
+    assert resp.status_code == 401  # requires auth now
 
 
 def test_groups_list(client):
@@ -76,15 +69,9 @@ def test_groups_list(client):
 
 def test_models_list(client):
     resp = client.get("/api/models")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert "models" in data
-    assert "count" in data
+    assert resp.status_code == 401  # requires auth now
 
 
 def test_clients_list(client):
     resp = client.get("/api/clients")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert "clients" in data
-    assert "count" in data
+    assert resp.status_code == 401  # requires auth now

@@ -354,8 +354,8 @@ def create_trust_router(platform: FLPlatformIntegration) -> APIRouter:
         return {"scores": scores}
 
     @router.get("/scores/{user_id}")
-    async def get_user_trust(user_id: int, group_id: str = "default"):
-        """Get trust score for a user."""
+    async def get_user_trust(user_id: int, group_id: str = "default", admin: dict = Depends(require_admin)):
+        """Get trust score for a user (admin only)."""
         score = platform.get_trust_score(user_id, group_id)
         return {"user_id": user_id, "group_id": group_id, "score": score}
 

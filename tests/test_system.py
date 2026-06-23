@@ -175,8 +175,8 @@ class TestGroupEndpoints:
         resp2 = fresh_client.get(f"/api/groups/{gid}", headers=auth_headers)
         assert resp2.status_code == 404
 
-    def test_get_nonexistent_group(self, fresh_client):
-        resp = fresh_client.get("/api/groups/does_not_exist_xyz")
+    def test_get_nonexistent_group(self, fresh_client, auth_headers):
+        resp = fresh_client.get("/api/groups/does_not_exist_xyz", headers=auth_headers)
         assert resp.status_code == 404
 
 
@@ -298,12 +298,12 @@ class TestSystemEndpoints:
         assert resp.status_code == 200
         assert resp.json()["status"] == "healthy"
 
-    def test_server_status(self, fresh_client):
-        resp = fresh_client.get("/api/server/status")
+    def test_server_status(self, fresh_client, auth_headers):
+        resp = fresh_client.get("/api/server/status", headers=auth_headers)
         assert resp.status_code == 200
 
-    def test_system_metrics(self, fresh_client):
-        resp = fresh_client.get("/api/system/metrics")
+    def test_system_metrics(self, fresh_client, auth_headers):
+        resp = fresh_client.get("/api/system/metrics", headers=auth_headers)
         assert resp.status_code == 200
 
 

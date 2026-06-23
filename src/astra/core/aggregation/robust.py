@@ -39,7 +39,7 @@ def coordinate_median(updates: list[np.ndarray]) -> np.ndarray:
         return np.array([])
     if len(updates) == 1:
         return updates[0].copy()
-    return np.median(np.array(updates), axis=0)
+    return np.nanmedian(np.array(updates), axis=0)
 
 
 def _clip_norms(updates: list[np.ndarray], norm_clip: float) -> list[np.ndarray]:

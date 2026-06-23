@@ -36,7 +36,7 @@ export interface Group {
     window_size: number;
     time_elapsed: number;
     time_remaining: number;
-    waiting: boolean;
+    trigger_reason: string;
   };
   created_at?: string;
 }
@@ -55,7 +55,7 @@ export interface Client {
   group_id: string;
   status: string;
   last_update: number;
-  update_count: number;
+  updates_count: number;
   trust_score: number;
   joined_at: string;
 }
@@ -121,7 +121,8 @@ export interface AuthResponse {
     id?: number;
     username: string;
     role: 'admin' | 'client' | 'observer';
-    name: string;
+    full_name?: string;
+    email?: string;
   };
 }
 

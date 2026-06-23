@@ -319,6 +319,13 @@ class GroupManager:
         update.setdefault("dataset_size", update.get("local_dataset_size", 1))
         update.setdefault("staleness_weight", 1.0)
         update.setdefault("trust", 1.0)
+
+        # Skip quarantined clients (trust < 0.35)
+        if update.get("trust", 1.0) < 0.35:
+            client_id = update.get("client_id", "unknown")
+            self.logger.warning("Client %s: quarantined (trust=%.3f), skipping", client_id, update["trust"])
+            update["delta"] = np.array([], dtype=np.float32)
+
         return update
 
     # ------------------------------------------------------------------
@@ -384,6 +391,8 @@ class GroupManager:
                     )
         except asyncio.CancelledError:
             return
+        except Exception as e:
+            self.logger.error("Watchdog for group %s crashed: %s", group_id, e)
 
     # ------------------------------------------------------------------
     # Group CRUD
@@ -682,6 +691,15 @@ class GroupManager:
             group.model_version += 1
             group.completed_rounds += 1
 
+            # Sync global_version on the AsyncServer so staleness computation works
+            try:
+                from astra.app.state import get_fl_server
+                fl = get_fl_server()
+                if fl.server is not None:
+                    fl.server.global_version = group.model_version
+            except Exception:
+                pass
+
             # Store metrics
             has_val = bool(group.config.get("training_manifest", {}).get("val_dataset"))
             group.metrics_history.append(
@@ -694,24 +712,6 @@ class GroupManager:
                     "metrics_source": "server" if has_val else "unverified",
                 }
             )
-
-            # Persist metrics to database (placeholder — updated after eval below)
-            try:
-                db = get_db()
-                db.log_metrics(
-                    experiment_id=group_id,
-                    step=group.model_version,
-                    metrics={
-                        "version": group.model_version,
-                        "timestamp": time.time(),
-                        "accuracy": global_accuracy,
-                        "loss": global_loss,
-                        "clients": len(updates),
-                    },
-                    group_id=group_id,
-                )
-            except Exception as e:
-                self.logger.warning(f"Could not persist metrics for group {group_id}: {e}")
 
             group.clear_updates()
 
