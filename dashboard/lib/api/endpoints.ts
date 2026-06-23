@@ -21,6 +21,9 @@ export const getGroup = (id: string) => api.get<{ group: Group }>(`/api/groups/$
 export const createGroup = (body: Record<string, unknown>) =>
   api.post<{ status: string; group: { group_id: string } }>('/api/groups', body);
 
+export const updateGroupManifest = (groupId: string, manifest: Record<string, unknown>) =>
+  api.put<{ status: string }>(`/api/groups/${groupId}/manifest`, manifest);
+
 export const controlGroup = (id: string, action: 'start' | 'pause' | 'resume' | 'stop') =>
   api.post<{ status: string }>(`/api/groups/${id}/${action}`);
 
@@ -109,3 +112,18 @@ export const signup = (body: {
   full_name: string;
   email?: string;
 }) => api.post<AuthResponse>('/api/auth/signup', body);
+
+export const getAnnouncements = (groupId: string) =>
+  api.get<{ announcements: import('./types').Announcement[] }>(`/api/groups/${groupId}/announcements`);
+
+export const sendAnnouncement = (groupId: string, body: { message: string; priority?: string }) =>
+  api.post<{ status: string; announcement_id: number }>(`/api/groups/${groupId}/announcements`, body);
+
+export const getMessages = (groupId: string, limit = 50, before?: number) => {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (before) params.set('before', String(before));
+  return api.get<{ messages: import('./types').Message[] }>(`/api/groups/${groupId}/messages?${params}`);
+};
+
+export const sendMessage = (groupId: string, content: string) =>
+  api.post<{ status: string; message_id: number }>(`/api/groups/${groupId}/messages`, { content });

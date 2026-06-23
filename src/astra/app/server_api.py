@@ -126,6 +126,8 @@ app.add_middleware(
 # Include route modules
 from astra.app.routes import uploads as uploads_routes
 from astra.app.routes import downloads as downloads_routes
+from astra.app.routes import announcements as announcements_routes
+from astra.app.routes import messages as messages_routes
 
 app.include_router(system.router)
 app.include_router(groups.router)
@@ -134,6 +136,8 @@ app.include_router(models.router)
 app.include_router(experiments.router)
 app.include_router(uploads_routes.router)
 app.include_router(downloads_routes.router)
+app.include_router(announcements_routes.router)
+app.include_router(messages_routes.router)
 
 # WebSocket endpoint
 app.websocket("/ws")(websocket_endpoint)

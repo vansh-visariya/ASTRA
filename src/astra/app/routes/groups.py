@@ -2,13 +2,18 @@
 Group management REST endpoints.
 """
 
+import json
+import logging
+
 from fastapi import APIRouter, Depends, Header, HTTPException
 
+from astra.app.database import get_db
 from astra.app.integration import get_platform_integration
 from astra.app.state import get_fl_server
 from astra.infra.models import TrainingManifest
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _get_any_user(authorization: str = Header(None)):
@@ -143,6 +148,32 @@ async def get_group_manifest(group_id: str):
         "model_id": group.model_id,
         "manifest": manifest,
     }
+
+
+@router.put("/api/groups/{group_id}/manifest")
+async def update_group_manifest(
+    group_id: str,
+    manifest: dict,
+    current_user=Depends(_require_admin),
+):
+    """Update the training manifest for a group (admin only)."""
+    fl_server = get_fl_server()
+    group = fl_server.group_manager.groups.get(group_id)
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+
+    group.config["training_manifest"] = manifest
+
+    try:
+        db = get_db()
+        db._execute(
+            "UPDATE experiments SET config_json = ? WHERE experiment_id = ?",
+            (json.dumps(group.config), group_id),
+        )
+    except Exception as e:
+        logger.warning("Could not persist manifest update: %s", e)
+
+    return {"status": "updated", "group_id": group_id, "manifest": manifest}
 
 
 @router.post("/api/groups/{group_id}/start")

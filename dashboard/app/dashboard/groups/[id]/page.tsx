@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useAuth } from '@/components/AuthContext';
 import { API_URL } from '@/lib/config';
@@ -17,8 +17,8 @@ import { MetricBar } from '@/components/ui/MetricBar';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { EmptyState } from '@/components/ui/EmptyState';
-import { controlGroup, approveJoin, rejectJoin } from '@/lib/api/endpoints';
-import type { Group, Client, LogEntry } from '@/lib/api/types';
+import { controlGroup, approveJoin, rejectJoin, getAnnouncements, sendAnnouncement, getMessages, sendMessage } from '@/lib/api/endpoints';
+import type { Group, Client, LogEntry, Announcement, Message } from '@/lib/api/types';
 
 export default function GroupDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -26,11 +26,28 @@ export default function GroupDetailPage() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState('overview');
   const [logFilter, setLogFilter] = useState<string | null>(null);
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [announcementText, setAnnouncementText] = useState('');
+  const [announcementPriority, setAnnouncementPriority] = useState('info');
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [messageText, setMessageText] = useState('');
   const { isConnected } = useWS();
 
   const { data: groupData, loading, error, refetch } = useGetGroup(id, isConnected);
   const { data: logsData } = useLogs(isConnected, id, logFilter || undefined);
   const { data: joinData, approveJoin: doApprove, rejectJoin: doReject } = useJoinRequests(isConnected, id);
+
+  useEffect(() => {
+    if (activeTab === 'announcements' && id) {
+      getAnnouncements(id).then((res: any) => setAnnouncements(res?.announcements || [])).catch(() => {});
+    }
+  }, [activeTab, id]);
+
+  useEffect(() => {
+    if (activeTab === 'chat' && id) {
+      getMessages(id).then((res: any) => setMessages(res?.messages || [])).catch(() => {});
+    }
+  }, [activeTab, id]);
 
   const group: Group | null = (groupData as any)?.group || null;
   const logs: LogEntry[] = (logsData as any)?.logs || [];
@@ -109,7 +126,7 @@ export default function GroupDetailPage() {
       </div>
 
       <div className="flex gap-2 border-b" style={{ borderColor: 'rgba(100,100,100,0.2)' }}>
-        {['overview', 'participants', 'models', 'logs', 'privacy'].map((tab) => (
+        {['overview', 'participants', 'models', 'logs', 'announcements', 'chat', 'privacy'].map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -171,6 +188,33 @@ export default function GroupDetailPage() {
               <p className="text-2xl font-bold text-white">v{group.model_version || 0}</p>
             </div>
           </div>
+
+          {group.metrics_history && group.metrics_history.length > 1 && (
+            <div className="glass-card p-5">
+              <h3 className="text-sm font-semibold text-white mb-4">Training Progress</h3>
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={group.metrics_history.map((m, i) => ({
+                    name: `v${m.version || i}`,
+                    accuracy: m.accuracy,
+                    loss: m.loss,
+                  }))}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(100,100,100,0.2)" />
+                    <XAxis dataKey="name" stroke="#64748b" fontSize={11} />
+                    <YAxis yAxisId="acc" stroke="#22c55e" fontSize={11} domain={[0, 1]} tickFormatter={(v) => `${(v * 100).toFixed(0)}%`} />
+                    <YAxis yAxisId="loss" orientation="right" stroke="#f59e0b" fontSize={11} />
+                    <Tooltip
+                      contentStyle={{ background: '#1e293b', border: '1px solid rgba(100,100,100,0.3)', borderRadius: 8, fontSize: 12 }}
+                      labelStyle={{ color: '#94a3b8' }}
+                      formatter={(value: number, name: string) => name === 'accuracy' ? [`${(value * 100).toFixed(1)}%`, 'Accuracy'] : [value.toFixed(4), 'Loss']}
+                    />
+                    <Area yAxisId="acc" type="monotone" dataKey="accuracy" stroke="#22c55e" fill="rgba(34,197,94,0.1)" strokeWidth={2} />
+                    <Area yAxisId="loss" type="monotone" dataKey="loss" stroke="#f59e0b" fill="rgba(245,158,11,0.1)" strokeWidth={2} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
 
           <div className="glass-card p-5">
             <h3 className="text-sm font-semibold text-white mb-4">Async Window</h3>
@@ -348,6 +392,165 @@ export default function GroupDetailPage() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {activeTab === 'announcements' && (
+        <div className="space-y-6">
+          {user?.role === 'admin' && (
+            <div className="glass-card p-5">
+              <h3 className="text-sm font-semibold text-white mb-4">Send Announcement</h3>
+              <div className="space-y-3">
+                <textarea
+                  value={announcementText}
+                  onChange={(e) => setAnnouncementText(e.target.value)}
+                  className="input-field w-full h-24 resize-none"
+                  placeholder="Announce training instructions, schedule changes, or important updates..."
+                />
+                <div className="flex items-center gap-3">
+                  <select
+                    value={announcementPriority}
+                    onChange={(e) => setAnnouncementPriority(e.target.value)}
+                    className="input-field w-40"
+                  >
+                    <option value="info">Info</option>
+                    <option value="warning">Warning</option>
+                    <option value="error">Urgent</option>
+                  </select>
+                  <button
+                    onClick={async () => {
+                      if (!announcementText.trim()) return;
+                      try {
+                        await sendAnnouncement(id, { message: announcementText, priority: announcementPriority });
+                        setAnnouncementText('');
+                        const res: any = await getAnnouncements(id);
+                        setAnnouncements(res?.announcements || []);
+                      } catch {}
+                    }}
+                    disabled={!announcementText.trim()}
+                    className="btn-primary !px-4 !py-2 text-sm disabled:opacity-50"
+                  >
+                    Send
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {announcements.length === 0 ? (
+            <EmptyState icon={ScrollText} title="No announcements yet" />
+          ) : (
+            <div className="space-y-3">
+              {announcements.map((a) => (
+                <div
+                  key={a.id}
+                  className="glass-card p-4"
+                  style={{
+                    borderColor: a.priority === 'error' ? 'var(--color-error-border)' :
+                      a.priority === 'warning' ? 'var(--color-warning-border)' : undefined,
+                  }}
+                >
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <p className="text-white text-sm font-medium">{a.message}</p>
+                      <p className="text-slate-500 text-xs mt-1">
+                        {a.author_name} · {new Date(a.created_at).toLocaleString()}
+                      </p>
+                    </div>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+                      a.priority === 'error' ? 'bg-red-500/20 text-red-400' :
+                      a.priority === 'warning' ? 'bg-amber-500/20 text-amber-400' :
+                      'bg-blue-500/20 text-blue-400'
+                    }`}>
+                      {a.priority}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {activeTab === 'chat' && (
+        <div className="space-y-4">
+          <div className="glass-card p-5">
+            <h3 className="text-sm font-semibold text-white mb-4">Group Chat</h3>
+            <div className="space-y-3 max-h-96 overflow-y-auto mb-4" id="chat-messages">
+              {messages.length === 0 ? (
+                <p className="text-slate-500 text-sm text-center py-4">No messages yet. Start the conversation.</p>
+              ) : (
+                messages.map((m) => (
+                  <div
+                    key={m.id}
+                    className={`flex gap-3 ${m.sender_id === (user as any)?.id ? 'flex-row-reverse' : ''}`}
+                  >
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
+                      m.sender_role === 'admin' ? 'bg-purple-500/20 text-purple-400' : 'bg-blue-500/20 text-blue-400'
+                    }`}>
+                      {(m.sender_name || '?')[0].toUpperCase()}
+                    </div>
+                    <div className={`max-w-[70%] ${m.sender_id === (user as any)?.id ? 'text-right' : ''}`}>
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <span className="text-slate-400 text-xs">{m.sender_name}</span>
+                        {m.sender_role === 'admin' && (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-400 font-medium">Admin</span>
+                        )}
+                      </div>
+                      <div className={`inline-block px-3 py-2 rounded-xl text-sm ${
+                        m.sender_id === (user as any)?.id
+                          ? 'bg-blue-600/30 text-white'
+                          : 'text-white'
+                      }`} style={m.sender_id !== (user as any)?.id ? { background: 'rgba(30,41,59,0.6)' } : {}}>
+                        {m.content}
+                      </div>
+                      <p className="text-slate-600 text-[10px] mt-0.5">
+                        {new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </p>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={messageText}
+                onChange={(e) => setMessageText(e.target.value)}
+                onKeyDown={async (e) => {
+                  if (e.key === 'Enter' && messageText.trim()) {
+                    try {
+                      await sendMessage(id, messageText);
+                      setMessageText('');
+                      const res: any = await getMessages(id);
+                      setMessages(res?.messages || []);
+                      const el = document.getElementById('chat-messages');
+                      if (el) el.scrollTop = el.scrollHeight;
+                    } catch {}
+                  }
+                }}
+                className="input-field flex-1"
+                placeholder="Type a message..."
+              />
+              <button
+                onClick={async () => {
+                  if (!messageText.trim()) return;
+                  try {
+                    await sendMessage(id, messageText);
+                    setMessageText('');
+                    const res: any = await getMessages(id);
+                    setMessages(res?.messages || []);
+                    const el = document.getElementById('chat-messages');
+                    if (el) el.scrollTop = el.scrollHeight;
+                  } catch {}
+                }}
+                disabled={!messageText.trim()}
+                className="btn-primary !px-4 text-sm disabled:opacity-50"
+              >
+                Send
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

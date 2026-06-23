@@ -1,5 +1,6 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import {
   Users, Shield, Activity,
@@ -12,7 +13,8 @@ import { StatCard } from '@/components/ui/StatCard';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { useAuth } from '@/components/AuthContext';
-import type { Notification, TrustData, ApiListResponse } from '@/lib/api/types';
+import { getAnnouncements } from '@/lib/api/endpoints';
+import type { Notification, TrustData, Announcement, ApiListResponse } from '@/lib/api/types';
 
 export default function ClientDashboard() {
   const { user } = useAuth();
@@ -25,8 +27,37 @@ export default function ClientDashboard() {
   const trustScore = (trustData as TrustData | null)?.score ?? 1.0;
   const recentNotifications: Notification[] = (notifData as any)?.notifications || [];
 
+  const groupsJoined = groups.filter((g: any) => {
+    const clientInfo = g.clients?.[user?.id || ''];
+    return clientInfo && (clientInfo.status === 'active' || clientInfo.status === 'joined');
+  }).length;
+
+  const roundsDone = groups.reduce((sum: number, g: any) => {
+    const clientInfo = g.clients?.[user?.id || ''];
+    return sum + (clientInfo?.updates_count || 0);
+  }, 0);
+
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+
   const loading = groupsLoading || trustLoading;
   const error = groupsError;
+
+  useEffect(() => {
+    if (groups.length > 0) {
+      const fetchAnnouncements = async () => {
+        const all: Announcement[] = [];
+        for (const g of groups.slice(0, 5)) {
+          try {
+            const res: any = await getAnnouncements(g.group_id);
+            all.push(...(res?.announcements || []).slice(0, 3));
+          } catch {}
+        }
+        all.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        setAnnouncements(all.slice(0, 5));
+      };
+      fetchAnnouncements();
+    }
+  }, [groups]);
 
   const getGreeting = () => {
     const hour = new Date().getHours();
@@ -47,9 +78,9 @@ export default function ClientDashboard() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard label="Available Groups" value={groups.length} icon={Users} accent="info" delay={0.05} />
-        <StatCard label="Groups Joined" value={0} icon={CheckCircle} accent="success" delay={0.1} />
+        <StatCard label="Groups Joined" value={groupsJoined} icon={CheckCircle} accent="success" delay={0.1} />
         <StatCard label="Trust Score" value={`${(trustScore * 100).toFixed(0)}%`} icon={Shield} accent="violet" delay={0.15} />
-        <StatCard label="Rounds Done" value={0} icon={TrendingUp} accent="blue" delay={0.2} />
+        <StatCard label="Rounds Done" value={roundsDone} icon={TrendingUp} accent="blue" delay={0.2} />
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-fade-in" style={{ animationDelay: '0.25s', opacity: 0 }}>
@@ -84,6 +115,66 @@ export default function ClientDashboard() {
           </div>
         </Link>
       </div>
+
+      {groups.filter((g: any) => g.clients?.[user?.id || '']?.status === 'active').length > 0 && (
+        <div className="glass-card p-5 animate-fade-in" style={{ animationDelay: '0.3s', opacity: 0 }}>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-sm font-semibold text-white uppercase tracking-wider">Your Groups</h2>
+          </div>
+          <div className="space-y-2">
+            {groups
+              .filter((g: any) => g.clients?.[user?.id || '']?.status === 'active')
+              .slice(0, 5)
+              .map((g: any) => (
+                <Link
+                  key={g.group_id}
+                  href={`/client/chat/${g.group_id}`}
+                  className="flex items-center justify-between p-3 rounded-xl hover:bg-white/5 transition"
+                >
+                  <div>
+                    <p className="text-white text-sm font-medium">{g.group_id}</p>
+                    <p className="text-slate-500 text-xs">{g.model_id} · v{g.model_version || 0}</p>
+                  </div>
+                  <span className="text-slate-600 text-xs">Chat →</span>
+                </Link>
+              ))}
+          </div>
+        </div>
+      )}
+
+      {announcements.length > 0 && (
+        <div className="glass-card p-5 animate-fade-in" style={{ animationDelay: '0.32s', opacity: 0 }}>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-sm font-semibold text-white uppercase tracking-wider">Announcements</h2>
+          </div>
+          <div className="space-y-2">
+            {announcements.map((a) => (
+              <div
+                key={a.id}
+                className="p-3 rounded-xl"
+                style={{
+                  background: a.priority === 'error' ? 'rgba(239,68,68,0.08)' :
+                    a.priority === 'warning' ? 'rgba(245,158,11,0.08)' : 'rgba(30,41,59,0.3)',
+                }}
+              >
+                <div className="flex items-start justify-between">
+                  <p className="text-white text-sm">{a.message}</p>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium shrink-0 ml-2 ${
+                    a.priority === 'error' ? 'bg-red-500/20 text-red-400' :
+                    a.priority === 'warning' ? 'bg-amber-500/20 text-amber-400' :
+                    'bg-blue-500/20 text-blue-400'
+                  }`}>
+                    {a.priority}
+                  </span>
+                </div>
+                <p className="text-slate-500 text-[10px] mt-1">
+                  {a.author_name} · {a.group_id} · {new Date(a.created_at).toLocaleString()}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="glass-card p-5 animate-fade-in" style={{ animationDelay: '0.35s', opacity: 0 }}>
         <div className="flex items-center justify-between mb-4">

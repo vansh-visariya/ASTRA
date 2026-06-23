@@ -31,6 +31,13 @@ export interface Group {
   active_clients?: string[];
   config?: Record<string, unknown>;
   training_manifest?: Record<string, unknown> | null;
+  metrics_history?: Array<{
+    accuracy: number;
+    loss: number;
+    version: number;
+    timestamp: number;
+    clients: number;
+  }>;
   window_status?: {
     pending_updates: number;
     window_size: number;
@@ -134,6 +141,28 @@ export interface ApiListResponse<T> {
   join_requests?: T[];
   requests?: T[];
   clients?: T[];
+  announcements?: T[];
+  messages?: T[];
   count?: number;
   [key: string]: unknown;
+}
+
+export interface Announcement {
+  id: number;
+  group_id: string;
+  author_id: number;
+  author_name: string;
+  message: string;
+  priority: 'info' | 'warning' | 'error';
+  created_at: string;
+}
+
+export interface Message {
+  id: number;
+  group_id: string;
+  sender_id: number;
+  sender_name: string;
+  sender_role: 'admin' | 'client' | 'observer';
+  content: string;
+  created_at: string;
 }

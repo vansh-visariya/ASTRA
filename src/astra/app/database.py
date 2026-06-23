@@ -268,6 +268,27 @@ class AstraDB:
                 )
             """)
 
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS announcements (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    group_id TEXT NOT NULL,
+                    author_id INTEGER NOT NULL,
+                    message TEXT NOT NULL,
+                    priority TEXT DEFAULT 'info',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS secure_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    group_id TEXT NOT NULL,
+                    sender_id INTEGER NOT NULL,
+                    content TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
             conn.commit()
 
             # Performance indexes for frequent queries
@@ -275,6 +296,7 @@ class AstraDB:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_metrics_group_id ON metrics(group_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_join_requests_group_id ON join_requests(group_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_event_logs_group_id ON event_logs(group_id)")
+            conn.commit()
 
             logger.info("[DB] Schema initialized in %s", self.db_path)
 

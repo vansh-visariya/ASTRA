@@ -324,7 +324,7 @@ class GroupManager:
         if update.get("trust", 1.0) < 0.35:
             client_id = update.get("client_id", "unknown")
             self.logger.warning("Client %s: quarantined (trust=%.3f), skipping", client_id, update["trust"])
-            update["delta"] = np.array([], dtype=np.float32)
+            update["quarantined"] = True
 
         return update
 
@@ -660,6 +660,14 @@ class GroupManager:
             updates = [self.normalize_update(u["update"]) for u in group.pending_updates]
             client_ids = [u["client_id"] for u in group.pending_updates]
 
+            # Filter out quarantined clients before aggregation
+            non_quarantined = [(cid, u) for cid, u in zip(client_ids, updates) if not u.get("quarantined")]
+            quarantined = [cid for cid, u in zip(client_ids, updates) if u.get("quarantined")]
+            if quarantined:
+                self.logger.info("Skipping quarantined clients: %s", quarantined)
+            client_ids = [cid for cid, _ in non_quarantined]
+            updates = [u for _, u in non_quarantined]
+
             # Metrics are now server-evaluated, not self-reported.
             # Placeholder values until evaluate_global_model() runs below.
             global_accuracy = 0.0
@@ -727,16 +735,6 @@ class GroupManager:
                 },
             )
 
-            # Save global model weights to disk
-            self.save_model_weights(
-                group_id=group_id,
-                model_version=group.model_version,
-                aggregated_weights=aggregated,
-                accuracy=global_accuracy,
-                loss=global_loss,
-                num_clients=len(updates),
-            )
-
             # --- Server-side evaluation (replaces self-reported metrics) ---
             eval_metrics = self.evaluate_global_model(group_id)
             global_accuracy = eval_metrics["accuracy"]
@@ -746,6 +744,16 @@ class GroupManager:
             if group.metrics_history:
                 group.metrics_history[-1]["accuracy"] = global_accuracy
                 group.metrics_history[-1]["loss"] = global_loss
+
+            # Save global model weights to disk (AFTER evaluation so accuracy/loss are correct)
+            self.save_model_weights(
+                group_id=group_id,
+                model_version=group.model_version,
+                aggregated_weights=aggregated,
+                accuracy=global_accuracy,
+                loss=global_loss,
+                num_clients=len(updates),
+            )
 
             # Re-persist server-evaluated metrics to DB
             try:

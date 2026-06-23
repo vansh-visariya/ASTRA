@@ -31,6 +31,10 @@ export default function CreateGroupPage() {
   const [timeLimit, setTimeLimit] = useState(20);
   const [groupId, setGroupId] = useState('');
   const [aggregator, setAggregator] = useState('fedavg');
+  const [localEpochs, setLocalEpochs] = useState(2);
+  const [batchSize, setBatchSize] = useState(32);
+  const [valDataset, setValDataset] = useState('');
+  const [expectedDeltaBytes, setExpectedDeltaBytes] = useState(0);
 
   const handleRegisterHf = async (modelName: string, peftRank?: number) => {
     const result = await registerHfModel({ model_name: modelName, use_peft: !!peftRank });
@@ -55,6 +59,15 @@ export default function CreateGroupPage() {
     e.preventDefault();
     setSubmitting(true);
     try {
+      const manifest: Record<string, unknown> = {
+        model_id: selectedModelId,
+        local_epochs: localEpochs,
+        batch_size: batchSize,
+        lr: learningRate,
+      };
+      if (valDataset) manifest.val_dataset = valDataset;
+      if (expectedDeltaBytes > 0) manifest.expected_delta_bytes = expectedDeltaBytes;
+
       await createGroup({
         group_id: groupId,
         model_id: selectedModelId,
@@ -63,6 +76,7 @@ export default function CreateGroupPage() {
         lr: learningRate,
         dp_enabled: dpEnabled,
         aggregator,
+        training_manifest: manifest,
       });
       router.push('/dashboard/groups');
     } catch {
@@ -139,10 +153,18 @@ export default function CreateGroupPage() {
         <TrainingConfig
           learningRate={learningRate}
           dpEnabled={dpEnabled}
+          localEpochs={localEpochs}
+          batchSize={batchSize}
+          valDataset={valDataset}
+          expectedDeltaBytes={expectedDeltaBytes}
           onChange={(field, value) => {
             switch (field) {
               case 'lr': setLearningRate(value as number); break;
               case 'dp_enabled': setDpEnabled(value as boolean); break;
+              case 'local_epochs': setLocalEpochs(value as number); break;
+              case 'batch_size': setBatchSize(value as number); break;
+              case 'val_dataset': setValDataset(value as string); break;
+              case 'expected_delta_bytes': setExpectedDeltaBytes(value as number); break;
             }
           }}
         />
