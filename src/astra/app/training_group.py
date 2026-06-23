@@ -78,8 +78,6 @@ class TrainingGroup:
                 "last_update": None,
                 "trust_score": 1.0,
                 "updates_count": 0,
-                "local_accuracy": 0.0,
-                "local_loss": 0.0,
                 "gradient_norm": 0.0,
                 **(client_info or {}),
             }
@@ -101,17 +99,12 @@ class TrainingGroup:
         if client_id in self.clients:
             self.clients[client_id]["last_update"] = time.time()
             self.clients[client_id]["updates_count"] += 1
-            train_acc = update.get("meta", {}).get("train_accuracy", 0)
-            train_loss = update.get("meta", {}).get("train_loss", 0)
-            self.clients[client_id]["local_accuracy"] = train_acc
-            self.clients[client_id]["local_loss"] = train_loss
             self.clients[client_id]["gradient_norm"] = update.get("meta", {}).get(
                 "gradient_norm", 0
             )
             logger.info(
-                f"\u2713 METRICS STORED: Client {client_id} in group"
-                f" {self.group_id} | acc={train_acc:.4f},"
-                f" loss={train_loss:.4f}"
+                f"\u2713 UPDATE STORED: Client {client_id} in group"
+                f" {self.group_id} | updates={self.clients[client_id]['updates_count']}"
             )
 
         self.pending_updates.append(
@@ -169,6 +162,7 @@ class TrainingGroup:
                 "aggregator": self.config.get("aggregator", "fedavg"),
                 "dp_enabled": self.config.get("dp_enabled", False),
             },
+            "training_manifest": self.config.get("training_manifest"),
             "window_config": {
                 "window_size": self.window_config.window_size,
                 "time_limit": self.window_config.time_limit,
@@ -182,8 +176,6 @@ class TrainingGroup:
                     "status": info.get("status", "unknown"),
                     "last_update": info.get("last_update"),
                     "update_count": info.get("updates_count", 0),
-                    "local_accuracy": info.get("local_accuracy", 0.0),
-                    "local_loss": info.get("local_loss", 0.0),
                     "trust_score": info.get("trust_score", 1.0),
                     "joined_at": info.get("joined_at"),
                 }
@@ -193,4 +185,5 @@ class TrainingGroup:
             "metrics_history": self.metrics_history[-10:],  # Last 10 entries
             "latest_accuracy": self.metrics_history[-1].get("accuracy", 0) if self.metrics_history else 0,
             "latest_loss": self.metrics_history[-1].get("loss", 0) if self.metrics_history else 0,
+            "metrics_source": "server" if self.config.get("training_manifest", {}).get("val_dataset") else "unverified",
         }

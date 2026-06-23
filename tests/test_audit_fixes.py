@@ -220,9 +220,11 @@ class TestD3MetricsPersistence:
         assert result is not None
         assert result["version"] == 1
 
-        # Verify in-memory metrics_history was updated (the core fix)
+        # Verify in-memory metrics_history was updated
+        # Accuracy is now server-evaluated (0.0 when no val_dataset configured)
         assert len(group.metrics_history) >= 1
-        assert group.metrics_history[-1]["accuracy"] == pytest.approx(0.85, abs=0.01)
+        assert group.metrics_history[-1]["accuracy"] == 0.0
+        assert group.metrics_history[-1]["metrics_source"] == "unverified"
 
         # Verify DB persistence: metrics table uses group_id as experiment_id.
         # The metrics table has FK to experiments, so create the experiment first.
@@ -232,15 +234,15 @@ class TestD3MetricsPersistence:
         # Re-run aggregation to persist to DB this time
         group.clients["d3_client_2"] = {
             "status": "active", "joined_at": "now", "last_update": None,
-            "trust_score": 1.0, "updates_count": 0, "local_accuracy": 0.0,
-            "local_loss": 0.0, "gradient_norm": 0.0, "user_id": 9998,
+            "trust_score": 1.0, "updates_count": 0,
+            "gradient_norm": 0.0, "user_id": 9998,
         }
         group.add_update("d3_client_2", {
             "delta": fake_delta,
             "local_dataset_size": 50,
             "staleness_weight": 1.0,
             "trust": 1.0,
-            "meta": {"train_accuracy": 0.90, "train_loss": 0.2},
+            "meta": {},
         })
         result2 = gm.aggregate_group(gid)
         assert result2 is not None
@@ -329,3 +331,200 @@ class TestJ2UserIdInClientDict:
         assert group is not None
         assert cid in group.clients
         assert group.clients[cid]["user_id"] == uid
+
+
+# ======================================================================
+# Bug fix: updates_count only incremented once per upload
+# ======================================================================
+
+class TestUpdatesCountSingleIncrement:
+    def test_add_update_increments_once(self):
+        from astra.app.training_group import TrainingGroup, AsyncWindowConfig
+        tg = TrainingGroup(
+            group_id="uc_test", model_id="m", config={},
+            window_config=AsyncWindowConfig(window_size=10, time_limit=20.0),
+        )
+        tg.clients["c1"] = {
+            "status": "active", "joined_at": "now", "last_update": None,
+            "trust_score": 1.0, "updates_count": 0, "local_accuracy": 0.0,
+            "local_loss": 0.0, "gradient_norm": 0.0, "user_id": 1,
+        }
+        tg.add_update("c1", {
+            "delta": np.array([1.0], dtype="<f4"),
+            "local_dataset_size": 10,
+            "meta": {},
+        })
+        assert tg.clients["c1"]["updates_count"] == 1
+
+        tg.add_update("c1", {
+            "delta": np.array([2.0], dtype="<f4"),
+            "local_dataset_size": 10,
+            "meta": {},
+        })
+        assert tg.clients["c1"]["updates_count"] == 2
+
+    def test_to_dict_uses_updates_count(self):
+        from astra.app.training_group import TrainingGroup, AsyncWindowConfig
+        tg = TrainingGroup(
+            group_id="uc_dict", model_id="m", config={},
+            window_config=AsyncWindowConfig(window_size=10, time_limit=20.0),
+        )
+        tg.clients["c1"] = {
+            "status": "active", "joined_at": "now", "last_update": None,
+            "trust_score": 1.0, "updates_count": 5, "local_accuracy": 0.0,
+            "local_loss": 0.0, "gradient_norm": 0.0, "user_id": 1,
+        }
+        d = tg.to_dict()
+        assert d["clients"]["c1"]["update_count"] == 5
+
+
+# ======================================================================
+# Bug fix: client status loaded from DB, not hardcoded to "offline"
+# ======================================================================
+
+class TestClientStatusFromDB:
+    def test_status_loaded_from_db_not_offline(self):
+        from astra.app.group_manager import GroupManager
+        from astra.app.database import get_db
+
+        db = get_db()
+        gid = f"cs_grp_{os.urandom(4).hex()}"
+        cid = f"cs_client_{os.urandom(4).hex()}"
+
+        import bcrypt
+        pw = bcrypt.hashpw(b"test", bcrypt.gensalt()).decode()
+        uname = f"cs_user_{os.urandom(4).hex()}"
+        with db.connection() as conn:
+            conn.execute(
+                "INSERT INTO users (username, password_hash, role) VALUES (?, ?, 'client')",
+                (uname, pw),
+            )
+            uid = conn.execute("SELECT id FROM users WHERE username = ?", (uname,)).fetchone()[0]
+            conn.commit()
+
+        db.create_group(group_id=gid, model_id="test_model", window_size=3, time_limit=20)
+        db.register_fl_client(client_id=cid, experiment_id=gid, user_id=uid, group_id=gid)
+
+        # Set status to "active" in DB
+        db.update_fl_client_metrics(client_id=cid, status="active")
+
+        gm = GroupManager(config={})
+        group = gm.groups.get(gid)
+        assert group is not None
+        assert cid in group.clients
+        assert group.clients[cid]["status"] == "active"
+
+
+# ======================================================================
+# Training Manifest: schema validation and group creation
+# ======================================================================
+
+class TestTrainingManifest:
+    def test_manifest_schema_requires_expected_delta_bytes(self):
+        from astra.infra.models import TrainingManifest
+        with pytest.raises(Exception):
+            TrainingManifest(model_id="test")  # missing expected_delta_bytes
+
+    def test_manifest_schema_valid(self):
+        from astra.infra.models import TrainingManifest
+        m = TrainingManifest(
+            model_id="test_model",
+            expected_delta_bytes=1024,
+            is_peft=True,
+            target_modules=["q_proj", "v_proj"],
+            lora_rank=8,
+        )
+        assert m.model_id == "test_model"
+        assert m.expected_delta_bytes == 1024
+        assert m.is_peft is True
+        assert m.lr == 0.01  # default
+
+    def test_manifest_stored_in_group_config(self, fresh_client, auth_headers):
+        mid = f"manifest_model_{os.urandom(4).hex()}"
+        _register_model(fresh_client, auth_headers, mid)
+        gid = f"manifest_grp_{os.urandom(4).hex()}"
+        resp = fresh_client.post("/api/groups", json={
+            "group_id": gid, "model_id": mid,
+            "training_manifest": {
+                "model_id": mid,
+                "expected_delta_bytes": 1024,
+                "lr": 0.001,
+                "val_dataset": "mnist",
+            },
+        }, headers=auth_headers)
+        assert resp.status_code == 200
+
+        from astra.app.state import get_fl_server
+        group = get_fl_server().group_manager.groups.get(gid)
+        assert group is not None
+        manifest = group.config.get("training_manifest")
+        assert manifest is not None
+        assert manifest["model_id"] == mid
+        assert manifest["lr"] == 0.001
+        assert manifest["val_dataset"] == "mnist"
+
+    def test_manifest_endpoint_returns_manifest(self, fresh_client, auth_headers):
+        mid = f"manifest_ep_model_{os.urandom(4).hex()}"
+        _register_model(fresh_client, auth_headers, mid)
+        gid = f"manifest_ep_{os.urandom(4).hex()}"
+        fresh_client.post("/api/groups", json={
+            "group_id": gid, "model_id": mid,
+            "training_manifest": {
+                "model_id": mid,
+                "expected_delta_bytes": 2048,
+            },
+        }, headers=auth_headers)
+
+        resp = fresh_client.get(f"/api/groups/{gid}/manifest")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["manifest"]["expected_delta_bytes"] == 2048
+
+    def test_manifest_endpoint_404_without_manifest(self, fresh_client, auth_headers):
+        mid = f"manifest_noman_model_{os.urandom(4).hex()}"
+        _register_model(fresh_client, auth_headers, mid)
+        gid = f"manifest_noman_{os.urandom(4).hex()}"
+        fresh_client.post("/api/groups", json={
+            "group_id": gid, "model_id": mid,
+        }, headers=auth_headers)
+
+        resp = fresh_client.get(f"/api/groups/{gid}/manifest")
+        assert resp.status_code == 404
+
+
+# ======================================================================
+# Server-side evaluation
+# ======================================================================
+
+class TestServerEvaluation:
+    def test_evaluate_returns_zeros_without_val_dataset(self):
+        from astra.app.group_manager import GroupManager
+        from astra.app.training_group import TrainingGroup, AsyncWindowConfig
+        gm = GroupManager(config={})
+        gid = f"eval_{os.urandom(4).hex()}"
+        group = TrainingGroup(
+            group_id=gid, model_id="m", config={},
+            window_config=AsyncWindowConfig(window_size=3, time_limit=20),
+        )
+        gm.groups[gid] = group
+        result = gm.evaluate_global_model(gid)
+        assert result == {"accuracy": 0.0, "loss": 0.0}
+
+    def test_metrics_history_has_metrics_source(self):
+        from astra.app.training_group import TrainingGroup, AsyncWindowConfig
+        group = TrainingGroup(
+            group_id="src_test", model_id="m", config={},
+            window_config=AsyncWindowConfig(window_size=3, time_limit=20),
+        )
+        d = group.to_dict()
+        assert d["metrics_source"] == "unverified"
+
+    def test_metrics_history_source_server_when_val_configured(self):
+        from astra.app.training_group import TrainingGroup, AsyncWindowConfig
+        group = TrainingGroup(
+            group_id="src_test2", model_id="m",
+            config={"training_manifest": {"val_dataset": "mnist"}},
+            window_config=AsyncWindowConfig(window_size=3, time_limit=20),
+        )
+        d = group.to_dict()
+        assert d["metrics_source"] == "server"

@@ -26,9 +26,11 @@ export interface Group {
   completed_rounds?: number;
   latest_accuracy?: number;
   latest_loss?: number;
+  metrics_source?: 'server' | 'unverified';
   client_count?: number;
   active_clients?: string[];
   config?: Record<string, unknown>;
+  training_manifest?: Record<string, unknown> | null;
   window_status?: {
     pending_updates: number;
     window_size: number;
@@ -44,8 +46,6 @@ export interface ClientMeta {
   status?: string;
   last_update?: number;
   update_count?: number;
-  local_accuracy?: number;
-  local_loss?: number;
   trust_score?: number;
   joined_at?: string;
 }
@@ -56,8 +56,6 @@ export interface Client {
   status: string;
   last_update: number;
   update_count: number;
-  local_accuracy: number;
-  local_loss: number;
   trust_score: number;
   joined_at: string;
 }

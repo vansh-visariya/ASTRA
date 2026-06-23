@@ -49,16 +49,33 @@ def flatten_peft_params(model: nn.Module) -> np.ndarray:
 
 
 def apply_peft_delta(model: nn.Module, flat_delta: np.ndarray) -> None:
-    """Apply a flat LoRA delta to the model's LoRA parameters in-place."""
-    offset = 0
-    for _name, param in sorted(
+    """Apply a flat LoRA delta to the model's LoRA parameters in-place.
+
+    Raises ValueError if the delta has more elements than the model's
+    LoRA parameters (indicates a PEFT config mismatch between client and
+    server — e.g. client trained with ``target_modules='all-linear'`` but
+    server only has LoRA on ``['q_proj', 'v_proj']``).
+    """
+    lora_params = sorted(
         [(n, p) for n, p in model.named_parameters() if _is_lora_param(n)],
         key=lambda x: x[0],
-    ):
+    )
+    total_lora_params = sum(p.numel() for _, p in lora_params)
+
+    if len(flat_delta) != total_lora_params:
+        raise ValueError(
+            f"PEFT delta size mismatch: delta has {len(flat_delta):,} elements "
+            f"but the model's LoRA parameters total {total_lora_params:,}. "
+            f"This usually means the client's LoRA config (target_modules, "
+            f"rank) doesn't match the server's. "
+            f"Delta params: {len(flat_delta):,} | Model LoRA params: {total_lora_params:,}"
+        )
+
+    offset = 0
+    for _name, param in lora_params:
         size = param.numel()
-        if offset + size <= len(flat_delta):
-            delta_slice = flat_delta[offset : offset + size].reshape(param.shape)
-            param.data.add_(torch.from_numpy(delta_slice).float().to(param.device))
+        delta_slice = flat_delta[offset : offset + size].reshape(param.shape)
+        param.data.add_(torch.from_numpy(delta_slice).float().to(param.device))
         offset += size
 
 
@@ -76,14 +93,27 @@ def flatten_all_params(model: nn.Module) -> np.ndarray:
 
 
 def apply_flat_delta(model: nn.Module, flat_delta: np.ndarray) -> None:
-    """Apply a flat delta to ALL model parameters in sorted-name order."""
-    offset = 0
-    for _name, param in sorted(
+    """Apply a flat delta to ALL model parameters in sorted-name order.
+
+    Raises ValueError if the delta size doesn't match the model's total
+    parameter count.
+    """
+    all_params = sorted(
         [(n, p) for n, p in model.named_parameters()],
         key=lambda x: x[0],
-    ):
+    )
+    total_params = sum(p.numel() for _, p in all_params)
+
+    if len(flat_delta) != total_params:
+        raise ValueError(
+            f"Delta size mismatch: delta has {len(flat_delta):,} elements "
+            f"but the model has {total_params:,} parameters. "
+            f"The uploaded weights don't match the group's model architecture."
+        )
+
+    offset = 0
+    for _name, param in all_params:
         size = param.numel()
-        if offset + size <= len(flat_delta):
-            delta_slice = flat_delta[offset : offset + size].reshape(param.shape)
-            param.data.add_(torch.from_numpy(delta_slice).float().to(param.device))
+        delta_slice = flat_delta[offset : offset + size].reshape(param.shape)
+        param.data.add_(torch.from_numpy(delta_slice).float().to(param.device))
         offset += size

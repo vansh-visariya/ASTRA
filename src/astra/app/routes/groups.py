@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 
 from astra.app.integration import get_platform_integration
 from astra.app.state import get_fl_server
+from astra.infra.models import TrainingManifest
 
 router = APIRouter()
 
@@ -71,6 +72,20 @@ async def create_group(group_data: dict, current_user=Depends(_get_any_user)):
     if aggregator_name not in ("fedavg", ""):
         config.setdefault("robust", {})["method"] = aggregator_name
 
+    # --- Training Manifest (optional but recommended) ---
+    manifest_data = group_data.get("training_manifest")
+    manifest = None
+    if manifest_data:
+        try:
+            manifest = TrainingManifest(**manifest_data)
+            # Store manifest in group config for persistence
+            config["training_manifest"] = manifest.model_dump()
+        except Exception as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid training_manifest: {e}",
+            )
+
     group = fl_server.group_manager.create_group(
         group_id=group_id,
         model_id=model_id,
@@ -93,6 +108,32 @@ async def get_group(group_id: str):
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
     return {"group": group.to_dict(include_secret=True)}
+
+
+@router.get("/api/groups/{group_id}/manifest")
+async def get_group_manifest(group_id: str):
+    """Get the training manifest for a group.
+
+    Clients call this before training to learn the required architecture,
+    training protocol, and data schema.
+    """
+    fl_server = get_fl_server()
+    group = fl_server.group_manager.groups.get(group_id)
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+
+    manifest = group.config.get("training_manifest")
+    if not manifest:
+        raise HTTPException(
+            status_code=404,
+            detail="No training manifest defined for this group. "
+            "The admin should create the group with a training_manifest.",
+        )
+    return {
+        "group_id": group_id,
+        "model_id": group.model_id,
+        "manifest": manifest,
+    }
 
 
 @router.post("/api/groups/{group_id}/start")

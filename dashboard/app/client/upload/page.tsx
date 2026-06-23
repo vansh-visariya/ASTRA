@@ -87,8 +87,6 @@ export default function ClientUploadPage() {
   const [clientId, setClientId] = useState<string>('');
   const [file, setFile] = useState<File | null>(null);
   const [datasetSize, setDatasetSize] = useState<number>(1000);
-  const [trainAccuracy, setTrainAccuracy] = useState<string>('');
-  const [trainLoss, setTrainLoss] = useState<string>('');
   const [globalVersion, setGlobalVersion] = useState<number>(0);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState<{ phase: string; pct: number } | null>(null);
@@ -106,6 +104,9 @@ export default function ClientUploadPage() {
   // Download info for the selected group
   const [downloadInfo, setDownloadInfo] = useState<DownloadInfo | null>(null);
   const [downloadInfoLoading, setDownloadInfoLoading] = useState(false);
+
+  // Training manifest for the selected group
+  const [manifest, setManifest] = useState<Record<string, any> | null>(null);
 
   // Track which base models have been downloaded locally
   const [downloadedBases, setDownloadedBases] = useState<Record<string, boolean>>({});
@@ -129,6 +130,25 @@ export default function ClientUploadPage() {
       }
     };
     fetchInfo();
+    return () => { cancelled = true; };
+  }, [selectedGroup]);
+
+  // Fetch training manifest when group changes
+  useEffect(() => {
+    if (!selectedGroup) {
+      setManifest(null);
+      return;
+    }
+    let cancelled = false;
+    const fetchManifest = async () => {
+      try {
+        const resp = await api.get<{ manifest: Record<string, any> }>(`/api/groups/${selectedGroup}/manifest`);
+        if (!cancelled) setManifest(resp?.manifest || null);
+      } catch {
+        if (!cancelled) setManifest(null);
+      }
+    };
+    fetchManifest();
     return () => { cancelled = true; };
   }, [selectedGroup]);
 
@@ -361,8 +381,6 @@ export default function ClientUploadPage() {
     const meta: Record<string, unknown> = {
       dataset_size: datasetSize,
     };
-    if (trainAccuracy !== '') meta.train_accuracy = Number(trainAccuracy);
-    if (trainLoss !== '') meta.train_loss = Number(trainLoss);
 
     const result = await api.post<{ status: string; global_version: number }>(
       `/api/clients/${clientId}/delta`,
@@ -446,8 +464,6 @@ export default function ClientUploadPage() {
       local_dataset_size: datasetSize,
       meta: {
         dataset_size: datasetSize,
-        ...(trainAccuracy !== '' ? { train_accuracy: Number(trainAccuracy) } : {}),
-        ...(trainLoss !== '' ? { train_loss: Number(trainLoss) } : {}),
       },
     });
 
@@ -791,6 +807,76 @@ export default function ClientUploadPage() {
                 />
               </div>
 
+              {manifest && (
+                <div className="p-3 rounded-xl" style={{ background: 'rgba(15,23,42,0.4)' }}>
+                  <div className="flex items-center gap-2 mb-2">
+                    <FileUp size={14} className="text-cyan-400" />
+                    <span className="text-white text-xs font-medium">Training Contract</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px]">
+                    {manifest.expected_delta_bytes != null && (
+                      <div className="col-span-2">
+                        <span className="text-slate-500">Expected delta:</span>{' '}
+                        <span className="text-slate-300 font-mono">{formatBytes(manifest.expected_delta_bytes)}</span>
+                      </div>
+                    )}
+                    {manifest.is_peft != null && (
+                      <div>
+                        <span className="text-slate-500">PEFT:</span>{' '}
+                        <span className={manifest.is_peft ? 'text-purple-300' : 'text-slate-300'}>
+                          {manifest.is_peft ? 'Yes' : 'No'}
+                        </span>
+                      </div>
+                    )}
+                    {manifest.lr != null && (
+                      <div>
+                        <span className="text-slate-500">Learning rate:</span>{' '}
+                        <span className="text-slate-300 font-mono">{manifest.lr}</span>
+                      </div>
+                    )}
+                    {manifest.target_modules != null && (
+                      <div className="col-span-2">
+                        <span className="text-slate-500">Target modules:</span>{' '}
+                        <span className="text-slate-300 font-mono">{manifest.target_modules.join(', ')}</span>
+                      </div>
+                    )}
+                    {manifest.epochs != null && (
+                      <div>
+                        <span className="text-slate-500">Epochs:</span>{' '}
+                        <span className="text-slate-300 font-mono">{manifest.epochs}</span>
+                      </div>
+                    )}
+                    {manifest.batch_size != null && (
+                      <div>
+                        <span className="text-slate-500">Batch size:</span>{' '}
+                        <span className="text-slate-300 font-mono">{manifest.batch_size}</span>
+                      </div>
+                    )}
+                    {manifest.val_dataset != null && (
+                      <div className="col-span-2">
+                        <span className="text-slate-500">Val dataset:</span>{' '}
+                        <span className="text-slate-300 font-mono">{manifest.val_dataset}</span>
+                      </div>
+                    )}
+                    {manifest.lora_rank != null && (
+                      <div>
+                        <span className="text-slate-500">LoRA rank:</span>{' '}
+                        <span className="text-slate-300 font-mono">{manifest.lora_rank}</span>
+                      </div>
+                    )}
+                    {manifest.lora_alpha != null && (
+                      <div>
+                        <span className="text-slate-500">LoRA alpha:</span>{' '}
+                        <span className="text-slate-300 font-mono">{manifest.lora_alpha}</span>
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-slate-600 text-[10px] mt-2">
+                    Your upload must match the expected delta size. Training params are advisory.
+                  </p>
+                </div>
+              )}
+
               <div>
                 <label className="text-slate-400 text-xs block mb-1">
                   Delta File (.pt / .npy / .bin / .safetensors) — {downloadInfo?.is_peft ? 'adapter weights only' : 'raw float32 weight bytes'}
@@ -822,26 +908,6 @@ export default function ClientUploadPage() {
                     value={datasetSize}
                     onChange={(e) => setDatasetSize(Number(e.target.value))}
                     min={1}
-                    className="w-full px-3 py-2 rounded-lg text-sm bg-slate-900 border border-slate-700 text-white"
-                  />
-                </div>
-                <div>
-                  <label className="text-slate-400 text-xs block mb-1">Train Acc (opt)</label>
-                  <input
-                    type="number"
-                    step="0.0001"
-                    value={trainAccuracy}
-                    onChange={(e) => setTrainAccuracy(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg text-sm bg-slate-900 border border-slate-700 text-white"
-                  />
-                </div>
-                <div>
-                  <label className="text-slate-400 text-xs block mb-1">Train Loss (opt)</label>
-                  <input
-                    type="number"
-                    step="0.0001"
-                    value={trainLoss}
-                    onChange={(e) => setTrainLoss(e.target.value)}
                     className="w-full px-3 py-2 rounded-lg text-sm bg-slate-900 border border-slate-700 text-white"
                   />
                 </div>

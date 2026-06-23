@@ -3,6 +3,7 @@ Unit tests for model_zoo: flatten/apply functions and SimpleMLP.
 """
 
 import numpy as np
+import pytest
 import torch
 import torch.nn as nn
 
@@ -54,11 +55,10 @@ class TestFlattenAllParams:
         updated = flatten_all_params(model)
         assert np.allclose(updated, original + 1.0)
 
-    def test_delta_too_short_handled_gracefully(self):
+    def test_delta_too_short_raises_error(self):
         model = DummyModel()
-        original = flatten_all_params(model)
-        apply_flat_delta(model, np.array([99.0]))
-        assert np.allclose(flatten_all_params(model), original + 0.0)
+        with pytest.raises(ValueError, match="Delta size mismatch"):
+            apply_flat_delta(model, np.array([99.0]))
 
     def test_zero_delta_no_change(self):
         model = DummyModel()
@@ -104,11 +104,12 @@ class TestPEFTFlatten:
         assert torch.equal(model.b.data, b_before)
         assert not torch.equal(model.lora_A.data, torch.tensor([0.1, 0.2]))
 
-    def test_no_peft_params_handled(self):
+    def test_no_peft_params_raises_error(self):
         model = nn.Linear(10, 10)
         flat = flatten_peft_params(model)
         assert len(flat) == 0
-        apply_peft_delta(model, np.array([1.0]))
+        with pytest.raises(ValueError, match="PEFT delta size mismatch"):
+            apply_peft_delta(model, np.array([1.0]))
 
 
 class TestSimpleMLP:

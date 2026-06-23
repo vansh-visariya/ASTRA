@@ -259,6 +259,22 @@ async def _dispatch_staged_delta(
     # PEFT validation: if the group uses PEFT, the delta should be adapter
     # weights only (much smaller than full model).
     is_peft = group.config.get("peft", {}).get("enabled", False)
+
+    # --- Training Manifest validation (hard constraint) ---
+    manifest = group.config.get("training_manifest")
+    if manifest:
+        expected_bytes = manifest.get("expected_delta_bytes")
+        if expected_bytes and len(delta_bytes) != expected_bytes:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Delta size mismatch: uploaded {len(delta_bytes):,} bytes, "
+                    f"but the training manifest requires exactly {expected_bytes:,} bytes. "
+                    f"Your model architecture or PEFT config likely doesn't match the group. "
+                    f"Fetch GET /api/groups/{group.group_id}/manifest to see the contract."
+                ),
+            )
+
     if is_peft and expected_params is not None:
         full_model_bytes = expected_params * 4
         adapter_ratio = len(delta_bytes) / full_model_bytes if full_model_bytes > 0 else 1.0

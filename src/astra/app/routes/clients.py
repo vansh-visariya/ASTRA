@@ -209,6 +209,21 @@ async def submit_client_delta(client_id: str, request: Request):
         if model_info:
             is_peft = model_info.get("is_peft", False)
 
+    # --- Training Manifest validation (hard constraint) ---
+    manifest = group.config.get("training_manifest")
+    if manifest:
+        expected_bytes = manifest.get("expected_delta_bytes")
+        if expected_bytes and len(delta_bytes) != expected_bytes:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Delta size mismatch: uploaded {len(delta_bytes):,} bytes, "
+                    f"but the training manifest requires exactly {expected_bytes:,} bytes. "
+                    f"Your model architecture or PEFT config likely doesn't match the group. "
+                    f"Fetch GET /api/groups/{group.group_id}/manifest to see the contract."
+                ),
+            )
+
     if expected_f32_bytes is not None and not is_peft:
         # Strict size check for non-PEFT models only.
         # PEFT groups upload adapter-only deltas (much smaller than full model).
@@ -356,18 +371,15 @@ async def submit_client_delta(client_id: str, request: Request):
     if not fl_server.is_running:
         fl_server.is_running = True
 
-    # Bump client's update counter / last_update
+    # Bump client's last_update timestamp only.
+    # updates_count is already incremented by group.add_update() inside
+    # process_client_update() — do NOT increment it again here.
     last_update_ts = time.time()
     if client_id in group.clients:
         group.clients[client_id]["last_update"] = last_update_ts
-        group.clients[client_id]["updates_count"] = (
-            group.clients[client_id].get("updates_count", 0) + 1
-        )
     try:
         fl_server.db.update_fl_client_metrics(
             client_id=client_id,
-            local_accuracy=update.meta.get("train_accuracy", 0.0),
-            local_loss=update.meta.get("train_loss", 0.0),
             updates_count=group.clients.get(client_id, {}).get("updates_count", 0),
             trust_score=trust_score,
             status="active",

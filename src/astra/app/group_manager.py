@@ -131,7 +131,7 @@ class GroupManager:
                                     "local_accuracy": cr["local_accuracy"] or 0,
                                     "local_loss": cr["local_loss"] or 0,
                                     "trust_score": cr["trust_score"] or 1.0,
-                                    "status": "offline",
+                                    "status": cr["status"] or "offline",
                                     "joined_at": cr["joined_at"],
                                     "gradient_norm": cr["gradient_norm"] or 0,
                                 }
@@ -651,11 +651,10 @@ class GroupManager:
             updates = [self.normalize_update(u["update"]) for u in group.pending_updates]
             client_ids = [u["client_id"] for u in group.pending_updates]
 
-            accuracies = [u.get("meta", {}).get("train_accuracy", 0) for u in updates]
-            losses = [u.get("meta", {}).get("train_loss", 0) for u in updates]
-
-            global_accuracy = sum(accuracies) / len(accuracies) if accuracies else 0
-            global_loss = sum(losses) / len(losses) if losses else 0
+            # Metrics are now server-evaluated, not self-reported.
+            # Placeholder values until evaluate_global_model() runs below.
+            global_accuracy = 0.0
+            global_loss = 0.0
 
             if group.aggregator:
                 aggregated = group.aggregator.aggregate(updates)
@@ -684,6 +683,7 @@ class GroupManager:
             group.completed_rounds += 1
 
             # Store metrics
+            has_val = bool(group.config.get("training_manifest", {}).get("val_dataset"))
             group.metrics_history.append(
                 {
                     "version": group.model_version,
@@ -691,10 +691,11 @@ class GroupManager:
                     "accuracy": global_accuracy,
                     "loss": global_loss,
                     "clients": len(updates),
+                    "metrics_source": "server" if has_val else "unverified",
                 }
             )
 
-            # Persist metrics to database
+            # Persist metrics to database (placeholder — updated after eval below)
             try:
                 db = get_db()
                 db.log_metrics(
@@ -735,6 +736,34 @@ class GroupManager:
                 loss=global_loss,
                 num_clients=len(updates),
             )
+
+            # --- Server-side evaluation (replaces self-reported metrics) ---
+            eval_metrics = self.evaluate_global_model(group_id)
+            global_accuracy = eval_metrics["accuracy"]
+            global_loss = eval_metrics["loss"]
+
+            # Update metrics_history entry with server-evaluated values
+            if group.metrics_history:
+                group.metrics_history[-1]["accuracy"] = global_accuracy
+                group.metrics_history[-1]["loss"] = global_loss
+
+            # Re-persist server-evaluated metrics to DB
+            try:
+                db = get_db()
+                db.log_metrics(
+                    experiment_id=group_id,
+                    step=group.model_version,
+                    metrics={
+                        "version": group.model_version,
+                        "timestamp": time.time(),
+                        "accuracy": global_accuracy,
+                        "loss": global_loss,
+                        "clients": len(updates),
+                    },
+                    group_id=group_id,
+                )
+            except Exception as e:
+                self.logger.warning(f"Could not persist server-evaluated metrics for {group_id}: {e}")
 
             self.logger.info(
                 f"Aggregated group {group_id}:"
@@ -886,6 +915,117 @@ class GroupManager:
             self.logger.warning(f"Could not save model for group {group_id}: {e}")
 
     # ------------------------------------------------------------------
+    # Server-side evaluation
+    # ------------------------------------------------------------------
+
+    def evaluate_global_model(self, group_id: str) -> dict[str, float]:
+        """Evaluate the global model on a validation dataset.
+
+        Returns ``{"accuracy": float, "loss": float}``.  If no validation
+        dataset is configured or evaluation fails, returns zeros.
+
+        The admin configures ``val_dataset`` in the training manifest
+        when creating the group.  Supported formats:
+
+        * ``"mnist"`` — built-in MNIST test split (requires torchvision)
+        * ``"cifar10"`` — built-in CIFAR-10 test split
+        * ``"/path/to/data.pt"`` — a PyTorch file with
+          ``{"X": Tensor[N, ...], "y": Tensor[N]}``
+        * ``None`` / empty — skip evaluation, return zeros
+        """
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        if group_id not in self.groups:
+            return {"accuracy": 0.0, "loss": 0.0}
+
+        group = self.groups[group_id]
+        manifest = group.config.get("training_manifest", {})
+        val_dataset = manifest.get("val_dataset")
+        val_metric = manifest.get("val_metric", "accuracy")
+
+        if not val_dataset or self.server_model is None:
+            return {"accuracy": 0.0, "loss": 0.0}
+
+        try:
+            import torch
+            import torch.nn.functional as F
+
+            model = self.server_model
+            model.eval()
+
+            X, y = self._load_val_dataset(val_dataset)
+            if X is None:
+                return {"accuracy": 0.0, "loss": 0.0}
+
+            with torch.no_grad():
+                logits = model(X)
+                loss = F.cross_entropy(logits, y).item()
+                preds = logits.argmax(dim=1)
+                accuracy = (preds == y).float().mean().item()
+
+            logger.info(
+                "Server evaluation for %s: acc=%.4f, loss=%.4f (metric=%s)",
+                group_id, accuracy, loss, val_metric,
+            )
+            return {"accuracy": accuracy, "loss": loss}
+
+        except Exception as e:
+            logger.warning("Server evaluation failed for %s: %s", group_id, e)
+            return {"accuracy": 0.0, "loss": 0.0}
+
+    def _load_val_dataset(self, source: str) -> tuple | tuple[None, None]:
+        """Load validation data from a named dataset or file path.
+
+        Returns (X, y) tensors or (None, None) on failure.
+        """
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        try:
+            import torch
+
+            # --- Named built-in datasets ---
+            if source.lower() == "mnist":
+                from torchvision import datasets, transforms
+
+                ds = datasets.MNIST(
+                    root="data", train=False, download=True,
+                    transform=transforms.ToTensor(),
+                )
+                X = torch.stack([ds[i][0] for i in range(len(ds))]).view(len(ds), -1)
+                y = torch.tensor([ds[i][1] for i in range(len(ds))])
+                return X, y
+
+            if source.lower() == "cifar10":
+                from torchvision import datasets, transforms
+
+                ds = datasets.CIFAR10(
+                    root="data", train=False, download=True,
+                    transform=transforms.ToTensor(),
+                )
+                X = torch.stack([ds[i][0] for i in range(len(ds))]).view(len(ds), -1)
+                y = torch.tensor([ds[i][1] for i in range(len(ds))])
+                return X, y
+
+            # --- File-based dataset ---
+            if source.endswith(".pt") or source.endswith(".pth"):
+                data = torch.load(source, map_location="cpu", weights_only=False)
+                if isinstance(data, dict) and "X" in data and "y" in data:
+                    return data["X"], data["y"]
+                logger.warning("val_dataset file %s missing 'X'/'y' keys", source)
+                return None, None
+
+            logger.warning("Unknown val_dataset format: %s", source)
+            return None, None
+
+        except Exception as e:
+            logger.warning("Could not load val_dataset '%s': %s", source, e)
+            return None, None
+
+    # ------------------------------------------------------------------
     # Group queries
     # ------------------------------------------------------------------
 
@@ -959,14 +1099,12 @@ class GroupManager:
         normalized = self.normalize_update(update)
         triggered = group.add_update(client_id, normalized)
 
-        # Persist client metrics to database
+        # Persist client metrics to database (no self-reported accuracy/loss)
         try:
             db = get_db()
             client_info = group.clients.get(client_id, {})
             db.update_fl_client_metrics(
                 client_id=client_id,
-                local_accuracy=client_info.get("local_accuracy", 0),
-                local_loss=client_info.get("local_loss", 0),
                 updates_count=client_info.get("updates_count", 0),
                 gradient_norm=client_info.get("gradient_norm", 0),
                 status="active",

@@ -59,8 +59,6 @@ export default function GroupDetailPage() {
     status: info.status || 'unknown',
     last_update: (info.last_update as number) || 0,
     update_count: info.update_count || 0,
-    local_accuracy: info.local_accuracy || 0,
-    local_loss: info.local_loss || 0,
     trust_score: info.trust_score || 0,
     joined_at: info.joined_at || '',
   }));
@@ -144,6 +142,12 @@ export default function GroupDetailPage() {
                 <TrendingUp size={17} className="text-gray-300" />
               </div>
               <p className="text-2xl font-bold text-white">{((accuracy) * 100).toFixed(1)}%</p>
+              {group.metrics_source === 'server' && (
+                <p className="text-[10px] text-emerald-400 mt-1">Server-verified</p>
+              )}
+              {group.metrics_source === 'unverified' && (
+                <p className="text-[10px] text-amber-400 mt-1">No validation dataset</p>
+              )}
             </div>
             <div className="stat-card accent-amber p-5">
               <div className="flex items-center justify-between mb-4">
@@ -170,6 +174,67 @@ export default function GroupDetailPage() {
               label={`Window: ${group.window_status?.pending_updates ?? 0} / ${group.window_size} updates (${group.time_limit}s timeout)`}
             />
           </div>
+
+          {group.training_manifest && (
+            <div className="glass-card p-5">
+              <div className="flex items-center gap-2 mb-4">
+                <ScrollText size={16} className="text-cyan-400" />
+                <h3 className="text-sm font-semibold text-white">Training Contract</h3>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
+                {group.training_manifest.expected_delta_bytes != null && (
+                  <div>
+                    <p className="text-slate-500">Expected delta</p>
+                    <p className="text-white font-mono mt-0.5">{group.training_manifest.expected_delta_bytes.toLocaleString()} bytes</p>
+                  </div>
+                )}
+                {group.training_manifest.is_peft != null && (
+                  <div>
+                    <p className="text-slate-500">PEFT</p>
+                    <p className={`font-medium mt-0.5 ${group.training_manifest.is_peft ? 'text-purple-300' : 'text-slate-300'}`}>
+                      {group.training_manifest.is_peft ? 'Yes' : 'No'}
+                    </p>
+                  </div>
+                )}
+                {group.training_manifest.lr != null && (
+                  <div>
+                    <p className="text-slate-500">Learning rate</p>
+                    <p className="text-white font-mono mt-0.5">{group.training_manifest.lr}</p>
+                  </div>
+                )}
+                {group.training_manifest.epochs != null && (
+                  <div>
+                    <p className="text-slate-500">Epochs</p>
+                    <p className="text-white font-mono mt-0.5">{group.training_manifest.epochs}</p>
+                  </div>
+                )}
+                {group.training_manifest.batch_size != null && (
+                  <div>
+                    <p className="text-slate-500">Batch size</p>
+                    <p className="text-white font-mono mt-0.5">{group.training_manifest.batch_size}</p>
+                  </div>
+                )}
+                {group.training_manifest.target_modules != null && (
+                  <div className="col-span-2">
+                    <p className="text-slate-500">Target modules</p>
+                    <p className="text-white font-mono mt-0.5">{group.training_manifest.target_modules.join(', ')}</p>
+                  </div>
+                )}
+                {group.training_manifest.val_dataset != null && (
+                  <div>
+                    <p className="text-slate-500">Val dataset</p>
+                    <p className="text-white font-mono mt-0.5">{group.training_manifest.val_dataset}</p>
+                  </div>
+                )}
+                {group.training_manifest.lora_rank != null && (
+                  <div>
+                    <p className="text-slate-500">LoRA rank</p>
+                    <p className="text-white font-mono mt-0.5">{group.training_manifest.lora_rank}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -205,8 +270,6 @@ export default function GroupDetailPage() {
                     <th className="text-left p-4 text-slate-500 text-[11px] font-semibold uppercase tracking-wider">Client</th>
                     <th className="text-left p-4 text-slate-500 text-[11px] font-semibold uppercase tracking-wider">Status</th>
                     <th className="text-left p-4 text-slate-500 text-[11px] font-semibold uppercase tracking-wider">Updates</th>
-                    <th className="text-left p-4 text-slate-500 text-[11px] font-semibold uppercase tracking-wider">Accuracy</th>
-                    <th className="text-left p-4 text-slate-500 text-[11px] font-semibold uppercase tracking-wider">Loss</th>
                     <th className="text-left p-4 text-slate-500 text-[11px] font-semibold uppercase tracking-wider">Trust</th>
                   </tr>
                 </thead>
@@ -216,8 +279,6 @@ export default function GroupDetailPage() {
                       <td className="p-4 text-white font-mono text-sm">{client.client_id}</td>
                       <td className="p-4"><StatusBadge status={client.status} /></td>
                       <td className="p-4 text-slate-300 text-sm">{client.update_count || 0}</td>
-                      <td className="p-4 text-slate-200 text-sm">{((client.local_accuracy || 0) * 100).toFixed(1)}%</td>
-                      <td className="p-4 text-slate-300 text-sm">{(client.local_loss || 0).toFixed(4)}</td>
                       <td className="p-4"><MetricBar value={client.trust_score || 0} max={1} colorMode="trust" /></td>
                     </tr>
                   ))}
