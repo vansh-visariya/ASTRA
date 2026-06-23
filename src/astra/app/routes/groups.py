@@ -166,10 +166,12 @@ async def update_group_manifest(
 
     try:
         db = get_db()
-        db._execute(
-            "UPDATE experiments SET config_json = ? WHERE experiment_id = ?",
-            (json.dumps(group.config), group_id),
-        )
+        with db.connection() as conn:
+            conn.execute(
+                "UPDATE experiments SET config_json = ? WHERE experiment_id = ?",
+                (json.dumps(group.config), group_id),
+            )
+            conn.commit()
     except Exception as e:
         logger.warning("Could not persist manifest update: %s", e)
 

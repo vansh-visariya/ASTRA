@@ -55,6 +55,7 @@ export interface ClientMeta {
   update_count?: number;
   trust_score?: number;
   joined_at?: string;
+  user_id?: number;
 }
 
 export interface Client {

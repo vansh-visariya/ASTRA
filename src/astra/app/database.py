@@ -36,6 +36,7 @@ class AstraDB:
         self._lock = threading.Lock()
         self._init_schema()
         self._migrate_legacy_dbs()
+        self._migrate_secure_messages()
         self._ensure_default_admin()
         logger.info("AstraDB init: path=%s WAL=on", os.path.abspath(db_path))
 
@@ -412,6 +413,33 @@ class AstraDB:
                 logger.info("[DB] Removed FK constraint from metrics table")
             except sqlite3.OperationalError as e:
                 logger.warning("[DB] metrics FK migration skipped: %s", e)
+
+    def _migrate_secure_messages(self):
+        """Migrate secure_messages table to chat schema if needed."""
+        try:
+            with self.connection() as conn:
+                row = conn.execute(
+                    "SELECT sql FROM sqlite_master WHERE type='table' AND name='secure_messages'"
+                ).fetchone()
+                if not row:
+                    return
+                create_sql = row[0]
+                if "sender_id" in create_sql and "content" in create_sql:
+                    return  # already migrated
+                conn.execute("DROP TABLE IF EXISTS secure_messages")
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS secure_messages (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        group_id TEXT NOT NULL,
+                        sender_id INTEGER NOT NULL,
+                        content TEXT NOT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                conn.commit()
+                logger.info("[DB] Migrated secure_messages to chat schema")
+        except Exception as e:
+            logger.warning("[DB] secure_messages migration skipped: %s", e)
 
     # ========================================================================
     # Migration from legacy databases

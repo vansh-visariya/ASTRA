@@ -9,12 +9,14 @@ interface WsContextValue {
   isConnected: boolean;
   lastMessage: Record<string, unknown> | null;
   onMessage: (handler: WsMessageHandler) => () => void;
+  send: (message: Record<string, unknown>) => void;
 }
 
 const WsContext = createContext<WsContextValue>({
   isConnected: false,
   lastMessage: null,
   onMessage: () => () => {},
+  send: () => {},
 });
 
 export function WebSocketProvider({ children }: { children: ReactNode }) {

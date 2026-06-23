@@ -49,14 +49,28 @@ class GroupManager:
     # ------------------------------------------------------------------
 
     async def broadcast_to_group(self, group_id: str, message: dict):
-        """Broadcast message to all clients in a group."""
+        """Broadcast message to all clients in a group AND all dashboard connections."""
         if not self.connection_manager:
             return
+
+        sent: set[int] = set()
+
+        # Send to registered FL clients in the group
         group = self.groups.get(group_id)
-        if not group:
-            return
-        for client_id in group.clients:
-            await self.connection_manager.send_to(client_id, message)
+        if group:
+            for client_id in group.clients:
+                ws = self.connection_manager.client_sockets.get(client_id)
+                if ws and id(ws) not in sent:
+                    with contextlib.suppress(Exception):
+                        await ws.send_json(message)
+                    sent.add(id(ws))
+
+        # Also broadcast to all active connections (dashboards, etc.)
+        for connection in self.connection_manager.active_connections:
+            if id(connection) not in sent:
+                with contextlib.suppress(Exception):
+                    await connection.send_json(message)
+                sent.add(id(connection))
 
     # ------------------------------------------------------------------
     # Database persistence

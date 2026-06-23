@@ -7,6 +7,7 @@ import logging
 from fastapi import APIRouter, Depends, Header, HTTPException
 
 from astra.app.database import get_db
+from astra.app.routes._auth import verify_request_jwt
 from astra.app.state import get_fl_server
 
 router = APIRouter()
@@ -15,14 +16,7 @@ logger = logging.getLogger(__name__)
 
 def _get_any_user(authorization: str = Header(None)):
     """Require valid JWT token (any role)."""
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
-    token = authorization.removeprefix("Bearer ").strip()
-    from astra.infra.security.auth import verify_token
-    payload = verify_token(token)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-    return payload
+    return verify_request_jwt(authorization)
 
 
 @router.get("/api/groups/{group_id}/messages")
@@ -39,22 +33,23 @@ async def get_messages(
         raise HTTPException(status_code=404, detail="Group not found")
 
     db = get_db()
-    if before:
-        rows = db._execute(
-            "SELECT m.*, u.username, u.full_name, u.role FROM secure_messages m "
-            "LEFT JOIN users u ON m.sender_id = u.id "
-            "WHERE m.group_id = ? AND m.id < ? "
-            "ORDER BY m.created_at DESC LIMIT ?",
-            (group_id, before, limit),
-        )
-    else:
-        rows = db._execute(
-            "SELECT m.*, u.username, u.full_name, u.role FROM secure_messages m "
-            "LEFT JOIN users u ON m.sender_id = u.id "
-            "WHERE m.group_id = ? "
-            "ORDER BY m.created_at DESC LIMIT ?",
-            (group_id, limit),
-        )
+    with db.connection() as conn:
+        if before:
+            rows = conn.execute(
+                "SELECT m.*, u.username, u.full_name, u.role FROM secure_messages m "
+                "LEFT JOIN users u ON m.sender_id = u.id "
+                "WHERE m.group_id = ? AND m.id < ? "
+                "ORDER BY m.created_at DESC LIMIT ?",
+                (group_id, before, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT m.*, u.username, u.full_name, u.role FROM secure_messages m "
+                "LEFT JOIN users u ON m.sender_id = u.id "
+                "WHERE m.group_id = ? "
+                "ORDER BY m.created_at DESC LIMIT ?",
+                (group_id, limit),
+            ).fetchall()
     messages = []
     for r in reversed(rows):
         messages.append({
@@ -86,16 +81,15 @@ async def send_message(
         raise HTTPException(status_code=400, detail="Content is required")
 
     db = get_db()
-    cursor = db._execute(
-        "INSERT INTO secure_messages (group_id, sender_id, content) VALUES (?, ?, ?)",
-        (group_id, current_user["user_id"], content),
-    )
-    message_id = cursor.lastrowid
+    with db.connection() as conn:
+        cursor = conn.execute(
+            "INSERT INTO secure_messages (group_id, sender_id, content) VALUES (?, ?, ?)",
+            (group_id, current_user["user_id"], content),
+        )
+        message_id = cursor.lastrowid
+        conn.commit()
 
-    # Broadcast via WebSocket to all connected clients in the group
     try:
-        from astra.app.state import get_fl_server
-        fl_server = get_fl_server()
         if fl_server and fl_server.group_manager:
             import asyncio
             asyncio.create_task(fl_server.group_manager.broadcast_to_group(group_id, {
@@ -119,11 +113,12 @@ async def send_message(
 
 @router.get("/api/groups/{group_id}/unread-count")
 async def get_unread_count(group_id: str, current_user=Depends(_get_any_user)):
-    """Get count of unread messages for a group (messages sent after user's last session)."""
+    """Get count of messages for a group."""
     db = get_db()
-    rows = db._execute(
-        "SELECT COUNT(*) as cnt FROM secure_messages WHERE group_id = ?",
-        (group_id,),
-    )
-    count = rows[0]["cnt"] if rows else 0
+    with db.connection() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) as cnt FROM secure_messages WHERE group_id = ?",
+            (group_id,),
+        ).fetchone()
+    count = row["cnt"] if row else 0
     return {"unread_count": count}

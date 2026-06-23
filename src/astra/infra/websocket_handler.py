@@ -146,6 +146,47 @@ async def websocket_endpoint(websocket: WebSocket):
                     {"status": "rejected", "reason": "client_training_no_longer_supported"}
                 )
 
+            elif message.get("type") == "chat_message":
+                group_id = message.get("group_id")
+                content = message.get("content", "").strip()
+                if not group_id or not content:
+                    await websocket.send_json({"status": "rejected", "reason": "missing_group_id_or_content"})
+                    continue
+
+                group = fl_server.group_manager.groups.get(group_id)
+                if not group:
+                    await websocket.send_json({"status": "rejected", "reason": "group_not_found"})
+                    continue
+
+                user_id = payload.get("user_id")
+                username = payload.get("username", "Unknown")
+
+                from astra.app.database import get_db
+                db = get_db()
+                with db.connection() as conn:
+                    cursor = conn.execute(
+                        "INSERT INTO secure_messages (group_id, sender_id, content) VALUES (?, ?, ?)",
+                        (group_id, user_id, content),
+                    )
+                    message_id = cursor.lastrowid
+                    conn.commit()
+
+                await fl_server.group_manager.broadcast_to_group(group_id, {
+                    "type": "new_message",
+                    "group_id": group_id,
+                    "message_id": message_id,
+                    "sender_id": user_id,
+                    "sender_name": username,
+                    "sender_role": payload.get("role", "client"),
+                    "content": content,
+                })
+
+                await websocket.send_json({
+                    "status": "sent",
+                    "message_id": message_id,
+                    "group_id": group_id,
+                })
+
     except WebSocketDisconnect:
         logger = logging.getLogger(__name__)
         logger.info("WebSocket disconnected normally")

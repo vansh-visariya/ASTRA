@@ -178,6 +178,7 @@ class TrainingGroup:
                     "update_count": info.get("updates_count", 0),
                     "trust_score": info.get("trust_score", 1.0),
                     "joined_at": info.get("joined_at"),
+                    "user_id": info.get("user_id"),
                 }
                 for cid, info in self.clients.items()
             },

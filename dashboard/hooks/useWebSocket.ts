@@ -8,6 +8,7 @@ interface UseWebSocketResult {
   isConnected: boolean;
   lastMessage: Record<string, unknown> | null;
   onMessage: (handler: WsMessageHandler) => () => void;
+  send: (message: Record<string, unknown>) => void;
 }
 
 export function useWebSocket(): UseWebSocketResult {
@@ -85,5 +86,11 @@ export function useWebSocket(): UseWebSocketResult {
     };
   }, []);
 
-  return { isConnected, lastMessage, onMessage };
+  const send = useCallback((message: Record<string, unknown>) => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify(message));
+    }
+  }, []);
+
+  return { isConnected, lastMessage, onMessage, send };
 }

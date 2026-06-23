@@ -31,7 +31,7 @@ export default function GroupDetailPage() {
   const [announcementPriority, setAnnouncementPriority] = useState('info');
   const [messages, setMessages] = useState<Message[]>([]);
   const [messageText, setMessageText] = useState('');
-  const { isConnected } = useWS();
+  const { isConnected, send: wsSend, onMessage } = useWS();
 
   const { data: groupData, loading, error, refetch } = useGetGroup(id, isConnected);
   const { data: logsData } = useLogs(isConnected, id, logFilter || undefined);
@@ -48,6 +48,31 @@ export default function GroupDetailPage() {
       getMessages(id).then((res: any) => setMessages(res?.messages || [])).catch(() => {});
     }
   }, [activeTab, id]);
+
+  useEffect(() => {
+    if (activeTab !== 'chat') return;
+    const unsub = onMessage((msg) => {
+      if (msg.type === 'new_message' && msg.group_id === id) {
+        setMessages((prev) => {
+          const newMsg: Message = {
+            id: msg.message_id as number,
+            group_id: msg.group_id as string,
+            sender_id: msg.sender_id as number,
+            sender_name: msg.sender_name as string,
+            sender_role: msg.sender_role as 'admin' | 'client' | 'observer',
+            content: msg.content as string,
+            created_at: new Date().toISOString(),
+          };
+          return [...prev, newMsg];
+        });
+        setTimeout(() => {
+          const el = document.getElementById('chat-messages');
+          if (el) el.scrollTop = el.scrollHeight;
+        }, 50);
+      }
+    });
+    return unsub;
+  }, [activeTab, id, onMessage]);
 
   const group: Group | null = (groupData as any)?.group || null;
   const logs: LogEntry[] = (logsData as any)?.logs || [];
@@ -519,30 +544,18 @@ export default function GroupDetailPage() {
                 onChange={(e) => setMessageText(e.target.value)}
                 onKeyDown={async (e) => {
                   if (e.key === 'Enter' && messageText.trim()) {
-                    try {
-                      await sendMessage(id, messageText);
-                      setMessageText('');
-                      const res: any = await getMessages(id);
-                      setMessages(res?.messages || []);
-                      const el = document.getElementById('chat-messages');
-                      if (el) el.scrollTop = el.scrollHeight;
-                    } catch {}
+                    wsSend({ type: 'chat_message', group_id: id, content: messageText });
+                    setMessageText('');
                   }
                 }}
                 className="input-field flex-1"
                 placeholder="Type a message..."
               />
               <button
-                onClick={async () => {
+                onClick={() => {
                   if (!messageText.trim()) return;
-                  try {
-                    await sendMessage(id, messageText);
-                    setMessageText('');
-                    const res: any = await getMessages(id);
-                    setMessages(res?.messages || []);
-                    const el = document.getElementById('chat-messages');
-                    if (el) el.scrollTop = el.scrollHeight;
-                  } catch {}
+                  wsSend({ type: 'chat_message', group_id: id, content: messageText });
+                  setMessageText('');
                 }}
                 disabled={!messageText.trim()}
                 className="btn-primary !px-4 text-sm disabled:opacity-50"

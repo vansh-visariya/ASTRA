@@ -28,13 +28,14 @@ export default function ClientDashboard() {
   const recentNotifications: Notification[] = (notifData as any)?.notifications || [];
 
   const groupsJoined = groups.filter((g: any) => {
-    const clientInfo = g.clients?.[user?.id || ''];
-    return clientInfo && (clientInfo.status === 'active' || clientInfo.status === 'joined');
+    const clients = g.clients || {};
+    return Object.values(clients).some((c: any) => c.user_id === user?.id && (c.status === 'active' || c.status === 'joined'));
   }).length;
 
   const roundsDone = groups.reduce((sum: number, g: any) => {
-    const clientInfo = g.clients?.[user?.id || ''];
-    return sum + (clientInfo?.updates_count || 0);
+    const clients = g.clients || {};
+    const myClient = Object.values(clients).find((c: any) => c.user_id === user?.id) as any;
+    return sum + (myClient?.update_count || myClient?.updates_count || 0);
   }, 0);
 
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
@@ -116,14 +117,14 @@ export default function ClientDashboard() {
         </Link>
       </div>
 
-      {groups.filter((g: any) => g.clients?.[user?.id || '']?.status === 'active').length > 0 && (
+      {groups.filter((g: any) => Object.values(g.clients || {}).some((c: any) => c.user_id === user?.id && c.status === 'active')).length > 0 && (
         <div className="glass-card p-5 animate-fade-in" style={{ animationDelay: '0.3s', opacity: 0 }}>
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-sm font-semibold text-white uppercase tracking-wider">Your Groups</h2>
           </div>
           <div className="space-y-2">
             {groups
-              .filter((g: any) => g.clients?.[user?.id || '']?.status === 'active')
+              .filter((g: any) => Object.values(g.clients || {}).some((c: any) => c.user_id === user?.id && c.status === 'active'))
               .slice(0, 5)
               .map((g: any) => (
                 <Link

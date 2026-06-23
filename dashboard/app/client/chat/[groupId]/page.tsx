@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { ArrowLeft, Send } from 'lucide-react';
 import { useAuth } from '@/components/AuthContext';
 import { useWS } from '@/components/WebSocketProvider';
-import { getMessages, sendMessage } from '@/lib/api/endpoints';
+import { getMessages } from '@/lib/api/endpoints';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import type { Message } from '@/lib/api/types';
 
@@ -13,7 +13,7 @@ export default function ClientChatPage() {
   const { groupId } = useParams<{ groupId: string }>();
   const { user } = useAuth();
   const router = useRouter();
-  const { isConnected } = useWS();
+  const { isConnected, send: wsSend, onMessage } = useWS();
   const [messages, setMessages] = useState<Message[]>([]);
   const [messageText, setMessageText] = useState('');
   const [loading, setLoading] = useState(true);
@@ -35,42 +35,31 @@ export default function ClientChatPage() {
       .catch(() => setLoading(false));
   }, [groupId]);
 
-  // Listen for new messages via WebSocket
   useEffect(() => {
-    if (!isConnected) return;
-    const handler = (event: MessageEvent) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.type === 'new_message' && data.group_id === groupId) {
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: data.message_id,
-              group_id: data.group_id,
-              sender_id: data.sender_id,
-              sender_name: data.sender_name,
-              sender_role: data.sender_role,
-              content: data.content,
-              created_at: new Date().toISOString(),
-            },
-          ]);
-          setTimeout(scrollToBottom, 100);
-        }
-      } catch {}
-    };
-    // We rely on the global WS connection from WebSocketProvider
-    return () => {};
-  }, [isConnected, groupId]);
+    const unsub = onMessage((msg) => {
+      if (msg.type === 'new_message' && msg.group_id === groupId) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: msg.message_id as number,
+            group_id: msg.group_id as string,
+            sender_id: msg.sender_id as number,
+            sender_name: msg.sender_name as string,
+            sender_role: msg.sender_role as 'admin' | 'client' | 'observer',
+            content: msg.content as string,
+            created_at: new Date().toISOString(),
+          },
+        ]);
+        setTimeout(scrollToBottom, 50);
+      }
+    });
+    return unsub;
+  }, [groupId, onMessage]);
 
-  const handleSend = async () => {
+  const handleSend = () => {
     if (!messageText.trim()) return;
-    try {
-      await sendMessage(groupId, messageText);
-      setMessageText('');
-      const res: any = await getMessages(groupId);
-      setMessages(res?.messages || []);
-      setTimeout(scrollToBottom, 100);
-    } catch {}
+    wsSend({ type: 'chat_message', group_id: groupId, content: messageText });
+    setMessageText('');
   };
 
   if (loading) return <LoadingSpinner message="Loading chat..." />;
@@ -88,7 +77,7 @@ export default function ClientChatPage() {
       </div>
 
       <div className="glass-card p-5">
-        <div className="space-y-3 max-h-[500px] overflow-y-auto mb-4">
+        <div className="space-y-3 max-h-[500px] overflow-y-auto mb-4" id="chat-messages">
           {messages.length === 0 ? (
             <p className="text-slate-500 text-sm text-center py-8">No messages yet. Start the conversation.</p>
           ) : (

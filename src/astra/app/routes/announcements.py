@@ -7,6 +7,7 @@ import logging
 from fastapi import APIRouter, Depends, Header, HTTPException
 
 from astra.app.database import get_db
+from astra.app.routes._auth import verify_request_jwt
 from astra.app.state import get_fl_server
 
 router = APIRouter()
@@ -15,19 +16,12 @@ logger = logging.getLogger(__name__)
 
 def _get_any_user(authorization: str = Header(None)):
     """Require valid JWT token (any role)."""
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
-    token = authorization.removeprefix("Bearer ").strip()
-    from astra.infra.security.auth import verify_token
-    payload = verify_token(token)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-    return payload
+    return verify_request_jwt(authorization)
 
 
 def _require_admin(authorization: str = Header(None)):
     """Require admin role."""
-    user = _get_any_user(authorization)
+    user = verify_request_jwt(authorization)
     if user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Admin access required")
     return user
@@ -42,12 +36,13 @@ async def get_announcements(group_id: str, current_user=Depends(_get_any_user)):
         raise HTTPException(status_code=404, detail="Group not found")
 
     db = get_db()
-    rows = db._execute(
-        "SELECT a.*, u.username, u.full_name FROM announcements a "
-        "LEFT JOIN users u ON a.author_id = u.id "
-        "WHERE a.group_id = ? ORDER BY a.created_at DESC LIMIT 50",
-        (group_id,),
-    )
+    with db.connection() as conn:
+        rows = conn.execute(
+            "SELECT a.*, u.username, u.full_name FROM announcements a "
+            "LEFT JOIN users u ON a.author_id = u.id "
+            "WHERE a.group_id = ? ORDER BY a.created_at DESC LIMIT 50",
+            (group_id,),
+        ).fetchall()
     announcements = []
     for r in rows:
         announcements.append({
@@ -83,16 +78,15 @@ async def send_announcement(
         priority = "info"
 
     db = get_db()
-    cursor = db._execute(
-        "INSERT INTO announcements (group_id, author_id, message, priority) VALUES (?, ?, ?, ?)",
-        (group_id, current_user["user_id"], message, priority),
-    )
-    announcement_id = cursor.lastrowid
+    with db.connection() as conn:
+        cursor = conn.execute(
+            "INSERT INTO announcements (group_id, author_id, message, priority) VALUES (?, ?, ?, ?)",
+            (group_id, current_user["user_id"], message, priority),
+        )
+        announcement_id = cursor.lastrowid
+        conn.commit()
 
-    # Broadcast via WebSocket to all connected clients
     try:
-        from astra.app.state import get_fl_server
-        fl_server = get_fl_server()
         if fl_server and fl_server.group_manager:
             import asyncio
             asyncio.create_task(fl_server.group_manager.broadcast_to_group(group_id, {
