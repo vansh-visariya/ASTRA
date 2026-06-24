@@ -17,8 +17,9 @@ import { MetricBar } from '@/components/ui/MetricBar';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { EmptyState } from '@/components/ui/EmptyState';
-import { controlGroup, approveJoin, rejectJoin, getAnnouncements, sendAnnouncement, getMessages, sendMessage } from '@/lib/api/endpoints';
-import type { Group, Client, LogEntry, Announcement, Message } from '@/lib/api/types';
+import { TrainingContract } from '@/components/client/TrainingContract';
+import { controlGroup, approveJoin, rejectJoin, getAnnouncements, sendAnnouncement, getMessages, sendMessage, uploadValidationData } from '@/lib/api/endpoints';
+import type { Group, Client, LogEntry, Announcement, Message, TrainingManifest } from '@/lib/api/types';
 
 export default function GroupDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -32,6 +33,9 @@ export default function GroupDetailPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [messageText, setMessageText] = useState('');
   const { isConnected, send: wsSend, onMessage } = useWS();
+  const [valUploadFile, setValUploadFile] = useState<File | null>(null);
+  const [valUploading, setValUploading] = useState(false);
+  const [valUploadResult, setValUploadResult] = useState<{ ok: boolean; message: string } | null>(null);
 
   const { data: groupData, loading, error, refetch } = useGetGroup(id, isConnected);
   const { data: logsData } = useLogs(isConnected, id, logFilter || undefined);
@@ -97,6 +101,22 @@ export default function GroupDetailPage() {
       await controlGroup(id, action);
       refetch();
     } catch { /* error shown via refetch */ }
+  };
+
+  const handleValUpload = async () => {
+    if (!valUploadFile || !id) return;
+    setValUploading(true);
+    setValUploadResult(null);
+    try {
+      await uploadValidationData(id, valUploadFile);
+      setValUploadResult({ ok: true, message: 'Validation data uploaded successfully' });
+      setValUploadFile(null);
+      refetch();
+    } catch (e: any) {
+      setValUploadResult({ ok: false, message: e?.message || 'Upload failed' });
+    } finally {
+      setValUploading(false);
+    }
   };
 
   if (loading) return <LoadingSpinner message="Loading group..." />;
@@ -253,62 +273,48 @@ export default function GroupDetailPage() {
 
           {group.training_manifest && (
             <div className="glass-card p-5">
-              <div className="flex items-center gap-2 mb-4">
-                <ScrollText size={16} className="text-cyan-400" />
-                <h3 className="text-sm font-semibold text-white">Training Contract</h3>
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <ScrollText size={16} className="text-cyan-400" />
+                  <h3 className="text-sm font-semibold text-white">Training Contract</h3>
+                  {group.training_manifest.contract_version != null && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 font-mono">
+                      v{group.training_manifest.contract_version}
+                    </span>
+                  )}
+                </div>
               </div>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
-                {group.training_manifest.expected_delta_bytes != null && (
-                  <div>
-                    <p className="text-slate-500">Expected delta</p>
-                    <p className="text-white font-mono mt-0.5">{Number(group.training_manifest.expected_delta_bytes).toLocaleString()} bytes</p>
+              <TrainingContract manifest={group.training_manifest as TrainingManifest} />
+
+              {/* Validation Data Upload */}
+              {user?.role === 'admin' && (
+                <div className="mt-4 p-3 rounded-xl" style={{ background: 'rgba(15,23,42,0.3)' }}>
+                  <p className="text-slate-400 text-xs font-medium mb-2">Upload Validation Data</p>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="file"
+                      accept=".pt,.pth"
+                      onChange={(e) => setValUploadFile(e.target.files?.[0] || null)}
+                      className="block text-sm text-slate-300 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:bg-slate-800 file:text-white"
+                    />
+                    <button
+                      onClick={handleValUpload}
+                      disabled={!valUploadFile || valUploading}
+                      className="btn-secondary !px-3 !py-1.5 text-xs disabled:opacity-50"
+                    >
+                      {valUploading ? 'Uploading...' : 'Upload'}
+                    </button>
                   </div>
-                )}
-                {group.training_manifest.is_peft != null && (
-                  <div>
-                    <p className="text-slate-500">PEFT</p>
-                    <p className={`font-medium mt-0.5 ${group.training_manifest.is_peft ? 'text-purple-300' : 'text-slate-300'}`}>
-                      {group.training_manifest.is_peft ? 'Yes' : 'No'}
+                  {valUploadResult && (
+                    <p className={`text-xs mt-2 ${valUploadResult.ok ? 'text-emerald-400' : 'text-red-400'}`}>
+                      {valUploadResult.message}
                     </p>
-                  </div>
-                )}
-                {group.training_manifest.lr != null && (
-                  <div>
-                    <p className="text-slate-500">Learning rate</p>
-                    <p className="text-white font-mono mt-0.5">{String(group.training_manifest.lr)}</p>
-                  </div>
-                )}
-                {group.training_manifest.local_epochs != null && (
-                  <div>
-                    <p className="text-slate-500">Local epochs</p>
-                    <p className="text-white font-mono mt-0.5">{String(group.training_manifest.local_epochs)}</p>
-                  </div>
-                )}
-                {group.training_manifest.batch_size != null && (
-                  <div>
-                    <p className="text-slate-500">Batch size</p>
-                    <p className="text-white font-mono mt-0.5">{String(group.training_manifest.batch_size)}</p>
-                  </div>
-                )}
-                {group.training_manifest.target_modules != null && (
-                  <div className="col-span-2">
-                    <p className="text-slate-500">Target modules</p>
-                    <p className="text-white font-mono mt-0.5">{String(group.training_manifest.target_modules)}</p>
-                  </div>
-                )}
-                {group.training_manifest.val_dataset != null && (
-                  <div>
-                    <p className="text-slate-500">Val dataset</p>
-                    <p className="text-white font-mono mt-0.5">{String(group.training_manifest.val_dataset)}</p>
-                  </div>
-                )}
-                {group.training_manifest.lora_rank != null && (
-                  <div>
-                    <p className="text-slate-500">LoRA rank</p>
-                    <p className="text-white font-mono mt-0.5">{String(group.training_manifest.lora_rank)}</p>
-                  </div>
-                )}
-              </div>
+                  )}
+                  <p className="text-slate-600 text-[10px] mt-1.5">
+                    .pt file with {'"X"'} (tensor) and {'"y"'} (tensor) keys. Used for server-side evaluation.
+                  </p>
+                </div>
+              )}
             </div>
           )}
         </div>

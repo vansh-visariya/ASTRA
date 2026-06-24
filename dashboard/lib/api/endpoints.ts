@@ -127,3 +127,20 @@ export const getMessages = (groupId: string, limit = 50, before?: number) => {
 
 export const sendMessage = (groupId: string, content: string) =>
   api.post<{ status: string; message_id: number }>(`/api/groups/${groupId}/messages`, { content });
+
+export const uploadValidationData = async (groupId: string, file: File) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  const response = await fetch(`${window.location.origin}/api/groups/${groupId}/validation-data`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${typeof window !== 'undefined' ? localStorage.getItem('astra_token') || '' : ''}`,
+    },
+    body: formData,
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ detail: 'Upload failed' }));
+    throw new Error(err.detail || 'Upload failed');
+  }
+  return response.json() as Promise<{ status: string; group_id: string; val_dataset: string; size_bytes: number }>;
+};

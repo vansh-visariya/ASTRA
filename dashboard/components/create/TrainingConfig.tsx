@@ -7,8 +7,15 @@ interface TrainingConfigProps {
   dpEnabled: boolean;
   localEpochs: number;
   batchSize: number;
-  valDataset: string;
-  expectedDeltaBytes: number;
+  optimizer: string;
+  lossFunction: string;
+  maxGradNorm: string;
+  inputShape: string;
+  numClasses: string;
+  labelType: string;
+  dataDescription: string;
+  preprocessingSteps: string;
+  valMetric: string;
   onChange: (field: string, value: number | boolean | string) => void;
 }
 
@@ -17,8 +24,15 @@ export function TrainingConfig({
   dpEnabled,
   localEpochs,
   batchSize,
-  valDataset,
-  expectedDeltaBytes,
+  optimizer,
+  lossFunction,
+  maxGradNorm,
+  inputShape,
+  numClasses,
+  labelType,
+  dataDescription,
+  preprocessingSteps,
+  valMetric,
   onChange,
 }: TrainingConfigProps) {
   return (
@@ -56,11 +70,37 @@ export function TrainingConfig({
       </div>
 
       <div className="glass-card p-5 space-y-4">
-        <h3 className="text-sm font-semibold text-white uppercase tracking-wider">Training Contract</h3>
+        <h3 className="text-sm font-semibold text-white uppercase tracking-wider">Training Protocol</h3>
         <p className="text-slate-500 text-xs">
           These parameters are sent to clients as a training contract. Clients see them before training and should follow them.
         </p>
         <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="text-slate-400 text-xs font-medium block mb-1.5">Optimizer</label>
+            <select
+              value={optimizer}
+              onChange={(e) => onChange('optimizer', e.target.value)}
+              className="input-field"
+            >
+              <option value="adamw">AdamW</option>
+              <option value="adam">Adam</option>
+              <option value="sgd">SGD</option>
+              <option value="rmsprop">RMSprop</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-slate-400 text-xs font-medium block mb-1.5">Loss Function</label>
+            <select
+              value={lossFunction}
+              onChange={(e) => onChange('loss_function', e.target.value)}
+              className="input-field"
+            >
+              <option value="cross_entropy">Cross Entropy</option>
+              <option value="mse">MSE</option>
+              <option value="nll">NLL</option>
+              <option value="bce">Binary Cross Entropy</option>
+            </select>
+          </div>
           <div>
             <label className="text-slate-400 text-xs font-medium block mb-1.5">Local Epochs</label>
             <input
@@ -86,30 +126,108 @@ export function TrainingConfig({
             <p className="text-slate-600 text-[10px] mt-1">Recommended batch size for training</p>
           </div>
           <div>
-            <label className="text-slate-400 text-xs font-medium block mb-1.5">Validation Dataset</label>
-            <select
-              value={valDataset}
-              onChange={(e) => onChange('val_dataset', e.target.value)}
-              className="input-field"
-            >
-              <option value="">None (no server evaluation)</option>
-              <option value="mnist">MNIST</option>
-              <option value="cifar10">CIFAR-10</option>
-            </select>
-            <p className="text-slate-600 text-[10px] mt-1">Server evaluates model on this dataset after each round</p>
-          </div>
-          <div>
-            <label className="text-slate-400 text-xs font-medium block mb-1.5">Expected Delta Size (bytes)</label>
+            <label className="text-slate-400 text-xs font-medium block mb-1.5">Max Gradient Norm</label>
             <input
               type="number"
-              value={expectedDeltaBytes}
-              onChange={(e) => onChange('expected_delta_bytes', parseInt(e.target.value) || 0)}
+              step="0.1"
+              value={maxGradNorm}
+              onChange={(e) => onChange('max_grad_norm', e.target.value)}
               className="input-field"
-              min={0}
+              placeholder="None (no clipping)"
             />
-            <p className="text-slate-600 text-[10px] mt-1">Exact byte count for uploaded deltas (0 = skip check)</p>
+            <p className="text-slate-600 text-[10px] mt-1">Optional gradient clipping norm</p>
           </div>
         </div>
+      </div>
+
+      <div className="glass-card p-5 space-y-4">
+        <h3 className="text-sm font-semibold text-white uppercase tracking-wider">Data Schema</h3>
+        <p className="text-slate-500 text-xs">
+          Informational — describes expected data format for clients.
+        </p>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="col-span-2">
+            <label className="text-slate-400 text-xs font-medium block mb-1.5">Data Description</label>
+            <textarea
+              value={dataDescription}
+              onChange={(e) => onChange('data_description', e.target.value)}
+              className="input-field w-full h-16 resize-none"
+              placeholder="e.g., MNIST digits 0-9, 28x28 grayscale images flattened to 784-dim vectors"
+            />
+          </div>
+          <div>
+            <label className="text-slate-400 text-xs font-medium block mb-1.5">Input Shape</label>
+            <input
+              type="text"
+              value={inputShape}
+              onChange={(e) => onChange('input_shape', e.target.value)}
+              className="input-field"
+              placeholder="e.g., 784 or 3,224,224"
+            />
+            <p className="text-slate-600 text-[10px] mt-1">Comma-separated dimensions</p>
+          </div>
+          <div>
+            <label className="text-slate-400 text-xs font-medium block mb-1.5">Number of Classes</label>
+            <input
+              type="number"
+              value={numClasses}
+              onChange={(e) => onChange('num_classes', e.target.value)}
+              className="input-field"
+              placeholder="e.g., 10"
+              min={1}
+            />
+          </div>
+          <div>
+            <label className="text-slate-400 text-xs font-medium block mb-1.5">Label Type</label>
+            <select
+              value={labelType}
+              onChange={(e) => onChange('label_type', e.target.value)}
+              className="input-field"
+            >
+              <option value="">Not specified</option>
+              <option value="classification">Classification</option>
+              <option value="regression">Regression</option>
+              <option value="causal_lm">Causal LM</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-slate-400 text-xs font-medium block mb-1.5">Preprocessing Steps</label>
+            <input
+              type="text"
+              value={preprocessingSteps}
+              onChange={(e) => onChange('preprocessing_steps', e.target.value)}
+              className="input-field"
+              placeholder="e.g., normalize, tokenize"
+            />
+            <p className="text-slate-600 text-[10px] mt-1">Comma-separated steps</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="glass-card p-5 space-y-4">
+        <h3 className="text-sm font-semibold text-white uppercase tracking-wider">Validation</h3>
+        <p className="text-slate-500 text-xs">
+          Server evaluates the global model after each aggregation round. Upload validation data after creating the group.
+        </p>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="text-slate-400 text-xs font-medium block mb-1.5">Validation Metric</label>
+            <select
+              value={valMetric}
+              onChange={(e) => onChange('val_metric', e.target.value)}
+              className="input-field"
+            >
+              <option value="accuracy">Accuracy</option>
+              <option value="f1">F1 Score</option>
+              <option value="precision">Precision</option>
+              <option value="recall">Recall</option>
+              <option value="mse">MSE</option>
+            </select>
+          </div>
+        </div>
+        <p className="text-slate-600 text-[10px]">
+          After creating the group, use the group detail page to upload a .pt validation dataset.
+        </p>
       </div>
     </div>
   );

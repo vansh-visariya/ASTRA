@@ -5,7 +5,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import {
   Layers, LogOut, Bell,
-  Users, Activity, Shield,
+  Users, Activity,
   ChevronRight, Upload
 } from 'lucide-react';
 import { useAuth } from '@/components/AuthContext';
@@ -16,7 +16,6 @@ const clientNav = [
   { href: '/client', label: 'Dashboard', icon: Activity },
   { href: '/client/groups', label: 'Available Groups', icon: Users },
   { href: '/client/upload', label: 'Upload Delta', icon: Upload },
-  { href: '/client/trust', label: 'Trust Score', icon: Shield },
   { href: '/client/notifications', label: 'Notifications', icon: Bell },
 ];
 

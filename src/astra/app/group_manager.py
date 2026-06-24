@@ -946,14 +946,9 @@ class GroupManager:
         Returns ``{"accuracy": float, "loss": float}``.  If no validation
         dataset is configured or evaluation fails, returns zeros.
 
-        The admin configures ``val_dataset`` in the training manifest
-        when creating the group.  Supported formats:
-
-        * ``"mnist"`` — built-in MNIST test split (requires torchvision)
-        * ``"cifar10"`` — built-in CIFAR-10 test split
-        * ``"/path/to/data.pt"`` — a PyTorch file with
-          ``{"X": Tensor[N, ...], "y": Tensor[N]}``
-        * ``None`` / empty — skip evaluation, return zeros
+        The admin uploads a validation dataset (.pt file) via
+        ``POST /api/groups/{group_id}/validation-data``.  The file must
+        contain a dict with ``"X"`` (Tensor) and ``"y"`` (Tensor) keys.
         """
         import logging
 
@@ -998,8 +993,9 @@ class GroupManager:
             return {"accuracy": 0.0, "loss": 0.0}
 
     def _load_val_dataset(self, source: str) -> tuple | tuple[None, None]:
-        """Load validation data from a named dataset or file path.
+        """Load validation data from an admin-uploaded .pt file.
 
+        Expects a file containing a dict with 'X' (tensor) and 'y' (tensor) keys.
         Returns (X, y) tensors or (None, None) on failure.
         """
         import logging
@@ -1009,30 +1005,6 @@ class GroupManager:
         try:
             import torch
 
-            # --- Named built-in datasets ---
-            if source.lower() == "mnist":
-                from torchvision import datasets, transforms
-
-                ds = datasets.MNIST(
-                    root="data", train=False, download=True,
-                    transform=transforms.ToTensor(),
-                )
-                X = torch.stack([ds[i][0] for i in range(len(ds))]).view(len(ds), -1)
-                y = torch.tensor([ds[i][1] for i in range(len(ds))])
-                return X, y
-
-            if source.lower() == "cifar10":
-                from torchvision import datasets, transforms
-
-                ds = datasets.CIFAR10(
-                    root="data", train=False, download=True,
-                    transform=transforms.ToTensor(),
-                )
-                X = torch.stack([ds[i][0] for i in range(len(ds))]).view(len(ds), -1)
-                y = torch.tensor([ds[i][1] for i in range(len(ds))])
-                return X, y
-
-            # --- File-based dataset ---
             if source.endswith(".pt") or source.endswith(".pth"):
                 data = torch.load(source, map_location="cpu", weights_only=False)
                 if isinstance(data, dict) and "X" in data and "y" in data:
@@ -1040,7 +1012,7 @@ class GroupManager:
                 logger.warning("val_dataset file %s missing 'X'/'y' keys", source)
                 return None, None
 
-            logger.warning("Unknown val_dataset format: %s", source)
+            logger.warning("Unknown val_dataset format: %s (only .pt/.pth supported)", source)
             return None, None
 
         except Exception as e:

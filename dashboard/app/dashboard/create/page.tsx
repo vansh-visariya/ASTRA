@@ -33,8 +33,15 @@ export default function CreateGroupPage() {
   const [aggregator, setAggregator] = useState('fedavg');
   const [localEpochs, setLocalEpochs] = useState(2);
   const [batchSize, setBatchSize] = useState(32);
-  const [valDataset, setValDataset] = useState('');
-  const [expectedDeltaBytes, setExpectedDeltaBytes] = useState(0);
+  const [optimizer, setOptimizer] = useState('adamw');
+  const [lossFunction, setLossFunction] = useState('cross_entropy');
+  const [maxGradNorm, setMaxGradNorm] = useState('');
+  const [inputShape, setInputShape] = useState('');
+  const [numClasses, setNumClasses] = useState('');
+  const [labelType, setLabelType] = useState('');
+  const [dataDescription, setDataDescription] = useState('');
+  const [preprocessingSteps, setPreprocessingSteps] = useState('');
+  const [valMetric, setValMetric] = useState('accuracy');
 
   const handleRegisterHf = async (modelName: string, peftRank?: number) => {
     const result = await registerHfModel({ model_name: modelName, use_peft: !!peftRank });
@@ -64,9 +71,16 @@ export default function CreateGroupPage() {
         local_epochs: localEpochs,
         batch_size: batchSize,
         lr: learningRate,
+        optimizer,
+        loss_function: lossFunction,
+        val_metric: valMetric,
       };
-      if (valDataset) manifest.val_dataset = valDataset;
-      if (expectedDeltaBytes > 0) manifest.expected_delta_bytes = expectedDeltaBytes;
+      if (maxGradNorm) manifest.max_grad_norm = parseFloat(maxGradNorm);
+      if (inputShape) manifest.input_shape = inputShape.split(',').map((s: string) => parseInt(s.trim())).filter(Boolean);
+      if (numClasses) manifest.num_classes = parseInt(numClasses);
+      if (labelType) manifest.label_type = labelType;
+      if (dataDescription) manifest.data_description = dataDescription;
+      if (preprocessingSteps) manifest.preprocessing_steps = preprocessingSteps.split(',').map((s: string) => s.trim()).filter(Boolean);
 
       await createGroup({
         group_id: groupId,
@@ -155,16 +169,30 @@ export default function CreateGroupPage() {
           dpEnabled={dpEnabled}
           localEpochs={localEpochs}
           batchSize={batchSize}
-          valDataset={valDataset}
-          expectedDeltaBytes={expectedDeltaBytes}
+          optimizer={optimizer}
+          lossFunction={lossFunction}
+          maxGradNorm={maxGradNorm}
+          inputShape={inputShape}
+          numClasses={numClasses}
+          labelType={labelType}
+          dataDescription={dataDescription}
+          preprocessingSteps={preprocessingSteps}
+          valMetric={valMetric}
           onChange={(field, value) => {
             switch (field) {
               case 'lr': setLearningRate(value as number); break;
               case 'dp_enabled': setDpEnabled(value as boolean); break;
               case 'local_epochs': setLocalEpochs(value as number); break;
               case 'batch_size': setBatchSize(value as number); break;
-              case 'val_dataset': setValDataset(value as string); break;
-              case 'expected_delta_bytes': setExpectedDeltaBytes(value as number); break;
+              case 'optimizer': setOptimizer(value as string); break;
+              case 'loss_function': setLossFunction(value as string); break;
+              case 'max_grad_norm': setMaxGradNorm(value as string); break;
+              case 'input_shape': setInputShape(value as string); break;
+              case 'num_classes': setNumClasses(value as string); break;
+              case 'label_type': setLabelType(value as string); break;
+              case 'data_description': setDataDescription(value as string); break;
+              case 'preprocessing_steps': setPreprocessingSteps(value as string); break;
+              case 'val_metric': setValMetric(value as string); break;
             }
           }}
         />

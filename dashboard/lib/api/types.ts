@@ -30,7 +30,7 @@ export interface Group {
   client_count?: number;
   active_clients?: string[];
   config?: Record<string, unknown>;
-  training_manifest?: Record<string, unknown> | null;
+  training_manifest?: TrainingManifest | null;
   metrics_history?: Array<{
     accuracy: number;
     loss: number;
@@ -46,6 +46,31 @@ export interface Group {
     trigger_reason: string;
   };
   created_at?: string;
+}
+
+export interface TrainingManifest {
+  contract_version?: number;
+  model_id: string;
+  is_peft?: boolean;
+  target_modules?: string[];
+  lora_rank?: number;
+  lora_alpha?: number;
+  expected_delta_bytes?: number;
+  lr?: number;
+  batch_size?: number;
+  local_epochs?: number;
+  optimizer?: string;
+  loss_function?: string;
+  max_grad_norm?: number;
+  input_features?: string[];
+  input_shape?: number[];
+  num_classes?: number;
+  label_type?: string;
+  data_description?: string;
+  preprocessing_steps?: string[];
+  accepted_update_types?: string[];
+  val_dataset?: string;
+  val_metric?: string;
 }
 
 export interface ClientMeta {

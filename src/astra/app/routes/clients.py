@@ -222,20 +222,9 @@ async def submit_client_delta(client_id: str, request: Request):
         if model_info:
             is_peft = model_info.get("is_peft", False)
 
-    # --- Training Manifest validation (hard constraint) ---
+    # --- Training Manifest (advisory only — no hard rejection) ---
     manifest = group.config.get("training_manifest")
-    if manifest:
-        expected_bytes = manifest.get("expected_delta_bytes")
-        if expected_bytes and len(delta_bytes) != expected_bytes:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Delta size mismatch: uploaded {len(delta_bytes):,} bytes, "
-                    f"but the training manifest requires exactly {expected_bytes:,} bytes. "
-                    f"Your model architecture or PEFT config likely doesn't match the group. "
-                    f"Fetch GET /api/groups/{group.group_id}/manifest to see the contract."
-                ),
-            )
+    contract_version = manifest.get("contract_version") if manifest else None
 
     if expected_f32_bytes is not None and not is_peft:
         # Strict size check for non-PEFT models only.
@@ -414,6 +403,7 @@ async def submit_client_delta(client_id: str, request: Request):
         "status": "accepted",
         "client_id": client_id,
         "global_version": new_version,
+        "contract_version": contract_version,
     }
 
 

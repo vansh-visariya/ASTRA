@@ -420,10 +420,15 @@ class TestClientStatusFromDB:
 # ======================================================================
 
 class TestTrainingManifest:
-    def test_manifest_schema_requires_expected_delta_bytes(self):
+    def test_manifest_expected_delta_bytes_is_optional(self):
         from astra.infra.models import TrainingManifest
-        with pytest.raises(Exception):
-            TrainingManifest(model_id="test")  # missing expected_delta_bytes
+        m = TrainingManifest(model_id="test")
+        assert m.expected_delta_bytes is None
+
+    def test_manifest_contract_version_default(self):
+        from astra.infra.models import TrainingManifest
+        m = TrainingManifest(model_id="test")
+        assert m.contract_version == 1
 
     def test_manifest_schema_valid(self):
         from astra.infra.models import TrainingManifest

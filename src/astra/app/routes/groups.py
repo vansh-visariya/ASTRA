@@ -4,8 +4,9 @@ Group management REST endpoints.
 
 import json
 import logging
+import os
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile
 
 from astra.app.database import get_db
 from astra.app.integration import get_platform_integration
@@ -162,6 +163,20 @@ async def update_group_manifest(
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
 
+    # Validate via Pydantic
+    try:
+        validated = TrainingManifest(**manifest)
+        manifest = validated.model_dump()
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid training_manifest: {e}",
+        )
+
+    # Bump contract version on every update
+    old_version = group.config.get("training_manifest", {}).get("contract_version", 0)
+    manifest["contract_version"] = old_version + 1
+
     group.config["training_manifest"] = manifest
 
     try:
@@ -176,6 +191,76 @@ async def update_group_manifest(
         logger.warning("Could not persist manifest update: %s", e)
 
     return {"status": "updated", "group_id": group_id, "manifest": manifest}
+
+
+@router.post("/api/groups/{group_id}/validation-data")
+async def upload_validation_data(
+    group_id: str,
+    file: UploadFile = File(...),
+    current_user=Depends(_require_admin),
+):
+    """Upload validation dataset for server-side evaluation (admin only).
+
+    Expects a .pt file containing a dict with 'X' (tensor) and 'y' (tensor) keys.
+    """
+    fl_server = get_fl_server()
+    group = fl_server.group_manager.groups.get(group_id)
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+
+    if not file.filename or not (file.filename.endswith(".pt") or file.filename.endswith(".pth")):
+        raise HTTPException(status_code=400, detail="Only .pt and .pth files are supported")
+
+    # Save to models/validation/{group_id}/
+    save_dir = os.path.join("models", "validation", group_id)
+    os.makedirs(save_dir, exist_ok=True)
+    save_path = os.path.join(save_dir, "val_data.pt")
+
+    content = await file.read()
+    if len(content) > 500 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Validation file too large (max 500 MB)")
+
+    with open(save_path, "wb") as f:
+        f.write(content)
+
+    # Validate the file is loadable and has the right keys
+    try:
+        import torch
+        data = torch.load(save_path, map_location="cpu", weights_only=False)
+        if not isinstance(data, dict) or "X" not in data or "y" not in data:
+            os.remove(save_path)
+            raise HTTPException(
+                status_code=400,
+                detail="File must contain a dict with 'X' (tensor) and 'y' (tensor) keys",
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        os.remove(save_path)
+        raise HTTPException(status_code=400, detail=f"Invalid .pt file: {e}") from None
+
+    # Update manifest with the validation dataset path
+    manifest = group.config.get("training_manifest", {})
+    manifest["val_dataset"] = save_path
+    group.config["training_manifest"] = manifest
+
+    try:
+        db = get_db()
+        with db.connection() as conn:
+            conn.execute(
+                "UPDATE experiments SET config_json = ? WHERE experiment_id = ?",
+                (json.dumps(group.config), group_id),
+            )
+            conn.commit()
+    except Exception as e:
+        logger.warning("Could not persist validation data path: %s", e)
+
+    return {
+        "status": "uploaded",
+        "group_id": group_id,
+        "val_dataset": save_path,
+        "size_bytes": len(content),
+    }
 
 
 @router.post("/api/groups/{group_id}/start")

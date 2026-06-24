@@ -354,8 +354,10 @@ def create_trust_router(platform: FLPlatformIntegration) -> APIRouter:
         return {"scores": scores}
 
     @router.get("/scores/{user_id}")
-    async def get_user_trust(user_id: int, group_id: str = "default", admin: dict = Depends(require_admin)):
-        """Get trust score for a user (admin only)."""
+    async def get_user_trust(user_id: int, group_id: str = "default", current_user: dict = Depends(get_current_user)):
+        """Get trust score for a user. Clients can view their own, admins can view anyone."""
+        if current_user.get("role") != "admin" and current_user.get("user_id") != user_id:
+            raise HTTPException(status_code=403, detail="Can only view your own trust score")
         score = platform.get_trust_score(user_id, group_id)
         return {"user_id": user_id, "group_id": group_id, "score": score}
 
