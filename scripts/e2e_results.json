@@ -1,0 +1,930 @@
+[
+  {
+    "method": "fedavg",
+    "group_id": "e2e_fedavg_c7a303",
+    "num_clients": 5,
+    "num_rounds": 3,
+    "final_model_version": 5,
+    "completed_rounds": 5,
+    "initial_accuracy": 0.18000000715255737,
+    "final_accuracy": 0.10000000149011612,
+    "final_loss": 2.1927599906921387,
+    "accuracy_improved": false,
+    "trust_scores": {},
+    "all_quarantined": true,
+    "rounds": [
+      {
+        "round": 1,
+        "uploads": [
+          {
+            "train_acc": 0.6899999976158142,
+            "train_loss": 2.16064715385437,
+            "delta_norm": 0.1453900784254074,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_fedavg_c0_0697_e2e_fedavg_c7a303",
+              "global_version": 0,
+              "contract_version": null
+            }
+          },
+          {
+            "train_acc": 1.0,
+            "train_loss": 2.0889737606048584,
+            "delta_norm": 0.16918213665485382,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_fedavg_c1_e8b2_e2e_fedavg_c7a303",
+              "global_version": 0,
+              "contract_version": null
+            }
+          },
+          {
+            "train_acc": 0.8050000071525574,
+            "train_loss": 1.923694133758545,
+            "delta_norm": 0.23239780962467194,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_fedavg_c2_ab69_e2e_fedavg_c7a303",
+              "global_version": 1,
+              "contract_version": null
+            }
+          },
+          {
+            "train_acc": 0.41999998688697815,
+            "train_loss": 1.8402026891708374,
+            "delta_norm": 0.259421169757843,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_fedavg_c3_efe4_e2e_fedavg_c7a303",
+              "global_version": 1,
+              "contract_version": null
+            }
+          },
+          {
+            "train_acc": 1.0,
+            "train_loss": 1.8050601482391357,
+            "delta_norm": 0.2704390287399292,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_fedavg_c4_f73e_e2e_fedavg_c7a303",
+              "global_version": 1,
+              "contract_version": null
+            }
+          }
+        ],
+        "aggregated": false,
+        "model_version": 1,
+        "completed_rounds": 1,
+        "eval": {
+          "accuracy": 0.18000000715255737,
+          "loss": 2.300180435180664
+        }
+      },
+      {
+        "round": 2,
+        "uploads": [
+          {
+            "train_acc": 0.5,
+            "train_loss": 2.176586389541626,
+            "delta_norm": 0.14646954834461212,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_fedavg_c0_0697_e2e_fedavg_c7a303",
+              "global_version": 2,
+              "contract_version": null
+            }
+          },
+          {
+            "train_acc": 1.0,
+            "train_loss": 2.067049026489258,
+            "delta_norm": 0.17554746568202972,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_fedavg_c1_e8b2_e2e_fedavg_c7a303",
+              "global_version": 2,
+              "contract_version": null
+            }
+          },
+          {
+            "train_acc": 0.9950000047683716,
+            "train_loss": 1.8988807201385498,
+            "delta_norm": 0.23738914728164673,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_fedavg_c2_ab69_e2e_fedavg_c7a303",
+              "global_version": 2,
+              "contract_version": null
+            }
+          },
+          {
+            "train_acc": 0.33000001311302185,
+            "train_loss": 1.553218126296997,
+            "delta_norm": 0.2906971275806427,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_fedavg_c3_efe4_e2e_fedavg_c7a303",
+              "global_version": 3,
+              "contract_version": null
+            }
+          },
+          {
+            "train_acc": 0.6650000214576721,
+            "train_loss": 1.3782671689987183,
+            "delta_norm": 0.3371567130088806,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_fedavg_c4_f73e_e2e_fedavg_c7a303",
+              "global_version": 3,
+              "contract_version": null
+            }
+          }
+        ],
+        "aggregated": false,
+        "model_version": 3,
+        "completed_rounds": 3,
+        "eval": {
+          "accuracy": 0.20499999821186066,
+          "loss": 2.255162239074707
+        }
+      },
+      {
+        "round": 3,
+        "uploads": [
+          {
+            "train_acc": 0.6399999856948853,
+            "train_loss": 2.1484968662261963,
+            "delta_norm": 0.15367157757282257,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_fedavg_c0_0697_e2e_fedavg_c7a303",
+              "global_version": 3,
+              "contract_version": null
+            }
+          },
+          {
+            "train_acc": 0.9449999928474426,
+            "train_loss": 1.9658176898956299,
+            "delta_norm": 0.19367964565753937,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_fedavg_c1_e8b2_e2e_fedavg_c7a303",
+              "global_version": 4,
+              "contract_version": null
+            }
+          },
+          {
+            "train_acc": 0.6650000214576721,
+            "train_loss": 1.6276038885116577,
+            "delta_norm": 0.29239746928215027,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_fedavg_c2_ab69_e2e_fedavg_c7a303",
+              "global_version": 4,
+              "contract_version": null
+            }
+          },
+          {
+            "train_acc": 0.33000001311302185,
+            "train_loss": 1.2548866271972656,
+            "delta_norm": 0.3276427686214447,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_fedavg_c3_efe4_e2e_fedavg_c7a303",
+              "global_version": 4,
+              "contract_version": null
+            }
+          },
+          {
+            "train_acc": 1.0,
+            "train_loss": 1.2149711847305298,
+            "delta_norm": 0.32662495970726013,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_fedavg_c4_f73e_e2e_fedavg_c7a303",
+              "global_version": 5,
+              "contract_version": null
+            }
+          }
+        ],
+        "aggregated": false,
+        "model_version": 5,
+        "completed_rounds": 5,
+        "eval": {
+          "accuracy": 0.10000000149011612,
+          "loss": 2.1927599906921387
+        }
+      }
+    ]
+  },
+  {
+    "method": "trimmed_mean",
+    "group_id": "e2e_trimmed_mean_b6c712",
+    "num_clients": 5,
+    "num_rounds": 3,
+    "final_model_version": 5,
+    "completed_rounds": 5,
+    "initial_accuracy": 0.15000000596046448,
+    "final_accuracy": 0.10000000149011612,
+    "final_loss": 2.165236473083496,
+    "accuracy_improved": false,
+    "trust_scores": {},
+    "all_quarantined": true,
+    "rounds": [
+      {
+        "round": 1,
+        "uploads": [
+          {
+            "train_acc": 0.6650000214576721,
+            "train_loss": 2.0949578285217285,
+            "delta_norm": 0.17831499874591827,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_trimmed_mean_c0_3e2d_e2e_trimmed_mean_b6c712",
+              "global_version": 5,
+              "contract_version": null
+            }
+          },
+          {
+            "train_acc": 0.9100000262260437,
+            "train_loss": 1.850242257118225,
+            "delta_norm": 0.24476373195648193,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_trimmed_mean_c1_5918_e2e_trimmed_mean_b6c712",
+              "global_version": 5,
+              "contract_version": null
+            }
+          },
+          {
+            "train_acc": 0.3400000035762787,
+            "train_loss": 1.3324161767959595,
+            "delta_norm": 0.3316384255886078,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_trimmed_mean_c2_9794_e2e_trimmed_mean_b6c712",
+              "global_version": 1,
+              "contract_version": null
+            }
+          },
+          {
+            "train_acc": 1.0,
+            "train_loss": 1.0174254179000854,
+            "delta_norm": 0.3460574448108673,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_trimmed_mean_c3_f995_e2e_trimmed_mean_b6c712",
+              "global_version": 1,
+              "contract_version": null
+            }
+          },
+          {
+            "train_acc": 1.0,
+            "train_loss": 1.1105151176452637,
+            "delta_norm": 0.34890681505203247,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_trimmed_mean_c4_6422_e2e_trimmed_mean_b6c712",
+              "global_version": 1,
+              "contract_version": null
+            }
+          }
+        ],
+        "aggregated": false,
+        "model_version": 1,
+        "completed_rounds": 1,
+        "eval": {
+          "accuracy": 0.15000000596046448,
+          "loss": 2.2181689739227295
+        }
+      },
+      {
+        "round": 2,
+        "uploads": [
+          {
+            "train_acc": 0.6650000214576721,
+            "train_loss": 2.008455753326416,
+            "delta_norm": 0.1902742236852646,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_trimmed_mean_c0_3e2d_e2e_trimmed_mean_b6c712",
+              "global_version": 2,
+              "contract_version": null
+            }
+          },
+          {
+            "train_acc": 0.8100000023841858,
+            "train_loss": 1.6906390190124512,
+            "delta_norm": 0.27968016266822815,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_trimmed_mean_c1_5918_e2e_trimmed_mean_b6c712",
+              "global_version": 2,
+              "contract_version": null
+            }
+          },
+          {
+            "train_acc": 1.0,
+            "train_loss": 1.1464056968688965,
+            "delta_norm": 0.365566611289978,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_trimmed_mean_c2_9794_e2e_trimmed_mean_b6c712",
+              "global_version": 2,
+              "contract_version": null
+            }
+          },
+          {
+            "train_acc": 0.41499999165534973,
+            "train_loss": 0.9228312969207764,
+            "delta_norm": 0.3039627969264984,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_trimmed_mean_c3_f995_e2e_trimmed_mean_b6c712",
+              "global_version": 3,
+              "contract_version": null
+            }
+          },
+          {
+            "train_acc": 1.0,
+            "train_loss": 1.0250283479690552,
+            "delta_norm": 0.35204175114631653,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_trimmed_mean_c4_6422_e2e_trimmed_mean_b6c712",
+              "global_version": 3,
+              "contract_version": null
+            }
+          }
+        ],
+        "aggregated": false,
+        "model_version": 3,
+        "completed_rounds": 3,
+        "eval": {
+          "accuracy": 0.1599999964237213,
+          "loss": 2.2080280780792236
+        }
+      },
+      {
+        "round": 3,
+        "uploads": [
+          {
+            "train_acc": 0.6650000214576721,
+            "train_loss": 1.9583587646484375,
+            "delta_norm": 0.20081724226474762,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_trimmed_mean_c0_3e2d_e2e_trimmed_mean_b6c712",
+              "global_version": 3,
+              "contract_version": null
+            }
+          },
+          {
+            "train_acc": 1.0,
+            "train_loss": 1.4593144655227661,
+            "delta_norm": 0.30142268538475037,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_trimmed_mean_c1_5918_e2e_trimmed_mean_b6c712",
+              "global_version": 4,
+              "contract_version": null
+            }
+          },
+          {
+            "train_acc": 1.0,
+            "train_loss": 0.9430245161056519,
+            "delta_norm": 0.3719366788864136,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_trimmed_mean_c2_9794_e2e_trimmed_mean_b6c712",
+              "global_version": 4,
+              "contract_version": null
+            }
+          },
+          {
+            "train_acc": 1.0,
+            "train_loss": 0.7949676513671875,
+            "delta_norm": 0.3417704105377197,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_trimmed_mean_c3_f995_e2e_trimmed_mean_b6c712",
+              "global_version": 4,
+              "contract_version": null
+            }
+          },
+          {
+            "train_acc": 1.0,
+            "train_loss": 0.9548121094703674,
+            "delta_norm": 0.30185478925704956,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_trimmed_mean_c4_6422_e2e_trimmed_mean_b6c712",
+              "global_version": 5,
+              "contract_version": null
+            }
+          }
+        ],
+        "aggregated": false,
+        "model_version": 5,
+        "completed_rounds": 5,
+        "eval": {
+          "accuracy": 0.10000000149011612,
+          "loss": 2.165236473083496
+        }
+      }
+    ]
+  },
+  {
+    "method": "median",
+    "group_id": "e2e_median_d366df",
+    "num_clients": 5,
+    "num_rounds": 3,
+    "final_model_version": 5,
+    "completed_rounds": 5,
+    "initial_accuracy": 0.10000000149011612,
+    "final_accuracy": 0.12999999523162842,
+    "final_loss": 2.3232502937316895,
+    "accuracy_improved": true,
+    "trust_scores": {},
+    "all_quarantined": true,
+    "rounds": [
+      {
+        "round": 1,
+        "uploads": [
+          {
+            "train_acc": 0.6650000214576721,
+            "train_loss": 1.8564453125,
+            "delta_norm": 0.2261190265417099,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_median_c0_0527_e2e_median_d366df",
+              "global_version": 5,
+              "contract_version": null
+            }
+          },
+          {
+            "train_acc": 1.0,
+            "train_loss": 1.305814266204834,
+            "delta_norm": 0.3344995677471161,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_median_c1_e2cb_e2e_median_d366df",
+              "global_version": 5,
+              "contract_version": null
+            }
+          },
+          {
+            "train_acc": 1.0,
+            "train_loss": 0.7826824188232422,
+            "delta_norm": 0.36203035712242126,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_median_c2_d6b7_e2e_median_d366df",
+              "global_version": 1,
+              "contract_version": null
+            }
+          },
+          {
+            "train_acc": 1.0,
+            "train_loss": 0.6523361206054688,
+            "delta_norm": 0.3758779764175415,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_median_c3_ada8_e2e_median_d366df",
+              "global_version": 1,
+              "contract_version": null
+            }
+          },
+          {
+            "train_acc": 1.0,
+            "train_loss": 0.9196155667304993,
+            "delta_norm": 0.3598262071609497,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_median_c4_d992_e2e_median_d366df",
+              "global_version": 1,
+              "contract_version": null
+            }
+          }
+        ],
+        "aggregated": false,
+        "model_version": 1,
+        "completed_rounds": 1,
+        "eval": {
+          "accuracy": 0.10000000149011612,
+          "loss": 2.279406785964966
+        }
+      },
+      {
+        "round": 2,
+        "uploads": [
+          {
+            "train_acc": 0.6650000214576721,
+            "train_loss": 1.723252773284912,
+            "delta_norm": 0.22527550160884857,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_median_c0_0527_e2e_median_d366df",
+              "global_version": 2,
+              "contract_version": null
+            }
+          },
+          {
+            "train_acc": 1.0,
+            "train_loss": 1.104874849319458,
+            "delta_norm": 0.34460535645484924,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_median_c1_e2cb_e2e_median_d366df",
+              "global_version": 2,
+              "contract_version": null
+            }
+          },
+          {
+            "train_acc": 1.0,
+            "train_loss": 0.701955258846283,
+            "delta_norm": 0.3848717510700226,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_median_c2_d6b7_e2e_median_d366df",
+              "global_version": 2,
+              "contract_version": null
+            }
+          },
+          {
+            "train_acc": 1.0,
+            "train_loss": 0.6228832006454468,
+            "delta_norm": 0.30877551436424255,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_median_c3_ada8_e2e_median_d366df",
+              "global_version": 3,
+              "contract_version": null
+            }
+          },
+          {
+            "train_acc": 0.6650000214576721,
+            "train_loss": 0.9001005291938782,
+            "delta_norm": 0.3854375183582306,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_median_c4_d992_e2e_median_d366df",
+              "global_version": 3,
+              "contract_version": null
+            }
+          }
+        ],
+        "aggregated": false,
+        "model_version": 3,
+        "completed_rounds": 3,
+        "eval": {
+          "accuracy": 0.1899999976158142,
+          "loss": 2.3697593212127686
+        }
+      },
+      {
+        "round": 3,
+        "uploads": [
+          {
+            "train_acc": 0.6650000214576721,
+            "train_loss": 1.667320728302002,
+            "delta_norm": 0.24688813090324402,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_median_c0_0527_e2e_median_d366df",
+              "global_version": 3,
+              "contract_version": null
+            }
+          },
+          {
+            "train_acc": 1.0,
+            "train_loss": 0.9603576064109802,
+            "delta_norm": 0.3265077471733093,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_median_c1_e2cb_e2e_median_d366df",
+              "global_version": 4,
+              "contract_version": null
+            }
+          },
+          {
+            "train_acc": 1.0,
+            "train_loss": 0.5871094465255737,
+            "delta_norm": 0.36834004521369934,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_median_c2_d6b7_e2e_median_d366df",
+              "global_version": 4,
+              "contract_version": null
+            }
+          },
+          {
+            "train_acc": 1.0,
+            "train_loss": 0.5251901745796204,
+            "delta_norm": 0.3770231306552887,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_median_c3_ada8_e2e_median_d366df",
+              "global_version": 4,
+              "contract_version": null
+            }
+          },
+          {
+            "train_acc": 1.0,
+            "train_loss": 0.7756806015968323,
+            "delta_norm": 0.36203697323799133,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_median_c4_d992_e2e_median_d366df",
+              "global_version": 5,
+              "contract_version": null
+            }
+          }
+        ],
+        "aggregated": false,
+        "model_version": 5,
+        "completed_rounds": 5,
+        "eval": {
+          "accuracy": 0.12999999523162842,
+          "loss": 2.3232502937316895
+        }
+      }
+    ]
+  },
+  {
+    "method": "hybrid",
+    "group_id": "e2e_hybrid_3e1dd3",
+    "num_clients": 5,
+    "num_rounds": 3,
+    "final_model_version": 5,
+    "completed_rounds": 5,
+    "initial_accuracy": 0.14000000059604645,
+    "final_accuracy": 0.20499999821186066,
+    "final_loss": 2.126192092895508,
+    "accuracy_improved": true,
+    "trust_scores": {},
+    "all_quarantined": true,
+    "rounds": [
+      {
+        "round": 1,
+        "uploads": [
+          {
+            "train_acc": 0.6650000214576721,
+            "train_loss": 1.5420928001403809,
+            "delta_norm": 0.24391305446624756,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_hybrid_c0_637d_e2e_hybrid_3e1dd3",
+              "global_version": 5,
+              "contract_version": null
+            }
+          },
+          {
+            "train_acc": 1.0,
+            "train_loss": 0.8935083150863647,
+            "delta_norm": 0.35977891087532043,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_hybrid_c1_5ab3_e2e_hybrid_3e1dd3",
+              "global_version": 5,
+              "contract_version": null
+            }
+          },
+          {
+            "train_acc": 1.0,
+            "train_loss": 0.5844848155975342,
+            "delta_norm": 0.3514602780342102,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_hybrid_c2_4188_e2e_hybrid_3e1dd3",
+              "global_version": 1,
+              "contract_version": null
+            }
+          },
+          {
+            "train_acc": 1.0,
+            "train_loss": 0.43314021825790405,
+            "delta_norm": 0.3747551739215851,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_hybrid_c3_9f99_e2e_hybrid_3e1dd3",
+              "global_version": 1,
+              "contract_version": null
+            }
+          },
+          {
+            "train_acc": 1.0,
+            "train_loss": 0.735612154006958,
+            "delta_norm": 0.3885820209980011,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_hybrid_c4_9b58_e2e_hybrid_3e1dd3",
+              "global_version": 1,
+              "contract_version": null
+            }
+          }
+        ],
+        "aggregated": false,
+        "model_version": 1,
+        "completed_rounds": 1,
+        "eval": {
+          "accuracy": 0.14000000059604645,
+          "loss": 2.363105535507202
+        }
+      },
+      {
+        "round": 2,
+        "uploads": [
+          {
+            "train_acc": 0.6650000214576721,
+            "train_loss": 1.408625841140747,
+            "delta_norm": 0.23684169352054596,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_hybrid_c0_637d_e2e_hybrid_3e1dd3",
+              "global_version": 2,
+              "contract_version": null
+            }
+          },
+          {
+            "train_acc": 1.0,
+            "train_loss": 0.7500461339950562,
+            "delta_norm": 0.39225924015045166,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_hybrid_c1_5ab3_e2e_hybrid_3e1dd3",
+              "global_version": 2,
+              "contract_version": null
+            }
+          },
+          {
+            "train_acc": 1.0,
+            "train_loss": 0.4356836974620819,
+            "delta_norm": 0.41406530141830444,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_hybrid_c2_4188_e2e_hybrid_3e1dd3",
+              "global_version": 2,
+              "contract_version": null
+            }
+          },
+          {
+            "train_acc": 1.0,
+            "train_loss": 0.33189189434051514,
+            "delta_norm": 0.26714974641799927,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_hybrid_c3_9f99_e2e_hybrid_3e1dd3",
+              "global_version": 3,
+              "contract_version": null
+            }
+          },
+          {
+            "train_acc": 1.0,
+            "train_loss": 0.6021625995635986,
+            "delta_norm": 0.35773780941963196,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_hybrid_c4_9b58_e2e_hybrid_3e1dd3",
+              "global_version": 3,
+              "contract_version": null
+            }
+          }
+        ],
+        "aggregated": false,
+        "model_version": 3,
+        "completed_rounds": 3,
+        "eval": {
+          "accuracy": 0.125,
+          "loss": 2.192706346511841
+        }
+      },
+      {
+        "round": 3,
+        "uploads": [
+          {
+            "train_acc": 0.6650000214576721,
+            "train_loss": 1.421820044517517,
+            "delta_norm": 0.2569118142127991,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_hybrid_c0_637d_e2e_hybrid_3e1dd3",
+              "global_version": 3,
+              "contract_version": null
+            }
+          },
+          {
+            "train_acc": 1.0,
+            "train_loss": 0.5619900226593018,
+            "delta_norm": 0.3409072756767273,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_hybrid_c1_5ab3_e2e_hybrid_3e1dd3",
+              "global_version": 4,
+              "contract_version": null
+            }
+          },
+          {
+            "train_acc": 1.0,
+            "train_loss": 0.3262796401977539,
+            "delta_norm": 0.3641773462295532,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_hybrid_c2_4188_e2e_hybrid_3e1dd3",
+              "global_version": 4,
+              "contract_version": null
+            }
+          },
+          {
+            "train_acc": 1.0,
+            "train_loss": 0.2679663598537445,
+            "delta_norm": 0.3353322148323059,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_hybrid_c3_9f99_e2e_hybrid_3e1dd3",
+              "global_version": 4,
+              "contract_version": null
+            }
+          },
+          {
+            "train_acc": 1.0,
+            "train_loss": 0.5281874537467957,
+            "delta_norm": 0.3133423328399658,
+            "delta_bytes": 1077288,
+            "upload": {
+              "status": "accepted",
+              "client_id": "e2e_hybrid_c4_9b58_e2e_hybrid_3e1dd3",
+              "global_version": 5,
+              "contract_version": null
+            }
+          }
+        ],
+        "aggregated": false,
+        "model_version": 5,
+        "completed_rounds": 5,
+        "eval": {
+          "accuracy": 0.20499999821186066,
+          "loss": 2.126192092895508
+        }
+      }
+    ]
+  }
+]

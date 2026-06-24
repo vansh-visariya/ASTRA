@@ -847,40 +847,49 @@ class GroupManager:
         loss: float,
         num_clients: int,
     ):
-        """Save global model weights and adapter checkpoints to disk."""
+        """Save global model weights and adapter checkpoints to disk.
+
+        Saves the full model state_dict (flattened) as ``weights`` so that
+        clients can download and apply them directly.  The raw aggregated
+        delta is also stored under ``aggregated_delta`` for audit and
+        cumulative-delta reconstruction.
+        """
         try:
             import torch
+
+            from astra.core.models.model_zoo import flatten_all_params
 
             save_dir = os.path.join("models", "global", group_id)
             os.makedirs(save_dir, exist_ok=True)
 
+            # Build the checkpoint dict — always save the full model
+            # weights so clients can download via format=raw.
+            ckpt: dict = {
+                "version": model_version,
+                "accuracy": accuracy,
+                "loss": loss,
+                "num_clients": num_clients,
+                "timestamp": datetime.now().isoformat(),
+                "group_id": group_id,
+            }
+
+            if self.server_model is not None and not self._is_peft_group(
+                self.groups.get(group_id)
+            ):
+                # Save the live server model's full weights (flat float32).
+                ckpt["weights"] = flatten_all_params(self.server_model)
+            else:
+                # Fallback: store the raw aggregated delta.
+                ckpt["weights"] = aggregated_weights
+
+            # Also store the raw delta for audit / cumulative reconstruction.
+            ckpt["aggregated_delta"] = aggregated_weights
+
             file_path = os.path.join(save_dir, f"model_v{model_version}.pt")
-            torch.save(
-                {
-                    "version": model_version,
-                    "weights": aggregated_weights,
-                    "accuracy": accuracy,
-                    "loss": loss,
-                    "num_clients": num_clients,
-                    "timestamp": datetime.now().isoformat(),
-                    "group_id": group_id,
-                },
-                file_path,
-            )
+            torch.save(ckpt, file_path)
 
             latest_path = os.path.join(save_dir, "model_latest.pt")
-            torch.save(
-                {
-                    "version": model_version,
-                    "weights": aggregated_weights,
-                    "accuracy": accuracy,
-                    "loss": loss,
-                    "num_clients": num_clients,
-                    "timestamp": datetime.now().isoformat(),
-                    "group_id": group_id,
-                },
-                latest_path,
-            )
+            torch.save(ckpt, latest_path)
 
             group_obj = self.groups.get(group_id)
             if self.server_model is not None and group_obj and self._is_peft_group(group_obj):
@@ -1051,6 +1060,45 @@ class GroupManager:
                 db.update_group_status(group_id, "TRAINING")
             except Exception as e:
                 self.logger.warning(f"Could not persist status for group {group_id}: {e}")
+
+            # Save initial model checkpoint so clients can download before
+            # the first aggregation round completes.
+            if self.server_model is not None:
+                save_dir = os.path.join("models", "global", group_id)
+                latest_path = os.path.join(save_dir, "model_latest.pt")
+                if not os.path.exists(latest_path):
+                    try:
+                        self.save_model_weights(
+                            group_id=group_id,
+                            model_version=0,
+                            aggregated_weights=np.array([]),
+                            accuracy=0.0,
+                            loss=0.0,
+                            num_clients=0,
+                        )
+                        self.logger.info(f"Saved initial model checkpoint for {group_id}")
+                    except Exception as e:
+                        self.logger.warning(f"Could not save initial checkpoint for {group_id}: {e}")
+            else:
+                # Lazy init: build model from the group's model_id so clients
+                # can download the initial weights before any aggregation.
+                try:
+                    from astra.infra.registry import get_registry
+
+                    registry = get_registry()
+                    model = registry.build_model(group.model_id)
+                    self.server_model = model
+                    self.save_model_weights(
+                        group_id=group_id,
+                        model_version=0,
+                        aggregated_weights=np.array([]),
+                        accuracy=0.0,
+                        loss=0.0,
+                        num_clients=0,
+                    )
+                    self.logger.info(f"Lazy-built model '{group.model_id}' and saved initial checkpoint for {group_id}")
+                except Exception as e:
+                    self.logger.warning(f"Could not lazy-build model for {group_id}: {e}")
 
             self._start_training_watchdog(group_id)
 
